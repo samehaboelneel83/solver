@@ -83,6 +83,23 @@ services:
       SOLVER_ADAPTERS_DIR: ${SOLVER_ADAPTERS_DIR:-/app/adapters/reference:/opt/solver/adapters}
       # OAAS OPS01: LATEST manifest + dump list for the Backups page.
       SOLVER_BACKUP_DIR: /backups
+      # The Assistant (docs/assistant.md): your vLLM server, reached from this container.
+      AGENT_ENABLED: ${AGENT_ENABLED:-1}
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://10.125.18.189:8000/v1}
+      LLM_MODEL: ${LLM_MODEL:-qwen3.5}
+      LLM_API_KEY: ${LLM_API_KEY:-EMPTY}
+      LLM_CONTEXT: ${LLM_CONTEXT:-262144}
+      LLM_COMPACT_AT: ${LLM_COMPACT_AT:-0.6}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-16384}
+      LLM_PLAN_MAX_TOKENS: ${LLM_PLAN_MAX_TOKENS:-32768}
+      LLM_THINKING: ${LLM_THINKING:-off}
+      LLM_WORKING_TOKENS: ${LLM_WORKING_TOKENS:-48000}
+      LLM_TIMEOUT: ${LLM_TIMEOUT:-1800}
+      LLM_TOOL_MODE: ${LLM_TOOL_MODE:-auto}
+      AGENT_CONFIRM: ${AGENT_CONFIRM:-delete}
+      AGENT_MAX_STEPS: ${AGENT_MAX_STEPS:-60}
+      # Model-written Python on this server: off unless set (docs/assistant.md, run_python).
+      AGENT_RUN_PYTHON: ${AGENT_RUN_PYTHON:-1}
     ports:
       - "8010:8000"
     # Prometheus metrics (app/core/metrics.py): on the compose network only,

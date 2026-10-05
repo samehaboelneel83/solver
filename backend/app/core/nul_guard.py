@@ -240,13 +240,17 @@ async def _drain(receive: Receive) -> tuple[bytes, list[Message]]:
     return b"".join(chunks), messages
 
 
-def _replay(messages: list[Message]) -> Receive:
+def _replay(messages: list[Message], upstream: Receive) -> Receive:
+    """The drained messages, then the real connection's own. Answering
+    `http.disconnect` once the body was replayed told a streamed response to
+    a POST (the assistant's chat) that the client had gone, and Starlette
+    stopped the stream before its first line."""
     queue = list(messages)
 
     async def receive() -> Message:
         if queue:
             return queue.pop(0)
-        return {"type": "http.disconnect"}
+        return await upstream()
 
     return receive
 
@@ -270,7 +274,7 @@ class NulByteGuard:
 
         if refusal is None and _should_inspect_body(_content_type(scope)):
             body, messages = await _drain(receive)
-            receive = _replay(messages)
+            receive = _replay(messages, receive)
             refusal = _body_refusal(_content_type(scope), body)
 
         if refusal is not None:

@@ -132,6 +132,7 @@ def write_setting(
 
     _refuse_wrong_type(known, payload.value, payload.key)
     _refuse_out_of_range(payload.key, payload.value)
+    _refuse_unknown_choice(payload.key, payload.value)
 
     try:
         db.execute(
@@ -194,6 +195,17 @@ _RANGES: dict[str, tuple[float | None, float | None]] = {
     # 0 keeps a run's events for ever (app.retention).
     "run.event_retention_days": (0, None),
 }
+
+
+# The words a string setting may take, where only some mean anything.
+_CHOICES: dict[str, tuple[str, ...]] = {
+    "solve.network_engine": ("networkx", "ortools"),
+}
+
+
+def _refuse_unknown_choice(key: str, value: Any) -> None:
+    if key in _CHOICES and value is not None and value not in _CHOICES[key]:
+        raise HTTPException(status_code=422, detail=f"{key} is one of {', '.join(_CHOICES[key])}; {value!r} is not")
 
 
 def _refuse_out_of_range(key: str, value: Any) -> None:

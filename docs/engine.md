@@ -10,6 +10,7 @@ IPOPT, CP-SAT, SCIP) — no commercial solver is needed for any of them.
 | A large mixed model with an easy continuous part | `"solver": "benders"` on a run | Benders decomposition over HiGHS; a proven optimum |
 | The learned selector to choose the solver | setting `solve.selector_acts` = `true` | A confident pick solves the run; the reason is recorded |
 | A faster “why is this infeasible?” on large models | nothing — always on | QuickXplain in the conflict search above 12 candidate rules |
+| A network model solved as a network, by NetworkX | `"solver": "networkx"` on a run (or nothing: the network lane uses it) | Network simplex (min-cost flow); a proven optimum |
 
 ## 1. Alternative plans (E-1)
 
@@ -101,3 +102,66 @@ its time stops the search, and the conflict is reported as not shown minimal. Co
 
 `test_alternatives.py`, `test_multistart.py`, `test_benders.py`, `test_selector_acts.py`,
 `test_quickxplain.py` (backend); `Runs.test.tsx` (alternatives and selector wording).
+
+## NetworkX as a solver
+
+NetworkX (BSD licence, `networkx==3.6.1`) is in the image and used two ways.
+
+**As a solver of its own, asked for by name:** `POST /api/v1/scenarios/{id}/runs {"solver": "networkx"}`.
+It takes a *network* model — transport, assignment, shortest path, maximum flow and any mix of them:
+every rule is flow in less flow out (each coefficient +1 or −1, each decision in at most two rules, a
+rule on one decision read as its bound), and every number is whole. It builds the network
+(`networkx.MultiDiGraph`, a node per rule plus one outside node, an arc per decision) and solves it with
+`networkx.network_simplex`: the optimum is **proven** (`optimality: global`), infeasible is a proof too, and
+an answer resting on a guard ceiling is reported unbounded with the reason, as for every solver.
+Continuous and whole-number networks both work (a network's LP optimum is whole). Anything else — a
+knapsack row, a product, a curve, a fractional cost — is refused before solving, with the reason, e.g.
+*"networkx solves a network … This model is not one: the rule 'cap' weighs a decision by more than one"*.
+The rules never choose it unasked (`automatic=False`): the model class alone cannot tell a network from
+any other linear model.
+
+**As the network lane's engine (the default):** with setting `solve.network` on, a whole-number network
+model is solved by min-cost flow without being asked. Setting `solve.network_engine` (migration 0108)
+picks the algorithm: `networkx` (the default) or `ortools` (OR-Tools `SimpleMinCostFlow`, about ten
+times quicker on large networks: a 400 × 400 assignment in 0.1 s against 1.1 s). Both prove the same
+optimum. The run records the engine in `params.network_engine` and `params.network_run.engine`, and the
+solver string says which: `network (min-cost flow, NetworkX network simplex)`.
+
+The Assistant's `run_python` has NetworkX too (paths, connectivity, components), e.g. to work out which
+cells of a layout reach a door before the model is written.
+
+Code: `backend/app/solve/network.py` (`_walk_networkx`, `_walk_ortools`), the `NETWORKX` entry in
+`backend/app/solve/backends.py`. Tests: `backend/tests/test_network.py`, the `transport_network` case in
+`test_golden.py`.
+
+
+## A run's answer as a CAD drawing (DXF)
+
+`GET /api/v1/runs/{id}/export?format=dxf` (the **DXF (CAD)** button under *Take the answer out*) writes the
+answer as a DXF (R2018) drawing for AutoCAD:
+
+- **Coordinates:** when the domain holds a drawing placed in local engineering coordinates (what a CAD file
+  with no projection gets), the answer is written in that drawing's own units and numbers, so it lies
+  exactly on the original. A drawing placed in a projected CRS (UTM, an Egyptian belt) gives that CRS. With
+  neither, the drawing uses local metres around the answer's centre, and the note in the drawing says so.
+- **The original drawing** is drawn underneath on grey `MAP-<layer>` layers, from the coordinates it was
+  read with.
+- **Each decision** goes on its own layers, by what happened:
+  - `<DECISION>-CHOSEN` (green), with a solid fill on `<DECISION>-CHOSEN-FILL`;
+  - `<DECISION>-NOT-CHOSEN` (grey, turned off);
+  - `<DECISION>-LINKS` for pairs;
+  - `UNMET-SHORT` (red) where a rule fell short;
+  - `<DECISION>-LABELS` for the names of what was chosen.
+- **Records placed by numbers rather than a shape** are drawn too (a layout's generated candidates, for
+  example). Their position comes from the first of these that the record has:
+  - `shape_m` (WKT);
+  - `min_x_m`/`min_y_m` with a width and height;
+  - `x_m`/`y_m` as the centre, with `width_m`/`w_m`/`w` and `height_m`/`h_m`/`h`.
+
+  These are metres from the drawing's lower-left corner, the frame the Assistant's file reader uses.
+- **A note at the top left** gives the run, its status and goal value, the coordinates used, and a count
+  per layer.
+- **A run with nothing placed** is refused with the reason (409).
+
+Code: `backend/app/api/run_dxf.py`. Tests: `backend/tests/test_run_dxf.py`, and
+`test_an_answer_exports_as_a_cad_drawing` in `test_results_out.py`.

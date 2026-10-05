@@ -3,8 +3,8 @@
  * keeps the drawing's layers, colours, text and blocks, placed on the Earth
  * with the coordinate system chosen for it.
  */
-import { Link } from "react-router-dom";
-import { Database, FileUp, Layers } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
+import { Database, FileUp, Layers, Wand2 } from "lucide-react";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getDataset, makeRecords, proposeRecords, useDatasets } from "../api/gis";
@@ -12,9 +12,9 @@ import { formatApiError } from "../api/errors";
 import { useEntityTypes } from "../api/v1";
 import MeasureFromMap from "../components/MeasureFromMap";
 import DeriveLayer from "../components/map/DeriveLayer";
+import AutoRecords from "../components/map/AutoRecords";
 import LoadFailure from "../components/LoadFailure";
 import Skeleton from "../components/Skeleton";
-import MapDataTabs from "../components/map/MapDataTabs";
 import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useDomain } from "../hooks/useDomain";
@@ -27,11 +27,20 @@ export default function MapData() {
   const kinds = useEntityTypes(domainId, { limit: 500 });
   const placed = (kinds.data?.items ?? []).filter((t) => t.attributes.some((a) => a.data_type === "geometry"));
   const { can } = useCapabilities();
+  // `?records=1` (the "Map to records" link on a drawing's page) opens the mapping straight away.
+  const [search, setSearch] = useSearchParams();
+  const [mapping, setMappingOpen] = useState(search.get("records") === "1");
+  const setMapping = (value: boolean) => {
+    setMappingOpen(value);
+    if (!value && search.has("records")) {
+      search.delete("records");
+      setSearch(search, { replace: true });
+    }
+  };
   if (domainId === null) return <p className="text-sm text-slate-600">Choose a domain first.</p>;
   return (
     <div className="max-w-5xl space-y-6">
       <div>
-        <MapDataTabs domainId={domainId} />
         <header className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="mb-1 text-lg font-semibold text-slate-900">Map data</h1>
@@ -41,14 +50,23 @@ export default function MapData() {
               checked over imagery before they are stored.
             </p>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+          {can("domain.edit") && (list.data?.items.length ?? 0) > 0 && (
+            <button type="button" onClick={() => setMapping(true)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-blue-600 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50">
+              <Wand2 className="h-4 w-4" aria-hidden /> Map to records
+            </button>
+          )}
           {can("domain.edit") && (
             <Link to={`/domains/${domainId}/map-data/import`}
               className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700">
               <FileUp className="h-4 w-4" aria-hidden /> Import map data (DXF, GeoJSON, KML, Shapefile…)
             </Link>
           )}
+          </div>
         </header>
       </div>
+      {mapping && <AutoRecords domainId={domainId} onClose={() => setMapping(false)} />}
       {list.isLoading ? <Skeleton /> : list.isError ? (
         <LoadFailure subject="The map data" error={list.error} retry={() => void list.refetch()} />
       ) : (

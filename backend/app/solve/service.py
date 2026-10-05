@@ -235,6 +235,8 @@ def enqueue_run(
                                   kept_out)
     network = bool(settings["solve.network"].value)
     from_settings["network"] = settings["solve.network"].source
+    network_engine = str(settings["solve.network_engine"].value or "networkx") if "solve.network_engine" in settings else "networkx"
+    from_settings["network_engine"] = settings["solve.network_engine"].source if "solve.network_engine" in settings else "default"
     metaheuristic = bool(settings["solve.metaheuristic"].value)
     from_settings["metaheuristic"] = settings["solve.metaheuristic"].source
     from_settings["connected_start"] = settings["solve.connected_start"].source
@@ -265,6 +267,10 @@ def enqueue_run(
     frozen, data_hash = db.execute(
         text("SELECT data, data_hash FROM dataset WHERE id = :d"), {"d": dataset_id}
     ).one()
+    empty = empty_decision_sets(scenario["ir"], frozen) + empty_relationships(scenario["ir"], frozen)
+    if empty:
+        # Refused before the commit, so the snapshot goes with it.
+        raise EmptySets(empty)
     found = classify(patched(scenario["ir"], scenario["patch"] or {}), frozen)
     if quota.get("max_vars") is not None:
         count = variable_count(scenario["ir"], frozen)
@@ -312,6 +318,7 @@ def enqueue_run(
         "connected_start": connected_start,
         "metaheuristic": metaheuristic,
         "network": network,
+        "network_engine": network_engine,
         "routing_start": routing_start,
         **({"allowed_solvers": allowed_solvers} if allowed_solvers else {}),
         **({"denied_solvers": denied_solvers} if denied_solvers else {}),
@@ -479,6 +486,42 @@ def _owns_attempt(db: Session, run_id: int, attempt: int) -> bool:
 
 # Any fixed number, shared by every worker: the key of the claim lock.
 _CLAIM_LOCK = 7_140_001
+
+
+class EmptySets(ValueError):
+    """Sets the model's decisions range over that hold no records: nothing to decide, so no run. The camp-bed
+    test built a model over "zone" and "door" with no records; the run was queued, failed, and the Assistant
+    re-tried for 24 steps. Refused at the door instead, naming the sets."""
+
+    def __init__(self, sets: list[str]):
+        self.sets = sets
+        records = [s for s in sets if not s.startswith("relationship ")]
+        links = [s.removeprefix("relationship ") for s in sets if s.startswith("relationship ")]
+        said = []
+        if records:
+            said.append(f"{', '.join(records)} {'has' if len(records) == 1 else 'have'} no records, and the model's "
+                        "decisions range over them: there is nothing to decide")
+        if links:
+            said.append(f"the relationship{'s' if len(links) > 1 else ''} {', '.join(links)} the model walks "
+                        f"{'have' if len(links) > 1 else 'has'} no links")
+        super().__init__("; ".join(said) + ". Load the data first (import, map data, or the Data page), then solve.")
+
+
+def empty_relationships(ir: dict, data: dict) -> list[str]:
+    """The relationships the model walks that have no links in `data` (named "relationship <name>")."""
+    rels = data.get("relationships") or {}
+    return [f"relationship {name}" for name in ir.get("relationships") or [] if not rels.get(name)]
+
+
+def empty_decision_sets(ir: dict, data: dict) -> list[str]:
+    """The sets some decision is indexed by that have no records in `data`."""
+    used: list[str] = []
+    for v in (ir.get("variables") or {}).values():
+        for name in (v or {}).get("index") or []:
+            if name not in used:
+                used.append(name)
+    sets = data.get("sets") or {}
+    return [name for name in used if name in (ir.get("sets") or []) and not sets.get(name)]
 
 
 class QuotaExceeded(Exception):
@@ -769,7 +812,15 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
     finally:
         # Whatever happened -- solved, refused, cancelled, crashed -- the
         # stream's last word is the status the run ended with.
-        settled = db.execute(text("SELECT status FROM run WHERE id = :r"), {"r": run_id}).scalar_one_or_none()
+        # A failed write (October 2026: an objective too wide for its column) leaves the session's
+        # transaction aborted; reading the status then raised over the real error, and the run said
+        # "current transaction is aborted" instead of what went wrong. Roll back first: the error that
+        # is propagating is the one recorded.
+        try:
+            settled = db.execute(text("SELECT status FROM run WHERE id = :r"), {"r": run_id}).scalar_one_or_none()
+        except Exception:  # noqa: BLE001 -- only the stream's last word is lost
+            db.rollback()
+            settled = db.execute(text("SELECT status FROM run WHERE id = :r"), {"r": run_id}).scalar_one_or_none()
         events.stage("settled", status=settled)
         events.close()
 
@@ -1204,7 +1255,9 @@ def _execute(
                     allocated = allocation_rows.solve(solving_model)
                     result, reason, decomposition_record = allocated.solution, None, allocated.record
                 elif networked:
-                    networked_run = network_rows.solve(solving_model)
+                    # NetworkX's network simplex unless the setting says OR-Tools; asked for by name, NetworkX.
+                    engine = "networkx" if backend.name == "networkx" else params.get("network_engine", "networkx")
+                    networked_run = network_rows.solve(solving_model, engine=engine)
                     result, reason, network_record = networked_run.solution, None, networked_run.record
                 elif stochastic_wanted:
                     result, stochastic_record = sandbox.run(

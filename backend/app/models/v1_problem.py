@@ -225,7 +225,7 @@ class Run(Base):
     # bigint, not int: CP-SAT objectives scale past 2^31.
     # numeric(15, 6) since migration 0015: a linear program's optimum is
     # fractional almost always, and a bigint would round the answer.
-    objective: Mapped[Decimal | None] = mapped_column(Numeric(15, 6), nullable=True)
+    objective: Mapped[Decimal | None] = mapped_column(Numeric(24, 6), nullable=True)
     # Migration 0028: what an answer may claim -- global, local or none.
     optimality: Mapped[str | None] = mapped_column(Text, nullable=True)
     wall_time_s: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -305,19 +305,19 @@ class ConstraintResult(Base):
     satisfied: Mapped[bool] = mapped_column(Boolean, nullable=False)
     # Likewise: a rule in a continuous model can be short by half a unit.
     total_violation: Mapped[Decimal] = mapped_column(
-        Numeric(15, 6), nullable=False, server_default="0"
+        Numeric(24, 6), nullable=False, server_default="0"
     )
     penalty_paid: Mapped[Decimal] = mapped_column(
-        Numeric(15, 6), nullable=False, server_default="0"
+        Numeric(24, 6), nullable=False, server_default="0"
     )
     # [{"instance": [...], "amount": 1}]
     violations: Mapped[Any] = mapped_column(JSONB, nullable=False, server_default="[]")
     # Residual at the recorded assignment: 0 means the rule has no room left.
     # Nullable because a run made before migration 0017 has none to report.
-    slack: Mapped[Decimal | None] = mapped_column(Numeric(15, 6), nullable=True)
+    slack: Mapped[Decimal | None] = mapped_column(Numeric(24, 6), nullable=True)
     # Shadow price from a linear solver. Null when the backend has none
     # (CP-SAT, mixed-integer search) or the run predates migration 0019.
-    dual: Mapped[Decimal | None] = mapped_column(Numeric(15, 6), nullable=True)
+    dual: Mapped[Decimal | None] = mapped_column(Numeric(24, 6), nullable=True)
 
 
 __all__ = [

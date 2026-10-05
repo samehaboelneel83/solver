@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import CampMap, { fitRings, useSiteBasemap, type At, type MapView } from "../map/SiteMap";
+import SiteMap, { fitRings, useSiteBasemap, type At, type MapView } from "../map/SiteMap";
 import type { GeoGeometry } from "../map/GeoMap";
 import { useToast } from "../ToastProvider";
 import { formatApiError } from "../../api/errors";
 import { getEntity, updateEntity, type Entity, type EntityType } from "../../api/v1";
 import { useCapabilities } from "../../hooks/useCapability";
-import { parseLatLon, toLocal, toLonLat } from "../../lib/campGeo";
+import { parseLatLon, toLocal, toLonLat } from "../../lib/geo";
 import { asGeometry, describeShape, middleOf, positionsOf, shapeOf, type DrawMode, type LonLat } from "../../lib/geoShape";
 
 const HEIGHT = 340;
@@ -152,7 +152,7 @@ export default function LocationEditor({
       )}
       {origin && shownView ? (
         <div className="overflow-hidden rounded border border-slate-200" data-testid="location-map">
-          <CampMap
+          <SiteMap
             origin={origin}
             view={shownView}
             onView={setView}
@@ -177,7 +177,7 @@ export default function LocationEditor({
                 })}
               </>
             )}
-          </CampMap>
+          </SiteMap>
         </div>
       ) : (
         <p className="rounded border border-dashed border-slate-300 p-4 text-sm text-slate-500">

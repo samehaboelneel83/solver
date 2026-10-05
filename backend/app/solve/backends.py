@@ -590,7 +590,61 @@ GA = Backend(
     planner_choice="A search over whole answers will take this; its answer keeps every rule but is not proven the best.",
 )
 
-BUILT_IN: tuple[Backend, ...] = (CP_SAT, GLOP, HIGHS, MILP, SCIP, PDLP, IPOPT, CMA_ES, PSO, GA, BENDERS)
+def _networkx_solve(
+    compiled: Compiled,
+    *,
+    time_limit: float,
+    workers: int,
+    should_stop: ShouldStop | None = None,
+    seed: int | None = None,
+    gap_rel: float = 0.0,
+    on_progress=None,
+    hint: dict | None = None,
+    solver_params: dict | None = None,
+) -> Solution:
+    from app.solve import network
+    from app.solve.compile import Unsupported
+
+    why = network.applies(compiled, ceilings=True)
+    if why is not None:
+        # Its class fits (a linear model), its shape does not: said, never answered as something else.
+        raise Unsupported(
+            "networkx solves a network -- every rule flow in less flow out (each coefficient +1 or -1, "
+            "each decision in at most two rules), every number whole: transport, assignment, shortest "
+            f"path, maximum flow. This model is not one: {why}. Leave the solver unset and the rules "
+            "choose one that takes it.")
+    return network.solve(compiled, engine="networkx", ceilings=True).solution
+
+
+def _networkx_available() -> bool:
+    from app.solve import network
+
+    return network.networkx_available()
+
+
+NETWORKX = Backend(
+    name="networkx",
+    # A network model is linear; its class is whatever its decisions are. The shape (flow in less flow
+    # out) is checked on the compiled model, and anything else is refused with the reason.
+    classes=frozenset({"IP", "LP", "MILP", "trivial"}),
+    provides=frozenset({"linear", "integral", "continuous"}),
+    # After the general solvers: it runs when asked for by name (`automatic=False`) -- the class alone
+    # cannot tell a network from any other linear model. Network models reach it unasked through the
+    # network lane (`solve.network`, engine `solve.network_engine`).
+    rank=3,
+    solve=_networkx_solve,
+    # Network simplex is exact on whole numbers: the optimum it proves is the global one, and a
+    # totally unimodular model's LP optimum is whole, so continuous and whole agree.
+    proves="global",
+    is_available=_networkx_available,
+    automatic=False,
+    note="NetworkX network simplex (min-cost flow, BSD licence); network models only -- transport, "
+         "assignment, shortest path, maximum flow -- proven optimal",
+    planner_choice="A network solver will take this: min-cost flow, proven optimal.",
+)
+
+BUILT_IN: tuple[Backend, ...] = (CP_SAT, GLOP, HIGHS, MILP, SCIP, PDLP, IPOPT, CMA_ES, PSO, GA, BENDERS,
+                                 NETWORKX)
 
 
 def _with_adapters() -> tuple[Backend, ...]:

@@ -1,0 +1,2047 @@
+"""The assistant's loop: an OpenAI-compatible LLM (vLLM / Qwen) that drives the
+platform through its own HTTP API, as the person who asked.
+
+Why the API and not the database: every rule the platform has -- capabilities,
+tenancy, triggers, audit -- is enforced behind its endpoints. Going through
+them, the assistant can do exactly what its user can, and nothing more, and
+everything it does is audited as that user.
+
+The model reaches "everything" with four tools over the live OpenAPI document:
+`search_endpoints` -> `describe_endpoint` (and `describe_schema`) -> `call_api`.
+`read_doc` lets it read the repo's docs (the Problem IR) when they are shipped
+with the image, and `wait` paces polling of a queued run.
+
+Conversation state is the client's: each request carries the messages so far
+and gets the new ones back (a `state` event). Nothing is kept per session on
+the server, so a restart or a second replica loses nothing. A call that needs
+the person's OK ends the turn with a `confirm` event; the next request carries
+`confirm: {allow}` and the pending calls run (or are declined) first.
+
+Two modes:
+
+- `assistant` -- do what is asked, anywhere in the platform.
+- `model` -- the person describes a problem in their own words. The assistant
+  interviews them until the decisions, goal, rules and data are clear, then
+  calls `propose_plan` with a summary and a spec. The server dry-runs the spec
+  (`POST /api/v1/problems/from-spec`) and shows the person only a plan that
+  builds; on their approval it builds *that* spec, all or nothing, and the
+  assistant explains what it built. In this mode the server refuses every
+  other write, and refuses a plan before there has been a conversation.
+
+Settings (environment):
+    AGENT_ENABLED        1 (default) / 0
+    LLM_BASE_URL         http://10.125.18.189:8000/v1
+    LLM_MODEL            qwen3.5
+    LLM_API_KEY          EMPTY
+    LLM_CONTEXT          32768      the model's max_model_len (vLLM's own value is read when it reports one)
+    LLM_TIMEOUT          1800       seconds to wait for one model reply
+    LLM_WORKING_TOKENS   48000      summarize the older conversation past this many tokens (whichever comes first)
+    LLM_COMPACT_AT       0.6        summarize the older conversation past this share of the context
+    LLM_MAX_TOKENS       4096       per reply
+    LLM_PLAN_MAX_TOKENS  8192       per reply in model mode (a plan carries data)
+    LLM_TEMPERATURE      0.2
+    LLM_THINKING         on | off | auto (think on new messages, plans and failures) | (blank: the server's default)
+    LLM_TOOL_MODE        auto | native | text
+    AGENT_CONFIRM        delete (default) | write | none
+    AGENT_MAX_STEPS      30
+    AGENT_SELF_URL       http://127.0.0.1:8000   where the API answers inside the container
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+from typing import Any, Callable, Iterator
+
+from app.agent import compact as agent_compact
+from app.agent import files as agent_files
+from app.agent import readback as agent_readback
+from app.agent import sandbox
+from app.agent import toolcall
+
+
+def _env(name: str, default: str = "") -> str:
+    return os.environ.get(name, default)
+
+
+@dataclass
+class Settings:
+    enabled: bool = field(default_factory=lambda: _env("AGENT_ENABLED", "1") not in ("0", "false", "no"))
+    base_url: str = field(default_factory=lambda: _env("LLM_BASE_URL", "http://10.125.18.189:8000/v1").rstrip("/"))
+    model: str = field(default_factory=lambda: _env("LLM_MODEL", "qwen3.5"))
+    api_key: str = field(default_factory=lambda: _env("LLM_API_KEY", "EMPTY"))
+    context: int = field(default_factory=lambda: int(_env("LLM_CONTEXT", "32768")))
+    max_tokens: int = field(default_factory=lambda: int(_env("LLM_MAX_TOKENS", "4096")))
+    plan_max_tokens: int = field(default_factory=lambda: int(_env("LLM_PLAN_MAX_TOKENS", "8192")))
+    temperature: float = field(default_factory=lambda: float(_env("LLM_TEMPERATURE", "0.2")))
+    thinking: str = field(default_factory=lambda: _env("LLM_THINKING", "").lower())
+    tool_mode: str = field(default_factory=lambda: _env("LLM_TOOL_MODE", "auto").lower())
+    confirm: str = field(default_factory=lambda: _env("AGENT_CONFIRM", "delete").lower())
+    max_steps: int = field(default_factory=lambda: int(_env("AGENT_MAX_STEPS", "30")))
+    self_url: str = field(default_factory=lambda: _env("AGENT_SELF_URL", "http://127.0.0.1:8000").rstrip("/"))
+    result_chars: int = 8000
+    timeout: float = field(default_factory=lambda: float(_env("LLM_TIMEOUT", "1800")))
+    #: Past this share of the context, the older conversation is summarized (app.agent.compact).
+    compact_at: float = field(default_factory=lambda: float(_env("LLM_COMPACT_AT", "0.6")))
+    #: The most a model call carries before the older conversation is summarized, whatever the context:
+    #: every call re-sends the whole history, so a small one keeps each step quick for the server.
+    working_tokens: int = field(default_factory=lambda: int(_env("LLM_WORKING_TOKENS", "48000")))
+
+
+# Learned once per process: does the LLM server do native tool calls?
+_NATIVE_TOOLS: dict[str, bool] = {}
+
+# The assistant must not call itself, mint credentials, or sign in as someone else.
+BLOCKED_PATHS = (
+    re.compile(r"^/api/v1/agent(/|$)"),
+    re.compile(r"^/api/auth/"),
+    re.compile(r"^/api/v1/sso(/|$)"),
+    re.compile(r"^/scim(/|$)"),
+)
+
+REPO = Path(__file__).resolve().parents[2]  # /app in the image (backend/)
+DOC_ROOTS = [p for p in (REPO / "docs", REPO.parent / "docs") if p.is_dir()]
+
+
+# --------------------------------------------------------------------- tools --
+TOOLS: list[dict[str, Any]] = [
+    {"type": "function", "function": {
+        "name": "search_endpoints",
+        "description": "Find platform API endpoints by keywords (e.g. 'entity types', 'scenario runs', "
+                       "'parameter values', 'api keys'). Returns method, path and summary.",
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string"},
+            "method": {"type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]},
+        }, "required": ["query"]}}},
+    {"type": "function", "function": {
+        "name": "describe_endpoint",
+        "description": "Exact path/query parameters, request body schema and response schema of one "
+                       "endpoint. Always use before a POST/PUT/PATCH.",
+        "parameters": {"type": "object", "properties": {
+            "method": {"type": "string"}, "path": {"type": "string"}}, "required": ["method", "path"]}}},
+    {"type": "function", "function": {
+        "name": "describe_schema",
+        "description": "Expand a named schema that describe_endpoint shortened.",
+        "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}}},
+    {"type": "function", "function": {
+        "name": "call_api",
+        "description": "Call a platform endpoint as the signed-in user. Put path parameters into the path "
+                       "(e.g. /api/v1/scenarios/42/runs). Returns status and JSON body.",
+        "parameters": {"type": "object", "properties": {
+            "method": {"type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]},
+            "path": {"type": "string"},
+            "query": {"type": "object", "description": "query-string parameters"},
+            "body": {"description": "JSON request body"},
+            "form": {"type": "object", "description": "form fields, for form endpoints"},
+            "headers": {"type": "object", "description": "extra headers, e.g. Idempotency-Key"},
+        }, "required": ["method", "path"]}}},
+    {"type": "function", "function": {
+        "name": "read_doc",
+        "description": "Read platform documentation, e.g. 'contracts/problem-ir.md' or 'engine.md'. "
+                       "Pass '' to list the documents. Read problem-ir.md before writing a model.",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string"}, "offset": {"type": "integer"}}, "required": ["path"]}}},
+    {"type": "function", "function": {
+        "name": "read_file",
+        "description": "Read rows of a file the user attached (listed under ATTACHED FILES), as CSV.",
+        "parameters": {"type": "object", "properties": {
+            "file": {"type": "string"}, "sheet": {"type": "string"},
+            "offset": {"type": "integer"}, "limit": {"type": "integer", "maximum": 200}},
+            "required": ["file"]}}},
+    {"type": "function", "function": {
+        "name": "query_file",
+        "description": "Count, filter, add up or group the rows of an attached file EXACTLY (never do this "
+                       "arithmetic yourself). where: [{column, op, value}] with op = != < <= > >= in notIn contains "
+                       "empty notEmpty. Without aggregate: the matching rows (only `columns`, if given) and how many. "
+                       "With aggregate {column: sum|min|max|mean|count|distinct} (\"*\": \"count\" counts rows): one "
+                       "line per group_by group, or one line in all.",
+        "parameters": {"type": "object", "properties": {
+            "file": {"type": "string"}, "sheet": {"type": "string"},
+            "where": {"type": "array", "items": {"type": "object"}},
+            "group_by": {"type": "array", "items": {"type": "string"}},
+            "aggregate": {"type": "object"},
+            "columns": {"type": "array", "items": {"type": "string"}},
+            "limit": {"type": "integer", "maximum": 200}},
+            "required": ["file"]}}},
+    {"type": "function", "function": {
+        "name": "place_file",
+        "description": "Place an attached map file marked NOT PLACED YET in the coordinate system the user "
+                       "confirmed. Afterwards its sheets give lon/lat, area_m2, length_m and each feature's geometry.",
+        "parameters": {"type": "object", "properties": {
+            "file": {"type": "string"}, "epsg": {"type": "integer", "description": "e.g. 22992, 32636, 4326"}},
+            "required": ["file", "epsg"]}}},
+    {"type": "function", "function": {
+        "name": "wait",
+        "description": "Pause a few seconds (while a run is queued or running), then poll again.",
+        "parameters": {"type": "object", "properties": {
+            "seconds": {"type": "integer", "minimum": 1, "maximum": 30}}, "required": ["seconds"]}}},
+]
+PLAN_TOOL: dict[str, Any] = {"type": "function", "function": {
+    "name": "propose_plan",
+    "description": "Show the user the model you will build and ask for approval. Only when nothing "
+                   "important is still open. The server checks the spec first and returns errors to fix; "
+                   "a valid plan is shown to the user, who approves (then it is built) or asks for changes.",
+    "parameters": {"type": "object", "properties": {
+        "summary": {"type": "string", "description": "markdown for the user: problem, records and data, "
+                    "decisions, rules (words + formula), goal, assumptions"},
+        "spec": {"type": "object", "description": "domain_name or domain_id, problem_name, note, seed, ir"},
+    }, "required": ["summary", "spec"]}}}
+_CALL_API = next(t for t in TOOLS if t["function"]["name"] == "call_api")
+MODEL_TOOLS = [t for t in TOOLS if t["function"]["name"] != "call_api"] + [
+    {"type": "function", "function": {**_CALL_API["function"], "description":
+     "Read platform data (GET), or solve a scenario after the build (POST /api/v1/scenarios/{id}/runs). "
+     "Nothing else may be written in this mode: changes go through propose_plan."}},
+    PLAN_TOOL]
+WORKSPACE_TOOL: dict[str, Any] = {"type": "function", "function": {
+    "name": "describe_workspace",
+    "description": "What a domain (workspace) already holds: kinds of record with their fields, counts and some keys, "
+                   "relationship types, data values (parameters), map data, problems with versions and scenarios. "
+                   "Call it first, before asking the user anything; reuse what is there.",
+    "parameters": {"type": "object", "properties": {
+        "domain_id": {"type": "integer", "description": "omit for the selected domain"}}}}}
+CHECK_TOOL: dict[str, Any] = {"type": "function", "function": {
+    "name": "check_spec",
+    "description": "Check a spec (the same object propose_plan takes) with the platform's own validators -- data and "
+                   "model (IR) -- without building anything or showing the user. Fix every error it reports, then "
+                   "propose_plan.",
+    "parameters": {"type": "object", "properties": {"spec": {"type": "object"}}, "required": ["spec"]}}}
+RESULT_TOOL: dict[str, Any] = {"type": "function", "function": {
+    "name": "read_result",
+    "description": "A settled run's answer, ready to report: status and goal, what the goal is made of, every "
+                   "decision with its records' names and numbers, per-record totals, and each rule held, tight or "
+                   "broken. Call it once the run has finished, and report from it.",
+    "parameters": {"type": "object", "properties": {"run_id": {"type": "integer"}}, "required": ["run_id"]}}}
+OUTPUT_TOOL: dict[str, Any] = {"type": "function", "function": {
+    "name": "read_output",
+    "description": "More of a long tool result. A result over a few thousand characters is shown in the "
+                   "conversation as its start and end, with its output number; this reads any part of it.",
+    "parameters": {"type": "object", "properties": {
+        "output": {"type": "integer", "description": "The output number named in the shortened result"},
+        "offset": {"type": "integer", "description": "Characters to skip (default 0)"},
+        "find": {"type": "string", "description": "Optional text: start at its first occurrence instead"}},
+        "required": ["output"]}}}
+LAYOUT_TOOL: dict[str, Any] = {"type": "function", "function": {
+    "name": "make_layout",
+    "description": "For any problem of PLACING ITEMS ON A DRAWING (beds in camps, desks in rooms, parking stalls, "
+                   "shelves, panels): the platform makes every candidate position (each turn and aisle side) on a "
+                   "grid over the free area, which cells each covers, and which cells its aisle needs free; writes "
+                   "the files, and returns the counts, an upper bound and the READY plan (seed + model) to give to "
+                   "check_spec. Use it instead of writing geometry code. Sizes in metres.",
+    "parameters": {"type": "object", "properties": {
+        "file": {"type": "string", "description": "The attached drawing (optional when there is one)"},
+        "area_layers": {"type": "array", "items": {"type": "string"},
+                        "description": "Layers whose polygons are where items may go (rooms, camps, plots)"},
+        "blocked_layers": {"type": "array", "items": {"type": "string"},
+                           "description": "Layers no item may cover (obstacles, closed areas, door fronts)"},
+        "label_layer": {"type": "string", "description": "Optional text layer naming each area (C01, Room 3)"},
+        "items": {"type": "array", "items": {"type": "object", "properties": {
+            "name": {"type": "string"}, "length": {"type": "number"}, "width": {"type": "number"},
+            "rotations": {"type": "array", "items": {"type": "integer"}, "description": "0 and/or 90"},
+            "value": {"type": "number", "description": "Worth of one (default 1)"}},
+            "required": ["name", "length", "width"]}},
+        "aisle": {"type": "number", "description": "Free width each item needs beside it to be reached (m); 0 for none"},
+        "aisle_side": {"type": "string", "enum": ["short", "long", "any", "none"],
+                       "description": "Which side the aisle is on: short (the foot of a bed), long, any"},
+        "step": {"type": "number", "description": "Grid step (m); leave out to let the platform choose"}},
+        "required": ["area_layers", "items"]}}}
+TOOLS.extend([WORKSPACE_TOOL, RESULT_TOOL, OUTPUT_TOOL])
+MODEL_TOOLS.extend([WORKSPACE_TOOL, CHECK_TOOL, RESULT_TOOL, OUTPUT_TOOL, LAYOUT_TOOL])
+#: A tool result kept whole in the conversation up to this many characters; past it, its start and end, and
+#: the whole of it on disk for read_output (every later call re-sends the history: the camp-bed test's
+#: run_python results made a 41k-token conversation of 15 steps).
+PREVIEW_CHARS = 6000
+#: Tool results kept whole: the checks' refusals (the model fixes them line by line).
+WHOLE_RESULTS = {"check_spec", "propose_plan", "read_output", "make_layout"}
+TOOL_NAMES = {t["function"]["name"] for t in MODEL_TOOLS} | {sandbox.SCHEMA["function"]["name"]}
+# Messages the platform adds to the conversation (not the person): not counted as the person's turns.
+PLATFORM = "[Platform] "
+MAX_NUDGES = 3  # per kind of correction, per turn
+MAX_SAME_ERROR = 3  # the same spec refusal this many times ends the turn, shown to the person
+MAX_TOTAL_NUDGES = 8
+CUT_OFF = (PLATFORM + "Your last reply was cut off at the length limit, so its tool call was NOT run. Send a smaller "
+           "call: load rows from files with *_from_file instead of writing them out (generate the files with "
+           "run_python if you have it), split the work into several calls, and keep prose short.")
+# A reply that hit the length limit with no tool call in it: Qwen thinking aloud in circles ("Actually...
+# let me...") until the limit, or drafting the spec in prose (the platform test of October 2026: 28,000
+# characters, twice, shown to the person as the answer). It is never shown; the step is asked again.
+RAMBLED = (PLATFORM + "Your last reply ran to the length limit without calling a tool, so it was NOT shown to the "
+           "user and nothing happened. Do not think aloud or draft in the reply. Decide, then act: if a rule is hard "
+           "to write, use the PATTERNS (a rule that depends on a value per pair: par[w,c] * pick[w,c] <= limit); "
+           "if you are ready, call check_spec with the spec; otherwise ask the user ONE short question.")
+SPEC_AS_TEXT = (PLATFORM + "You wrote the spec in your reply instead of calling a tool. It was run through check_spec "
+                "for you; the result follows. Fix what it reports, then call propose_plan with the spec "
+                "(through the tool interface, not as text).")
+READBACK_CHECK = ("Before propose_plan, compare EVERY line of AS BUILT with what the user said: which records each rule "
+                  "covers, which way a link goes (d → d2 means d2 is the next one), which numbers apply to which "
+                  "records (ONE number for the whole problem applies to every record alike). If anything differs, "
+                  "fix the spec and check it again. Your summary must describe AS BUILT, not your intention.")
+EMPTY = (PLATFORM + "Your reply was empty. Answer the user, or call the tool you meant to call.")
+_SPEC_TEXT = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S)
+_CLAIM = re.compile(r"\b(?:I(?:'ve| have)?|we(?:'ve| have)?|it (?:has been|is now|was)|they (?:have been|were)|has been|"
+                    r"have been|is now|are now)\s+(?:\w+\s+){0,2}?(?:built|created|imported|loaded|solved|published|"
+                    r"added|placed)\b", re.I)
+MIN_USER_TURNS_BEFORE_PLAN = 2
+SOLVE_PATH = re.compile(r"^/api/v1/scenarios/\d+/runs$")
+RUN_PATH = re.compile(r"^/api/v1/runs/\d+$")
+MAX_SOLVES = 2  # per scenario per turn
+# POSTs that only read: allowed in problem-description mode, where nothing else may be written.
+# Data preparation, allowed in problem-description mode too (DATA FIRST, the camp-bed test: the drawing never
+# became records because the Assistant could not import it nor compute what the file lacked): a new domain,
+# map data imported into it and turned into records, and the platform's own calculations on those records.
+DATA_POST = re.compile(r"^/api/domain/?$|^/api/v1/gis/datasets$|^/api/v1/gis/datasets/\d+/records(?:/attach)?$"
+                       r"|^/api/v1/gis/domains/\d+/records$|^/api/v1/gis/derived-layers$"
+                       r"|^/api/v1/domains/\d+/(?:derive-value|distances|within)$|^/api/v1/entity-types/\d+/derive$"
+                       r"|^/api/v1/parameters/\d+/recompute$")
+READ_ONLY_POST = re.compile(r"^/api/v1/gis/domains/\d+/records/propose$|^/api/v1/problems/\d+/versions/validate$")
+
+
+def bind_literal_keys(ir: dict) -> list[str]:
+    """`work[n, d, "night"]`: a record named by its key where an index belongs. The IR wants every index
+    bound, so the roster field test's model wrote it again and again and was refused each time. Each such
+    key becomes an index bound to that one record -- {"index": "k_night", "set": "shift", "where": id =
+    "night"} -- added to the rule's forall (a goal term: summed over it); one record, so nothing else
+    changes. Rewrites `ir` in place; returns what it did, for the model to read."""
+    declared = {**{n: (v or {}).get("index") or [] for n, v in (ir.get("variables") or {}).items()},
+                **{n: (v or {}).get("index") or [] for n, v in (ir.get("parameters") or {}).items()}}
+    done: list[str] = []
+
+    def walk(term, scope: set[str], added: dict[str, dict]):
+        if isinstance(term, list):
+            for t in term:
+                walk(t, scope, added)
+            return
+        if not isinstance(term, dict):
+            return
+        inner = set(scope)
+        for b in term.get("over") or []:
+            if isinstance(b, dict) and isinstance(b.get("index"), str):
+                inner.add(b["index"])
+        ref = term.get("var") if "var" in term else term.get("par")
+        if isinstance(ref, str) and isinstance(term.get("index"), list) and ref in declared:
+            sets = declared[ref]
+            for j, key in enumerate(term["index"]):
+                if isinstance(key, str) and key not in inner and j < len(sets):
+                    name = "k_" + "".join(ch if ch.isascii() and ch.isalnum() else "_" for ch in key.lower())[:40]
+                    if name not in added:
+                        added[name] = {"index": name, "set": sets[j],
+                                       "where": [{"attr": "id", "op": "=", "value": key}]}
+                        done.append(f'{ref}[..."{key}"...] -> index {name} bound to the {sets[j]} "{key}"')
+                    term["index"][j] = name
+        for k, v in term.items():
+            if k not in ("index", "where"):
+                walk(v, inner, added)
+
+    for c in ir.get("constraints") or []:
+        if not isinstance(c, dict):
+            continue
+        scope = {b["index"] for b in c.get("forall") or [] if isinstance(b, dict) and isinstance(b.get("index"), str)}
+        added: dict[str, dict] = {}
+        walk([c.get("left"), c.get("right")], scope, added)
+        if added:
+            c["forall"] = list(c.get("forall") or []) + list(added.values())
+    for t in ((ir.get("objective") or {}).get("terms") or []):
+        if not isinstance(t, dict):
+            continue
+        added = {}
+        walk(t.get("expression"), set(), added)
+        if added:
+            t["expression"] = {"sum": t["expression"], "over": list(added.values())}
+    return done
+
+
+#: Tools whose results are data or calculations, so their numbers may be used in a plan.
+DATA_TOOLS = {"read_file", "query_file", "run_python", "call_api", "describe_workspace", "read_result"}
+_NUMBER = re.compile(r"(?<![A-Za-z_])-?\d[\d,]*(?:\.\d+)?%?")
+
+
+def numbers_in(text: str) -> set[float]:
+    """Every number written in a text (1,500 and 1.5 and 35%: the last also as 0.35)."""
+    found: set[float] = set()
+    for raw in _NUMBER.findall(text or ""):
+        try:
+            value = float(raw.rstrip("%").replace(",", ""))
+        except ValueError:
+            continue
+        found.add(round(value, 6))
+        if raw.endswith("%"):
+            found.add(round(value / 100, 6))
+    return found
+
+
+def _platform_order_faults(spec: dict, workspace: dict | None, files: list[dict],
+                           known: set[float], typed_cells: int = 0) -> list[str]:
+    """The platform's order, step by step, before a model (the camp-bed evaluation: Qwen jumped from reading
+    the drawing to writing rules -- no map data, no records, no relationships, made-up values):
+    1. MAP DATA: an attached map file is imported into the domain the plan builds in;
+    2. RECORDS: every set has records (_sets_without_data);
+    3. RELATIONSHIPS: every relationship the model walks has links;
+    4. DATA VALUES: a value typed into the plan is one the user gave or one the data or a calculation gave
+       (`known`: the numbers in the person's messages, the attached files and the tools' results)."""
+    seed = spec.get("seed") if isinstance(spec.get("seed"), dict) else {}
+    ir = spec.get("ir") if isinstance(spec.get("ir"), dict) else {}
+    faults: list[str] = []
+    # STEP 1, MAP DATA: an attached drawing not yet in the domain is imported by the build itself
+    # (Agent._import_drawings) -- asking the model to do it cost the camp-bed retest five turns and an
+    # upload id it could not find.
+    links: dict[str, int] = {}
+    for r in seed.get("relationships") or []:
+        if isinstance(r, dict):
+            links[r.get("type")] = links.get(r.get("type"), 0) + 1
+    for r in (workspace or {}).get("relationship_types") or []:
+        links[r.get("name")] = links.get(r.get("name"), 0) + int(r.get("links") or 0)
+    for name in ir.get("relationships") or []:
+        if not links.get(name):
+            faults.append(f'STEP 3, RELATIONSHIPS: "{name}" has NO links, and the model walks it. Load them '
+                          f'(relationships_from_file from a generated file, e.g. which candidate covers which cell), '
+                          f'or make them with the platform (POST /api/v1/domains/<id>/within or /distances).')
+    typed = [(p.get("name"), p.get("default_value")) for p in seed.get("parameters") or []
+             if isinstance(p, dict) and not p.get("index")]
+    # Cells typed into the plan come first; the ones loaded from files follow them (files.expand).
+    typed += [(v.get("parameter"), v.get("value")) for v in (seed.get("parameter_values") or [])[:typed_cells]
+              if isinstance(v, dict)]
+    made_up = sorted({f"{name} = {value}" for name, value in typed
+                      if isinstance(value, (int, float)) and not isinstance(value, bool)
+                      and round(float(value), 6) not in known and float(value) not in (0.0, 1.0)
+                      and float(value) < 999_999})
+    if made_up:
+        faults.append("STEP 4, DATA VALUES: these numbers were not given by the user nor found in the data or a "
+                      f"calculation: {', '.join(made_up)}. Ask the user for them, or compute them (query_file, "
+                      "run_python, the platform's calculations) -- never put in a placeholder.")
+    return faults
+
+
+def _numbers_from(messages: list[dict]) -> set[float]:
+    """Only what the person wrote and what reading or computing tools returned: never the checks' own replies,
+    which quote the plan's numbers back (an invented value would vouch for itself), nor a summary's prose."""
+    known: set[float] = set()
+    for m in messages:
+        if (m["role"] == "user" and not str(m.get("content") or "").startswith(PLATFORM)) or (
+                m["role"] == "tool" and m.get("name") in DATA_TOOLS):
+            known |= numbers_in(str(m.get("content") or ""))
+    return known
+
+
+def _sendable(spec: dict) -> dict:
+    """The spec without the Assistant's own markers (cells loaded from a file)."""
+    seed = spec.get("seed")
+    if not isinstance(seed, dict) or not seed.get("parameter_values"):
+        return spec
+    cells = [{k: v for k, v in c.items() if k != "_from_file"} if isinstance(c, dict) else c
+             for c in seed["parameter_values"]]
+    return {**spec, "seed": {**seed, "parameter_values": cells}}
+
+
+def _sets_without_data(spec: dict, existing: dict[str, int]) -> list[str]:
+    """DATA FIRST: every set the model uses must get its records from somewhere -- typed in the seed, loaded
+    from a file or map layer (entities_from_file; run_python's output files count), or already in the
+    domain. The camp-bed test built "zone" and "door" with no records at all; the solve then failed and
+    the Assistant looped 24 times. `existing`: records per kind already in the domain."""
+    seed = spec.get("seed") if isinstance(spec.get("seed"), dict) else {}
+    ir = spec.get("ir") if isinstance(spec.get("ir"), dict) else {}
+    made: dict[str, int] = {}
+    for e in seed.get("entities") or []:
+        if isinstance(e, dict):
+            made[e.get("type")] = made.get(e.get("type"), 0) + 1
+    faults = []
+    for name in ir.get("sets") or []:
+        if made.get(name) or existing.get(name):
+            continue
+        faults.append(f'Set "{name}" would have NO records: nothing in the plan makes them and the domain has none. '
+                      f'Name its data: entities_from_file from an attached file or map layer (e.g. {{"file": ..., '
+                      f'"sheet": <layer>, "type": "{name}", "key": "feature", "attrs": {{...}}}}), a file generated '
+                      f'with run_python (when on), or records typed in entities. Numbers the file lacks (areas, '
+                      f'distances) come from its columns (area_m2, x_m, ...) or from a calculation step; never invent them.')
+    return faults
+
+
+def _empty_parameters(spec: dict) -> list[str]:
+    """Parameters the model reads that would hold nothing but their default. The field test (October
+    2026): the goal used delivery_cost_egp[warehouse, customer], declared with default 999999999 and never
+    loaded, so every lane cost the same and the transport cost dropped out of the decision -- a plan that
+    passed every check, was shown as "cost per ton x demand", and would have answered the wrong question.
+    A parameter indexed by records with no cell at all is refused; one the domain already has (not
+    declared in this seed) is left alone, its values being in the platform."""
+    seed = spec.get("seed") if isinstance(spec.get("seed"), dict) else {}
+    ir = spec.get("ir") if isinstance(spec.get("ir"), dict) else {}
+    declared = {p.get("name"): p for p in seed.get("parameters") or [] if isinstance(p, dict)}
+    cells: dict[str, int] = {}
+    for v in seed.get("parameter_values") or []:
+        if isinstance(v, dict):
+            cells[v.get("parameter")] = cells.get(v.get("parameter"), 0) + 1
+    faults = []
+    read: set[str] = set()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            if isinstance(node.get("par"), str):
+                read.add(node["par"])
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    walk([ir.get("constraints"), ir.get("objective")])
+    for name, count in cells.items():
+        # Data loaded that no rule or goal reads (the roster field test: the 8 days off asked for were
+        # loaded as requested_off, and the goal "fewest broken requests" counted every shift worked instead).
+        if name in declared and name not in read:
+            faults.append(f'Parameter "{name}" holds data ({count} cells) but no rule or goal reads it. If it matters, '
+                          f'read it in a rule or goal ({{"par": "{name}", "index": [...]}}); if not, drop it.')
+    for name in (ir.get("parameters") or {}):
+        p = declared.get(name)
+        if not p or not p.get("index") or cells.get(name):
+            continue
+        faults.append(f'Parameter "{name}"[{", ".join(map(str, p["index"]))}] is used by the model but no value is '
+                      f'loaded: every cell would be its default {p.get("default_value", 0)}. Load it '
+                      f'(parameter_values_from_file), or compute it in the model from what is loaded (cost per ton '
+                      f'x demand is {{"mul": [{{"mul": [{{"par": "lane_cost", ...}}, {{"attr": {{"of": "c", '
+                      f'"name": "demand"}}}}]}}, {{"var": "assign", ...}}]}}), or drop it.')
+    return faults
+
+
+def _spec_in_text(text: str) -> dict | None:
+    """A spec the model wrote into its reply in a ```json fence (or bare), recognised by its "ir"."""
+    candidates = [m.group(1) for m in _SPEC_TEXT.finditer(text or "")]
+    start = (text or "").find("{")
+    if not candidates and start >= 0 and '"ir"' in text:
+        candidates.append(text[start: text.rfind("}") + 1])
+    for raw in candidates:
+        try:
+            obj = toolcall.strict_loads(raw)
+        except Exception:  # noqa: BLE001 -- not a spec after all
+            continue
+        if isinstance(obj, dict) and isinstance(obj.get("spec"), dict):
+            obj = obj["spec"]
+        if isinstance(obj, dict) and isinstance(obj.get("ir"), dict):
+            return obj
+    return None
+
+
+def clip(obj: Any, limit: int) -> str:
+    s = obj if isinstance(obj, str) else json.dumps(obj, ensure_ascii=False, default=str)
+    if len(s) <= limit:
+        return s
+    return s[:limit] + f"\n...[truncated {len(s) - limit} chars: narrow it with filters or a limit]"
+
+
+# ------------------------------------------------------------------ the spec --
+class ApiIndex:
+    """The OpenAPI document, searchable and described one endpoint at a time."""
+
+    def __init__(self, spec: dict[str, Any]):
+        self.spec = spec
+        self.ops: list[dict[str, Any]] = []
+        for path, item in spec.get("paths", {}).items():
+            if any(b.match(path) for b in BLOCKED_PATHS):
+                continue
+            for method, op in item.items():
+                if method.lower() not in ("get", "post", "put", "patch", "delete"):
+                    continue
+                self.ops.append({
+                    "method": method.upper(), "path": path,
+                    "summary": op.get("summary") or op.get("operationId") or "",
+                    "tags": op.get("tags") or [],
+                    "description": (op.get("description") or "").strip(),
+                    "op": op, "item": item,
+                })
+
+    def tag_overview(self) -> str:
+        counts: dict[str, int] = {}
+        for o in self.ops:
+            for t in o["tags"] or ["untagged"]:
+                counts[t] = counts.get(t, 0) + 1
+        return ", ".join(f"{t} ({n})" for t, n in sorted(counts.items()))
+
+    def search(self, query: str, method: str | None = None, limit: int = 25) -> list[dict[str, Any]]:
+        words = [w for w in re.split(r"[\s/_\-]+", (query or "").lower()) if w]
+        scored = []
+        for o in self.ops:
+            if method and o["method"] != method.upper():
+                continue
+            path = o["path"].lower()
+            hay = " ".join([path, o["summary"].lower(), " ".join(o["tags"]).lower(), o["description"][:400].lower()])
+            score = 0 if words else 1
+            for w in words:
+                stem = w.rstrip("s") if len(w) > 3 else w
+                score += (3 if stem in path else 0) + (1 if stem in hay else 0)
+            if score:
+                scored.append((score, o))
+        scored.sort(key=lambda x: (-x[0], x[1]["path"], x[1]["method"]))
+        return [{"method": o["method"], "path": o["path"], "summary": o["summary"], "tags": o["tags"]}
+                for _, o in scored[:limit]]
+
+    def find(self, method: str, path: str) -> dict[str, Any] | None:
+        method = method.upper()
+        path = path.split("?")[0]
+        for o in self.ops:
+            if o["method"] == method and o["path"] == path:
+                return o
+        for o in self.ops:
+            if o["method"] != method:
+                continue
+            pattern = "^" + re.sub(r"\\\{[^}]+\\\}", "[^/]+", re.escape(o["path"])) + "$"
+            if re.match(pattern, path):
+                return o
+        return None
+
+    def _resolve(self, schema: Any, depth: int = 0, seen: tuple = ()) -> Any:
+        if isinstance(schema, list):
+            return [self._resolve(s, depth, seen) for s in schema]
+        if not isinstance(schema, dict):
+            return schema
+        if "$ref" in schema:
+            ref = schema["$ref"]
+            name = ref.split("/")[-1]
+            if ref in seen or depth >= 5:
+                return {"$ref_name": name, "note": f"use describe_schema('{name}')"}
+            node: Any = self.spec
+            for part in ref.lstrip("#/").split("/"):
+                node = node.get(part, {})
+            return self._resolve(node, depth + 1, seen + (ref,))
+        return {k: self._resolve(v, depth, seen) for k, v in schema.items() if k != "title"}
+
+    def schema(self, name: str) -> Any:
+        node = self.spec.get("components", {}).get("schemas", {}).get(name)
+        return self._resolve(node) if node else {"error": f"no schema named {name}"}
+
+    def describe(self, method: str, path: str) -> dict[str, Any]:
+        o = self.find(method, path)
+        if not o:
+            return {"error": f"no endpoint {method.upper()} {path}; use search_endpoints"}
+        op = o["op"]
+        params = [self._resolve(p) for p in (o["item"].get("parameters") or []) + (op.get("parameters") or [])]
+        out: dict[str, Any] = {
+            "method": o["method"], "path": o["path"], "summary": o["summary"],
+            "description": o["description"][:2500],
+            "parameters": [{"name": p.get("name"), "in": p.get("in"), "required": p.get("required", False),
+                            "schema": p.get("schema"), "description": (p.get("description") or "")[:300]}
+                           for p in params],
+        }
+        body = op.get("requestBody")
+        if body:
+            body = self._resolve(body)
+            content = body.get("content", {})
+            ctype = next(iter(content), None)
+            out["request_body"] = {"required": body.get("required", False), "content_type": ctype,
+                                   "schema": content.get(ctype, {}).get("schema") if ctype else None}
+        ok = next((v for k, v in (op.get("responses") or {}).items() if str(k).startswith("2")), None)
+        if ok and "content" in ok:
+            sch = next(iter(ok["content"].values()), {}).get("schema")
+            if sch:
+                out["response_schema"] = self._resolve(sch)
+        return out
+
+
+def read_doc(path: str, offset: int, limit: int) -> str:
+    if not DOC_ROOTS:
+        return "No documentation is shipped with this installation."
+    rel = (path or "").replace("\\", "/").strip("/")
+    if rel.startswith("docs/"):
+        rel = rel[5:]
+    for root in DOC_ROOTS:
+        target = (root / rel).resolve()
+        if not str(target).startswith(str(root.resolve())):
+            return "not allowed"
+        if target.is_dir():
+            files = sorted(str(p.relative_to(root)).replace("\\", "/") for p in target.rglob("*.md"))
+            return "\n".join(files[:300])
+        if target.is_file():
+            text = target.read_text(encoding="utf-8", errors="replace")
+            chunk = text[offset: offset + limit]
+            rest = len(text) - offset - len(chunk)
+            return chunk + (f"\n...[{rest} more chars; read_doc offset={offset + len(chunk)}]" if rest > 0 else "")
+    return "not found; pass '' to list the documents"
+
+
+# ------------------------------------------------------------- calling the API --
+CallFn = Callable[..., dict]
+
+
+def loopback_caller(settings: Settings, token: str) -> CallFn:
+    """Calls this same API over HTTP with the person's own bearer token."""
+
+    def call(method: str, path: str, query: dict | None = None, body: Any = None,
+             form: dict | None = None, headers: dict | None = None) -> dict:
+        url = settings.self_url + path
+        if query:
+            q = {k: (json.dumps(v) if isinstance(v, (dict, list)) else v) for k, v in query.items() if v is not None}
+            url += ("&" if "?" in url else "?") + urllib.parse.urlencode(q, doseq=True)
+        hdrs = {"Accept": "application/json", "Authorization": f"Bearer {token}"}
+        hdrs.update({str(k): str(v) for k, v in (headers or {}).items() if str(k).lower() != "authorization"})
+        data = None
+        if form is not None:
+            data = urllib.parse.urlencode(form).encode()
+            hdrs["Content-Type"] = "application/x-www-form-urlencoded"
+        elif body is not None:
+            data = json.dumps(body).encode()
+            hdrs["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
+        try:
+            with urllib.request.urlopen(req, timeout=300) as r:
+                status, ctype, raw = r.status, r.headers.get("content-type", ""), r.read()
+        except urllib.error.HTTPError as e:
+            status, ctype, raw = e.code, (e.headers.get("content-type", "") if e.headers else ""), e.read()
+        if "json" in ctype:
+            try:
+                payload: Any = json.loads(raw or b"null")
+            except ValueError:
+                payload = raw.decode("utf-8", "replace")
+        elif ctype.startswith("text/") or not raw:
+            payload = raw.decode("utf-8", "replace")
+        else:
+            payload = f"<{len(raw)} bytes of {ctype}: a file download; give the person the endpoint path instead>"
+        return {"status": status, "ok": 200 <= status < 300, "body": payload}
+
+    return call
+
+
+# ------------------------------------------------------------------- the LLM --
+class LlmError(Exception):
+    def __init__(self, status: int, body: str):
+        super().__init__(f"LLM HTTP {status}: {body[:300]}")
+        self.status = status
+        self.body = body
+
+
+class ToolModeChanged(Exception):
+    """The server has no native tool calling; rebuild the prompt for the text protocol."""
+
+
+def llm_chat(settings: Settings, messages: list[dict], native: bool | None,
+             tools: list[dict] | None = None, max_tokens: int | None = None) -> tuple[dict, bool]:
+    """One completion. Returns (message, native_used)."""
+    payload: dict[str, Any] = {"model": settings.model, "messages": messages,
+                               "temperature": settings.temperature,
+                               "max_tokens": max_tokens or settings.max_tokens}
+    if settings.thinking == "auto":
+        settings = replace(settings, thinking=thinking_for(messages))
+    if settings.thinking in ("on", "off"):
+        payload["chat_template_kwargs"] = {"enable_thinking": settings.thinking == "on"}
+    if native is not False:
+        payload["tools"] = tools or TOOLS
+        payload["tool_choice"] = "auto"
+    req = urllib.request.Request(
+        settings.base_url + "/chat/completions", data=json.dumps(payload).encode(), method="POST",
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {settings.api_key}"})
+    try:
+        # A 32,768-token reply at the Qwen3.5 server's ~50 tokens a second takes about 11 minutes: the wait
+        # outlasts the longest reply allowed (LLM_TIMEOUT, seconds), or a turn would end on "timed out".
+        with urllib.request.urlopen(req, timeout=settings.timeout) as r:
+            data = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", "replace")
+        if native is None and e.code == 400 and "tool" in body.lower():
+            _NATIVE_TOOLS[settings.base_url] = False
+            raise ToolModeChanged() from e
+        raise LlmError(e.code, body) from e
+    except urllib.error.URLError as e:
+        raise LlmError(0, f"cannot reach the model at {settings.base_url}: {e.reason}") from e
+    if native is None:
+        _NATIVE_TOOLS[settings.base_url] = True
+    choice = data["choices"][0]
+    message = dict(choice.get("message") or {})
+    message["_finish"] = choice.get("finish_reason")
+    return message, native is not False
+
+
+def thinking_for(messages: list[dict]) -> str:
+    """LLM_THINKING=auto: think where it pays, not at every step. Thinking is most of a step's time (the camp
+    test: ~10 s of every 13 s was decoding). On when a person's message is to be understood, when the plan
+    is being written or was refused, and when a tool failed; off when carrying on after tools that worked."""
+    last = messages[-1] if messages else {}
+    if last.get("role") != "tool":
+        return "on"
+    done = []
+    for m in reversed(messages):
+        if m.get("role") != "tool":
+            break
+        done.append(m)
+    for m in done:
+        content = str(m.get("content") or "")
+        if m.get("name") in ("check_spec", "propose_plan") or content.startswith(
+                ("tool error", "Refused", "Could not", "Not valid yet", "The spec does not build", "No attached")) \
+                or '"ok": false' in content[:40] or (content.startswith('{"exit_code":')
+                                                       and not content.startswith('{"exit_code": 0')):
+            return "on"
+    return "off"
+
+
+_SERVER_CONTEXT: dict[str, tuple[float, int | None]] = {}
+
+
+def server_context(settings: Settings) -> int:
+    """The model server's own context size (vLLM reports max_model_len per model), cached ten minutes; the
+    configured LLM_CONTEXT when the server does not say. Raising vLLM's --max-model-len to 64k is then
+    picked up without changing the platform."""
+    now = time.time()
+    seen = _SERVER_CONTEXT.get(settings.base_url)
+    if seen is None or now - seen[0] > 600:
+        found: int | None = None
+        try:
+            req = urllib.request.Request(settings.base_url + "/models",
+                                         headers={"Authorization": f"Bearer {settings.api_key}"})
+            with urllib.request.urlopen(req, timeout=3) as r:
+                for m in json.loads(r.read()).get("data", []):
+                    if m.get("id") == settings.model and m.get("max_model_len"):
+                        found = int(m["max_model_len"])
+        except Exception:  # noqa: BLE001 -- unreachable or silent: the configured size stands
+            found = None
+        _SERVER_CONTEXT[settings.base_url] = seen = (now, found)
+    return seen[1] or settings.context
+
+
+def check_llm(settings: Settings) -> dict[str, Any]:
+    try:
+        req = urllib.request.Request(settings.base_url + "/models",
+                                     headers={"Authorization": f"Bearer {settings.api_key}"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            data = json.loads(r.read()).get("data", [])
+        models = [m.get("id") for m in data]
+        context = next((int(m["max_model_len"]) for m in data if m.get("id") == settings.model and m.get("max_model_len")),
+                       settings.context)
+        return {"reachable": True, "models": models, "model_found": settings.model in models, "context": context}
+    except Exception as e:  # noqa: BLE001 -- any failure is "not reachable", with why
+        return {"reachable": False, "error": str(e)[:300]}
+
+
+THINK_RE = re.compile(r"<think>.*?</think>", re.S)
+OPEN_THINK_RE = re.compile(r"^.*?</think>", re.S)  # template put <think> in the prompt
+
+
+def clean(content: str | None) -> str:
+    text = THINK_RE.sub("", content or "")
+    if "</think>" in text:
+        text = OPEN_THINK_RE.sub("", text)
+    return text.strip()
+
+
+
+
+def text_protocol(tools: list[dict]) -> str:
+    return (
+        "\n\n# Tools\nCall a tool by writing, on its own lines:\n<tool_call>\n"
+        '{"name": "<tool>", "arguments": {...}}\n</tool_call>\n'
+        'Several blocks may follow each other. Then stop: results come back in a message starting '
+        '"TOOL RESULTS". When finished, answer with no <tool_call> block.\nTools:\n'
+        + json.dumps([t["function"] for t in tools])
+    )
+
+
+def to_wire(messages: list[dict], native: bool) -> list[dict]:
+    """The canonical (native-style) history in the form the server accepts."""
+    if native:
+        return messages
+    out: list[dict] = []
+    pending: list[str] = []
+
+    def flush() -> None:
+        if pending:
+            out.append({"role": "user", "content": "TOOL RESULTS\n\n" + "\n\n".join(pending)})
+            pending.clear()
+
+    for m in messages:
+        if m["role"] == "tool":
+            pending.append(f"[{m.get('name', 'tool')}]\n{m['content']}")
+            continue
+        flush()
+        if m["role"] == "assistant" and m.get("tool_calls"):
+            blocks = "\n".join(
+                "<tool_call>\n" + json.dumps({"name": c["function"]["name"],
+                                              "arguments": _args(c)}, ensure_ascii=False) + "\n</tool_call>"
+                for c in m["tool_calls"])
+            out.append({"role": "assistant", "content": ((m.get("content") or "") + "\n" + blocks).strip()})
+        else:
+            out.append({"role": m["role"], "content": m.get("content") or ""})
+    flush()
+    return out
+
+
+def _shown(name: str, args: dict) -> dict:
+    """What the UI shows of a call: a plan's spec is large and shown in its own card."""
+    if name == "propose_plan":
+        return {"summary": str(args.get("summary", ""))[:200]}
+    return args
+
+
+def _args(call: dict) -> dict:
+    try:
+        a = json.loads(call["function"].get("arguments") or "{}")
+        return a if isinstance(a, dict) else {}
+    except ValueError:
+        return {}
+
+
+CHARS_PER_TOKEN = 2.0  # JSON and specs tokenise densely: 2.5 let a 24,577-token prompt through as "fitting"
+
+
+def fit(messages: list[dict], settings: Settings, reply_tokens: int | None = None, spare: int = 0) -> list[dict]:
+    """Under the model's context: shorten old tool results, then drop the oldest exchanges. `spare`: tokens
+    more to free, when the server said the last estimate was still too big."""
+    reply = reply_tokens or settings.max_tokens
+    budget = int((settings.context - reply - 2500 - spare) * CHARS_PER_TOKEN)
+    msgs = [dict(m) for m in messages]
+    # A spec is long, and only the latest one matters: every earlier check_spec / propose_plan keeps its
+    # summary only (the roster field test: four 10,000-character specs in the history overflowed 32k).
+    spec_at = [i for i, m in enumerate(msgs) if m["role"] == "assistant" and any(
+        c["function"]["name"] in ("propose_plan", "check_spec") for c in m.get("tool_calls") or [])]
+    for i in spec_at[:-1]:
+        msgs[i]["tool_calls"] = [
+            {**c, "function": {**c["function"], "arguments": json.dumps(
+                {"summary": str(_args(c).get("summary", ""))[:1500], "spec": "(superseded by a later spec)"})}}
+            if c["function"]["name"] in ("propose_plan", "check_spec") else c
+            for c in msgs[i]["tool_calls"]]
+    size = lambda: sum(len(json.dumps(m, ensure_ascii=False, default=str)) for m in msgs)  # noqa: E731
+    for m in msgs[1:-6]:
+        if size() <= budget:
+            break
+        if m["role"] == "tool" and len(m.get("content") or "") > 400:
+            m["content"] = m["content"][:400] + "...[older result shortened]"
+        if m["role"] == "assistant" and m.get("tool_calls"):
+            # Old code and request bodies are the bulk of a long session (the camp-bed retest: two
+            # 8,000-character run_python scripts); what they produced is in their (shortened) results.
+            m["tool_calls"] = [
+                {**c, "function": {**c["function"], "arguments": c["function"]["arguments"][:300]
+                                   + '..."(earlier call, shortened)"'}}
+                if len(c["function"].get("arguments") or "") > 600 and c["function"]["name"] not in
+                ("propose_plan", "check_spec") else c
+                for c in m["tool_calls"]]
+    # The person's first message is the problem itself: it is never dropped (the camp-bed retest lost the
+    # brief to trimming, and the model asked "What decision are you making?"). The oldest exchanges AFTER
+    # it go first.
+    first = next((i for i, m in enumerate(msgs) if m["role"] == "user"
+                  and not str(m.get("content") or "").startswith(PLATFORM)), None)
+    keep = (first + 1) if first is not None else 1
+    while size() > budget:
+        starts = [i for i, m in enumerate(msgs) if i > keep and m["role"] == "user"
+                  and not str(m.get("content") or "").startswith(PLATFORM)]
+        if not starts or starts[0] >= len(msgs) - 1:
+            break
+        del msgs[keep:starts[0]]
+    if first is not None and keep < len(msgs) and msgs[keep]["role"] == "tool":
+        # Never leave a tool result without the call it answers.
+        while keep < len(msgs) and msgs[keep]["role"] == "tool":
+            del msgs[keep]
+    return msgs
+
+
+# ------------------------------------------------------------------ the loop --
+@dataclass
+class Context:
+    username: str
+    page: str | None = None
+    domain_id: int | None = None
+    problem_id: int | None = None
+    mode: str = "assistant"  # or "model"
+    files: list[dict] = field(default_factory=list)  # attached, parsed (app/agent/files.py)
+    user_id: str = ""
+    conversation_id: str | None = None
+    can_run_python: bool = False  # AGENT_RUN_PYTHON on, and the person may publish models
+
+
+EXAMPLE_SPEC = {
+    "domain_name": "City projects",
+    "problem_name": "Choose projects to fund",
+    "note": "Fund the projects worth most within the budget; district A gets at most two.",
+    "seed": {
+        "entity_types": [{"name": "project", "role": "task", "attributes": [
+            {"name": "cost", "data_type": "number", "required": True, "unit": "kEGP"},
+            {"name": "benefit", "data_type": "number", "required": True, "unit": "points"},
+            {"name": "district", "data_type": "enum", "enum_values": ["a", "b"], "required": True}]}],
+        "parameters": [{"name": "budget", "index": [], "default_value": 500, "unit": "kEGP"}],
+        "entities": [
+            {"type": "project", "key": "roof", "label": "School roof", "attrs": {"cost": 200, "benefit": 9, "district": "a"}},
+            {"type": "project", "key": "clinic", "label": "Clinic wing", "attrs": {"cost": 250, "benefit": 12, "district": "a"}},
+            {"type": "project", "key": "park", "label": "Park", "attrs": {"cost": 120, "benefit": 5, "district": "a"}},
+            {"type": "project", "key": "road", "label": "Road repair", "attrs": {"cost": 180, "benefit": 7, "district": "b"}}],
+    },
+    "ir": {
+        "version": 2,
+        "sets": ["project"],
+        "parameters": {"budget": {"index": []}},
+        "variables": {"fund": {"index": ["project"], "domain": "binary"}},
+        "constraints": [
+            {"id": "c_budget", "note": "total cost of funded projects within the budget",
+             "left": {"sum": {"mul": [{"attr": {"of": "p", "name": "cost"}}, {"var": "fund", "index": ["p"]}]},
+                      "over": [{"index": "p", "set": "project"}]},
+             "relation": "<=", "right": {"par": "budget", "index": []}, "severity": "hard"},
+            {"id": "c_district_a", "note": "at most two projects in district A",
+             "left": {"sum": {"var": "fund", "index": ["p"]},
+                      "over": [{"index": "p", "set": "project",
+                                "where": [{"attr": "district", "op": "=", "value": "a"}]}]},
+             "relation": "<=", "right": {"const": 2}, "severity": "hard"}],
+        "objective": {"sense": "maximize", "terms": [
+            {"id": "o_benefit", "weight": 1,
+             "expression": {"sum": {"mul": [{"attr": {"of": "p", "name": "benefit"}}, {"var": "fund", "index": ["p"]}]},
+                            "over": [{"index": "p", "set": "project"}]}}]},
+    },
+}
+
+
+def model_prompt(ctx: "Context") -> str:
+    where = (f"The user has domain id {ctx.domain_id} selected; build there (domain_id) unless they want "
+             f"a new domain." if ctx.domain_id is not None else
+             "No domain is selected: make a new one (domain_name) unless the user names an existing one.")
+    workbench = ("""
+- WORKBENCH: run_python runs Python in this conversation's folder, where every attached sheet is a CSV. Use it to
+  read and check data, compute totals and bounds, and GENERATE the data a model needs (candidate positions at true
+  size, pairs that touch or cover, distances...) as CSV files: they come back as attachments that the plan loads
+  with *_from_file. After solving, use it to check the answer against the raw data, rule by rule.""" if ctx.can_run_python else "")
+    return f"""You are the modelling assistant of the Problem Solver platform, talking with "{ctx.username}".
+They describe a real decision problem in their own words. You understand it fully, turn it into a platform
+model, get their approval, build it, and explain what you built. {where} Reply in the user's language.
+
+PHASE 1 - UNDERSTAND. This is most of the conversation. Do not just accept what you are told.
+- LOOK FIRST: call describe_workspace before your first question, and read the attached files. Never ask for what
+  the workspace or the files already say; reuse existing kinds of record, fields and data values by their names.
+- Each turn: an "Agreed so far" list (short bullets), then the open questions, numbered, at most 4, most
+  important first, in plain words, with examples of possible answers. Never ask again about an agreed item.
+  Ask only what would change the model: never about names (choose them), never about coordinate systems unless a
+  map file is attached, never what the user already said. When the user says "nothing else", "go ahead" or "you
+  decide", stop asking: choose sensible defaults, list them as assumptions, and propose.
+- SIZE IT: as soon as the numbers are known, compare totals (demand vs capacity, cost vs budget, area vs
+  footprint) and say early if the target looks out of reach. NEVER add up, count or compare numbers in your head:
+  take totals from ATTACHED FILES (exact) and ask query_file (e.g. how many lanes are over 450 km, which
+  warehouses can reach each customer, demand per region).
+- Before any plan you must know: (a) the DECISIONS (assign who to what, how many to make, which to open...);
+  (b) the GOAL: what to minimise or maximise; with several goals, their priority or relative weight;
+  (c) every RULE, and whether it may never be broken (hard) or may bend at a cost (soft: how bad, relative to the goal);
+  (d) the THINGS involved and their DATA: names or counts, quantities with units (capacity, cost, demand,
+  hours, distance), time periods; and which data the user has.
+- Vague words ("cheap", "fair", "balanced", "as many as possible", "usually", "close") need a number or an exact
+  rule: ask, or propose a concrete reading and ask them to confirm it.
+- Point out contradictions, missing data and numbers that look wrong. If they answer "ok" or "you decide" to
+  something unsettled, choose a specific default, say it is an assumption, and list it in the plan.
+- DATA: when data is missing, ask for it. Small data the user can type in the chat. Otherwise ask them to attach
+  a CSV or Excel file (the paperclip button) and say exactly which columns you need, e.g. "a file with columns
+  shop, demand_trays". Read attached files with read_file and query_file; check them (missing values, units, duplicates, numbers
+  that look wrong) and ask about anything odd before you plan.
+- MAP FILES (a CAD drawing, GeoJSON, KML, GPX, Shapefile, GeoPackage, CSV of shapes): each layer is a sheet,
+  one row per feature. Ask what each layer is (e.g. "layer PLOTS are the candidate sites"). A drawing with no
+  coordinate system comes in LOCAL METRES: never ask the user for a coordinate system and never use EPSG:4326 for
+  it (degrees are not metres); check its size is plausible (a site plan is metres to a few km). Only a file that
+  must line up with other map data needs place_file, with a projected system in metres. If a file is NOT PLACED
+  YET, ask which coordinate system it is in, offering the likely ones listed, call place_file, and check with the
+  user that it lands in the right place. Never push technical choices (grid size, coordinate system) on the user:
+  choose them from the data (a grid step that divides every given length) and say what you chose. Map data ALREADY IN the domain: call_api POST
+  /api/v1/gis/domains/<id>/records/propose {{}} shows which kind of record each layer matches and its key (it writes
+  nothing); apply the reviewed mappings with POST /api/v1/gis/domains/<id>/records {{"mappings": [...]}}, say what
+  you applied, then use those kinds. Attached files' features
+  become records with entities_from_file: key "feature" (or an id
+  property), attrs such as {{"location": "geometry", "area_m2": "area_m2", "lon": "lon", "lat": "lat"}}, with
+  location declared data_type geometry and the others number.
+- You may read existing platform data with call_api GET when the user refers to it.{workbench}
+
+THE PLATFORM'S ORDER -- never skip a step; the plan is refused when one is missing:
+ 1. MAP DATA: an attached drawing or map file is imported into the domain as map data (local metres for a drawing).
+ 2. RECORDS: every kind of record the model uses has its records (from the map layers, a file, or generated).
+ 3. RELATIONSHIPS: every link the model walks exists (which candidate covers which cell, which cell is next to which).
+ 4. DATA VALUES: every number comes from the user, the data or a calculation -- never a placeholder.
+ 5. MODEL: only then the rules and goals; then solve.
+DATA FIRST (before any model): every kind of record the model uses must get its records from a named source, or
+the plan is refused. Sources: (a) an attached file or map layer, loaded in the plan with entities_from_file (a map
+layer's rows are its features: key "feature", attrs from its columns -- x_m, y_m, width_m, height_m, area_m2,
+geometry...); (b) map data imported into a domain: POST /api/domain/ {{"name"}} for a new one, then POST
+/api/v1/gis/datasets {{"upload_id", "domain_id", "name", "placement": the file's placement}}, then POST
+/api/v1/gis/datasets/<id>/records/propose and POST .../records with the reviewed plan; build the problem there
+with domain_id; (c) numbers the files lack, computed by the platform on records already in a domain: POST
+/api/v1/domains/<id>/distances, /within, /derive-value, /api/v1/entity-types/<id>/derive (describe_endpoint
+first for their bodies); (d) when run_python is on, generated data: candidate items at real size, the cells or
+resources each occupies, neighbours, door cells -- written as CSV files that come back as attachments to load.
+Never invent a number a file or a calculation can give (no placeholder factors); never plan a kind with no source.
+A layout problem (where to place items on a drawing: beds, desks, stalls, shelves) is modelled over generated
+CANDIDATE positions, not a count per area: call make_layout (areas, blocked layers, item sizes and turns, the aisle)
+and use the plan it returns. Never write that geometry yourself with run_python. Only when make_layout cannot express
+the problem, generate the files yourself as follows. With run_python write: candidates.csv (cand, x_m, y_m, rot, ...), cells.csv (cell, x_m, y_m) on a grid
+whose step divides the item sizes (0.25 m for 1.5 x 0.5), and occupies.csv (cand, cell: one row per cell a candidate
+covers; keep it under about 200,000 rows). The plan loads them (entities_from_file; relationships_from_file for
+occupies; declare the relationship type occupies from cand to cell, and list it in the IR's "relationships"). NO OVERLAP,
+one rule over cells, never pairs of candidates: forall k in cell: Σ over c in cand {{"via":{{"rel":"occupies",
+"to":"k"}}}} of pick[c] <= 1. ACCESS: keep corridor cells free the same way (a second link, e.g. blocks, from
+candidates to the corridor cells they would close) or generate only candidates that leave the paths open.
+Keep every agreed rule: a rule you cannot model goes under "Not modelled" in the plan, never silently dropped.
+NEVER change an agreed choice on your own (a grid step, a size, a limit, a distance, the data to use): if it makes
+the model too big or slow, stop and tell the user the numbers (e.g. "0.1 m gives 347,451 candidates and about 7
+million cell links") with the options and what each costs, and wait for their answer. Never invent a threshold the
+user did not give (e.g. "within 50 m of a door") -- compute it from the data or ask.
+
+PHASE 2 - PROPOSE: when nothing important is open, run check_spec on your spec and fix every error it reports
+(nothing is built and the user sees nothing), then call propose_plan with the same spec.
+- summary (markdown the user reads), in the Model Editor's own terms, these headings in this order:
+  **Problem** one paragraph in the user's words.
+  **Sets** each kind of record: what it is, how many, its fields with units, where the data comes from
+  (typed in the chat, or file X / sheet Y). A short table of members when there are few.
+  **Parameters** name[index]: meaning, unit, value or source.
+  **Variables** name[index]: binary / integer / continuous, and what it means ("assign[v,s] = 1 if van v serves shop s").
+  **Rules** one per line: id, in words, then the formula, e.g. "For every shop s: sum over vans v of assign[v,s] = 1
+  (hard)"; soft rules with their weight.
+  **Goals** minimise/maximise and the formula; several goals with their weights or order.
+  **Assumptions** every default you chose.
+- spec: exactly what will be built (format below). The server checks it before the user sees it; if it returns
+  errors, fix the spec and call propose_plan again. The user then approves (it is built) or replies with changes
+  (adjust, then propose again).
+
+PHASE 3 - SOLVE AND REPORT: when the result starts with BUILT, solve it straight away (the result says how), wait
+for the run to finish (a run with status "error" FAILED: read its error, tell the user, never queue it again unchanged),
+call read_result with its id and report from what it returns (never recompute numbers yourself), then explain in plain language what was built (sets, parameters, variables, rules, goals,
+assumptions) and the results: status, the goal's value, the decisions as a table in the user's names, and for an
+infeasible run which rules conflict and what to relax. Nothing else can be written in this mode.
+
+SPEC
+{{"domain_name": "..." or "domain_id": n, "problem_name": "...", "note": "one line", "seed": {{...}}, "ir": {{...}}}}
+seed keys (all optional lists):
+ entity_types [{{"name","role","attributes":[{{"name","data_type","required","unit","enum_values","default_value"}}]}}]
+ relationship_types [{{"name","from":type,"to":type,"cardinality":"many_to_one|one_to_many|many_to_many|one_to_one"}}]
+ parameters [{{"name","index":[type names],"default_value":number,"unit"}}]
+ entities [{{"type","key","label","attrs":{{attribute: value}}}}]
+ relationships [{{"type","from":[type,key],"to":[type,key]}}]
+ parameter_values [{{"parameter","entities":[[type,key], ...one per index],"value":number}}]
+ entities_from_file [{{"file","sheet","type","key":column,"label":column,"attrs":{{attribute: column}}}}]
+ parameter_values_from_file [{{"file","sheet","parameter","entities":[[type, key column], ...],"value":column or a
+   number for every row (a file that only lists pairs -- days off asked, bans, skills -- is a 0/1 parameter: "value": 1)}}]
+ relationships_from_file [{{"file","sheet","type","from":[type, column],"to":[type, column]}}] (one link per row)
+Rows of an attached file are loaded by the *_from_file entries: one record or cell per row. Never copy a file's
+rows into entities or parameter_values yourself.
+Names are lower_snake_case. role: agent|resource|time|location|task|org|other. data_type: integer|number|text|
+boolean|enum (with enum_values)|date|time. A number that belongs to one record is an attribute. A number per
+combination of records (demand per day and shift, distance per pair) is a parameter indexed by those types,
+with its cells in parameter_values. One number for the whole problem (a budget) is a parameter with index [].
+A cell left out is the parameter's default_value.
+
+PROBLEM IR (version 2)
+{{"version":2,"sets":[entity types the model uses],"relationships":[relationship types walked; omit if none],
+ "parameters":{{name:{{"index":[types, as declared]}}}},
+ "variables":{{name:{{"index":[types],"domain":"binary|integer|continuous","lower":n,"upper":n}}}},
+ "constraints":[{{"id":"c_...","note":"words","forall":[bindings] (omit when none),"left":term,
+   "relation":"<=|=|>=","right":term,"severity":"hard"}} or "severity":"soft" with "weight": positive integer],
+ "objective":{{"sense":"minimize|maximize","mode":"weighted|lex","terms":[{{"id":"o_...","weight":integer,"expression":term}}]}}
+   (omit for feasibility; "lex" solves the terms in order, first the most important -- each term is one WHOLE
+   goal in its own rank, so a cost made of parts (day and night wages) is ONE term adding them; a negative weight in a
+   maximize means "less is better")}}
+binding: {{"index":"p","set":"project","where":[{{"attr":"district","op":"=","value":"a"}}]}} (op: = != < <= > >= in notIn)
+ walking a relationship: {{"index":"i","set":"item","via":{{"rel":"item_group","to":"g"}}}} = the items linked TO g;
+ {{"via":{{"rel":"item_group","from":"i"}}}} = what i links to (declare the relationship in "relationships")
+term: {{"const":3}} | {{"par":"demand","index":["d","s"]}} | {{"var":"fund","index":["p"]}} | {{"attr":{{"of":"p","name":"cost"}}}}
+ | {{"sum":term,"over":[bindings]}} | {{"add":[terms]}} | {{"mul":[term,term]}} (exactly two factors, at most
+ quadratic; three factors nest: a*b*x = {{"mul":[{{"mul":[a,b]}},x]}}, e.g. cost per ton x demand x assign)
+Every index must be bound by forall or an enclosing over; par/var indices follow their declared order; only
+integer/number attributes can be used as numbers; a whole-number decision is "integer" with bounds; ids match
+^[a-z][a-z0-9_]*$.
+PATTERNS (building blocks, not templates): a value per PAIR limits which pairs may be used (distance per
+warehouse and customer <= 450, skill level per worker and task >= 3): load that column as its own parameter
+indexed by the pair, e.g. lane_km[warehouse,customer] with parameter_values_from_file, then for every pair
+"lane_km[w,c] * assign[w,c] <= 450" (for >=: "level[w,t] >= 3 * assign[w,t]") -- linear, because assign is
+binary; one file column per parameter, several *_from_file entries may read the same file; a pair the file
+does not list gets the parameter's default_value (set it to forbid: e.g. 999999 km); a number that depends on a
+record's kind (night shifts pay 1.3 times): a parameter indexed by that set, pay_factor[shift] (night 1.3, default
+1), multiplied in (nested mul); one particular record in a rule: a binding with where [{{"attr":"id","op":"=",
+"value":"night"}}]; CONSECUTIVE periods (no morning right after a night): a relationship next_day (day -> day,
+one link per pair, typed in "relationships"), then forall n, d, and d2 bound {{"via":{{"rel":"next_day","from":"d"}}}}:
+x[n,d,night] + x[n,d2,morning] <= 1; requests to honour if possible: a 0/1 parameter from the list, and a goal
+term (or soft rule) counting the cells that break it: sum of asked[n,d] * x[n,d,s]; one per group (sum of pick over the group's items via a relationship
+= 1); capacity or budget (sum of amount x size <= limit); cover every demand (sum of open over the sites that
+cover it >= 1); one user per shared resource (sum over things occupying it <= 1); link use to opening
+(x <= M * y, M as small as valid); ranked goals ("lex" in the user's order, soft rules for targets that may be out
+of reach, then report how far short).
+
+TOOL CALLS: only through the tool interface, never as text in your reply; valid JSON with unique keys (each list,
+e.g. entity_types or constraints, once, with all its items); keep each call small (load rows from files, never
+write them out). Keep replies short: never think aloud or draft the spec in a reply; put it straight into
+check_spec. When unsure how to write a rule, pick the closest PATTERN, check_spec it, and fix what it reports. If a tool returns an error, change the call; never
+repeat it unchanged. Never say something was built, imported, solved or checked unless a tool result in this
+turn shows it.
+
+EXAMPLE (a complete, valid spec): "fund the most valuable city projects within 500k; at most two in district A"
+{json.dumps(EXAMPLE_SPEC, separators=(",", ":"))}
+
+Today is {time.strftime('%Y-%m-%d')}."""
+
+
+def system_prompt(index: ApiIndex, ctx: Context, native: bool) -> str:
+    attached = agent_files.outline(ctx.files)
+    tools = list(MODEL_TOOLS if ctx.mode == "model" else TOOLS) + ([sandbox.SCHEMA] if ctx.can_run_python else [])
+    if ctx.mode == "model":
+        return model_prompt(ctx) + ("\n\n" + attached if attached else "") + \
+            ("" if native else text_protocol(tools))
+    where = []
+    if ctx.page:
+        where.append(f"they are on the page {ctx.page}")
+    if ctx.domain_id is not None:
+        where.append(f"the selected domain id is {ctx.domain_id}")
+    if ctx.problem_id is not None:
+        where.append(f"the open problem id is {ctx.problem_id}")
+    p = f"""You are the Assistant built into the Problem Solver platform (optimization as a service:
+domains, entity types and attributes, entities, relationships, parameters, problems, model versions
+written in the Problem IR, scenarios, runs and their solutions, maps/GIS, imports, suites,
+users and access, settings, operations). You act for the signed-in user "{ctx.username}" through the
+platform's own API, with exactly their permissions. {"; ".join(where).capitalize() + "." if where else ""}
+"this", "here" and "current" refer to that context.
+
+Endpoint groups (tag (count)): {index.tag_overview()}
+
+How to work:
+1. search_endpoints -> describe_endpoint -> call_api. Never guess a request body; describe it first.
+2. Look things up before changing them; use ids you got from the API, never invented ones.
+   describe_workspace gives a domain's whole contents (kinds of record, fields, relationships, data values,
+   map data, problems) in one call: start there.
+3. Before writing or changing a model (IR), read_doc('contracts/problem-ir.md').
+4. Solving is asynchronous: POST /api/v1/scenarios/{{id}}/runs queues a run; poll GET /api/v1/runs/{{id}}
+   with wait between polls until it settles, then read_result(run_id) and report from it.
+   The body may name a solver ({{"solver": "networkx"}}); leave it out and the platform chooses. A network
+   model (transport, assignment, shortest path, max flow: each rule flow in less flow out, numbers whole) is
+   solved by NetworkX's network simplex anyway; ask for "networkx" by name only when the user wants it.
+   run_python has networkx too (graphs, paths, connectivity, e.g. which cells reach a door).
+   The answer downloads as files: /api/v1/runs/{{id}}/export?format=xlsx|csv|geojson|dxf|pdf. dxf is a CAD drawing
+   on the domain's drawing, in its own coordinates (chosen items on <decision>-CHOSEN layers): offer it for a
+   layout or any answer on a drawing.
+5. On a 4xx, read the detail, fix the request and retry; a 422 names the bad field. A 403 means the
+   user lacks the capability: say which, don't work around it.
+6. Delete or remove only what the user clearly asked to.
+7. A MAP FILE attached (see ATTACHED FILES) goes on the map with POST /api/v1/gis/datasets
+   {{"upload_id", "domain_id", "name", "placement": {{"kind": "epsg", "code": n}}, "layers": [...] (optional)}};
+   records from its layers with POST /api/v1/gis/datasets/{{id}}/records/propose, then .../records with that plan.
+   To map ALL of a domain's map data onto its kinds of record at once (matched by shared record keys, name and
+   fields; features that name a record update it, the rest are added): POST /api/v1/gis/domains/{{id}}/records/propose
+   {{}} (writes nothing; "choices" [{{"dataset_id","layer","type","key"}}] change a layer), show the user the
+   mappings, then POST /api/v1/gis/domains/{{id}}/records {{"mappings": [...]}} with the reviewed ones.
+   If it is NOT PLACED YET, ask the user for the coordinate system first (offer the likely ones) and use place_file.
+8. Finish with a short, plain answer: what you did, key ids and numbers, a markdown table for lists.
+   Mention where in the app to look (e.g. "Runs page"). Don't show raw JSON unless asked.
+Tool calls go through the tool interface only, never as text in your reply, as valid JSON with unique keys.
+Never say something was created, changed or solved unless a tool result in this turn shows it.
+Today is {time.strftime('%Y-%m-%d')}."""
+    return p + ("\n\n" + attached if attached else "") + ("" if native else text_protocol(tools))
+
+
+class Agent:
+    def __init__(self, settings: Settings, index: ApiIndex, call: CallFn, ctx: Context):
+        # The context the server really has (it may have been raised to 64k), not only the configured one.
+        self.s = replace(settings, context=server_context(settings)) if settings.enabled else settings
+        # Everything sized by the context the server has (262k on the Qwen3.5 server): a tool result may be
+        # an eighth of it, and a reply a quarter, never more than configured -- on 32k the old sizes hold.
+        self.s = replace(self.s, result_chars=max(self.s.result_chars, self.s.context // 2))
+        self.index = index
+        self.call = call
+        self.ctx = ctx
+        self.modelling = ctx.mode == "model"
+        self.tools = list(MODEL_TOOLS if self.modelling else TOOLS)
+        if ctx.can_run_python:
+            self.tools.append(sandbox.SCHEMA)
+        self.tool_names = {t["function"]["name"] for t in self.tools}
+        self.did_work = False  # a tool changed or made something this turn (what a reply may claim)
+        self.reply_tokens = min(settings.plan_max_tokens if self.modelling else settings.max_tokens,
+                                max(2048, self.s.context // 4))
+        self.built: dict | None = None
+        self.messages: list[dict] = []
+        self.events: list[dict] = []  # raised by a tool, sent after its result (a re-placed file)
+        self.joined: list[str] = []
+        self.refusals: dict[str, int] = {}
+        self._typed_cells = 0  # parameter values the last spec typed itself (not loaded from files)  # each spec refusal seen this turn, by its text
+        self.solves: dict[str, int] = {}  # solves queued this turn, per scenario  # keys the model gave twice and the platform joined (toolcall.strict_loads)
+
+    def _needs_ok(self, call: dict) -> bool:
+        if call["function"]["name"] == "propose_plan":
+            return True  # its OK is the person's approval of the plan
+        if call["function"]["name"] != "call_api":
+            return False
+        method = str(_args(call).get("method", "GET")).upper()
+        if self.modelling and method != "POST":
+            return False  # refused outright in this mode; nothing to ask about
+        return (self.s.confirm == "write" and method != "GET") or (self.s.confirm == "delete" and method == "DELETE")
+
+    def run_tool(self, name: str, args: dict) -> str:
+        lim = self.s.result_chars
+        try:
+            if name == "search_endpoints":
+                return clip(self.index.search(args.get("query", ""), args.get("method")), lim)
+            if name == "describe_endpoint":
+                return clip(self.index.describe(str(args.get("method", "GET")), str(args.get("path", ""))), lim)
+            if name == "describe_schema":
+                return clip(self.index.schema(str(args.get("name", ""))), lim)
+            if name == "read_doc":
+                return read_doc(str(args.get("path", "")), int(args.get("offset") or 0), lim)
+            if name == "wait":
+                time.sleep(max(1, min(30, int(args.get("seconds") or 3))))
+                return "ok"
+            if name == "place_file":
+                return self._place(str(args.get("file", "")), args.get("epsg"))
+            if name == "describe_workspace":
+                domain = args.get("domain_id") or self.ctx.domain_id
+                if not domain:
+                    return clip({"note": "No domain is selected; these are the domains you can use. Ask which one, "
+                                         "or make a new one in the plan (domain_name).",
+                                 "domains": self.call("GET", "/api/domain/", {"limit": 100}).get("body")}, lim)
+                res = self.call("GET", "/api/v1/agent/workspace", {"domain_id": int(domain)})
+                return clip(res.get("body") if res.get("ok") else res, lim)
+            if name == "read_output":
+                return self._read_output(args)
+            if name == "make_layout":
+                return self._make_layout(args)
+            if name == "read_result":
+                res = self.call("GET", f"/api/v1/agent/result/{int(args.get('run_id') or 0)}")
+                body = res.get("body") if isinstance(res, dict) else None
+                return clip(body.get("text") if res.get("ok") and isinstance(body, dict) else res, lim)
+            if name == "check_spec":
+                if name not in self.tool_names:
+                    return f"{name} is not available in this mode"
+                return self._check_spec(args.get("spec"))
+            if name == "run_python":
+                return self._run_python(str(args.get("code") or ""), args.get("timeout_s"))
+            if name == "query_file":
+                return agent_files.query(self.ctx.files, str(args.get("file", "")), args.get("sheet"),
+                                         args.get("where") or [], args.get("group_by") or [],
+                                         args.get("aggregate") or None, args.get("columns") or None,
+                                         int(args.get("limit") or 50))
+            if name == "read_file":
+                return agent_files.read(self.ctx.files, str(args.get("file", "")), args.get("sheet"),
+                                        int(args.get("offset") or 0), int(args.get("limit") or 50))
+            if name in ("call_api", "propose_plan") and name not in {t["function"]["name"] for t in self.tools}:
+                return f"{name} is not available in this mode"
+            if name == "call_api":
+                method = str(args.get("method", "GET")).upper()
+                path = "/" + str(args.get("path", "")).lstrip("/")
+                if method not in ("GET", "POST", "PUT", "PATCH", "DELETE"):
+                    return f"unsupported method {method}"
+                if any(b.match(path.split("?")[0]) for b in BLOCKED_PATHS):
+                    return "That endpoint is not available to the assistant."
+                if self.modelling and method != "GET" and not (
+                        (method == "POST" and READ_ONLY_POST.match(path.split("?")[0])) or
+                        (method == "POST" and DATA_POST.match(path.split("?")[0])) or
+                        (self.built and method == "POST" and SOLVE_PATH.match(path.split("?")[0]))):
+                    return ("Refused: in problem-description mode nothing is written except data preparation (a new "
+                            "domain, map data imported and turned into records, the platform's calculations), the "
+                            "approved plan (propose_plan), and, once it is built, solving its scenario.")
+                bare = path.split("?")[0]
+                if method == "POST" and SOLVE_PATH.match(bare):
+                    # The field test (October 2026): every run failed and the model queued the same scenario
+                    # twelve times, never reading why, until it ran out of steps.
+                    self.solves[bare] = self.solves.get(bare, 0) + 1
+                    if self.solves[bare] > MAX_SOLVES:
+                        return (f"Refused: this scenario was already queued {MAX_SOLVES} times in this turn. Read the "
+                                "last run's error (GET /api/v1/runs/<id>) and tell the user what it says; queue it "
+                                "again only after something has changed.")
+                res = self.call(method, path, args.get("query"), args.get("body"), args.get("form"), args.get("headers"))
+                body = res.get("body") if isinstance(res, dict) else None
+                if method == "GET" and RUN_PATH.match(bare) and isinstance(body, dict) and body.get("status") == "error":
+                    res = {**res, "platform_note": "This run FAILED; its error says why. Do not queue it again "
+                           "unchanged: tell the user the error in plain words, and what could fix it."}
+                return clip(res, lim)
+            if name == "propose_plan":
+                return self._check_plan(args)
+            return f"unknown tool {name}"
+        except Exception as e:  # noqa: BLE001 -- told to the model, which can recover
+            return f"tool error: {type(e).__name__}: {e}"
+
+    def _place(self, name: str, epsg: Any) -> str:
+        found = next((f for f in self.ctx.files if f.get("name") == name), None)
+        if found is None or not (found.get("spatial") or {}).get("upload_id"):
+            return f'No attached map file named "{name}".'
+        try:
+            code = int(epsg)
+        except (TypeError, ValueError):
+            return "epsg must be a number, e.g. 22992"
+        spatial = found["spatial"]
+        extent = spatial.get("extent") or []
+        degree_like = len(extent) == 4 and all(abs(v) <= 180 for v in extent[0::2]) and all(abs(v) <= 90 for v in extent[1::2])
+        try:
+            from app.gis.crs import crs_info
+
+            geographic = crs_info(code)["geographic"]
+        except Exception:  # noqa: BLE001 -- an unknown code is refused by the platform below
+            geographic = False
+        if geographic and spatial.get("format") not in agent_files.GEOGRAPHIC_FORMATS and not degree_like:
+            # The camp-bed test: EPSG:4326 on a drawing in metres made an 88 m camp "86 km" wide.
+            return (f"Refused: EPSG:{code} is longitude/latitude in degrees, and this drawing's coordinates are not "
+                    "degrees (they run to " + ", ".join(f"{v:,.0f}" for v in extent) + "). It is already in LOCAL "
+                    "METRES (x_m, y_m, area_m2); keep that. To put it on the real map, it needs a projected system in "
+                    "metres (a UTM zone or a national grid), or a local placement at a known point.")
+        res = self.call("POST", "/api/v1/agent/files/place", None,
+                        {"upload_id": found["spatial"]["upload_id"], "placement": {"kind": "epsg", "code": code}})
+        if not res.get("ok"):
+            return "Could not place it: " + clip(res.get("body"), 1500)
+        placed = res["body"]
+        self.ctx.files = [placed if f is found else f for f in self.ctx.files]
+        self.events.append({"type": "file", "file": placed})
+        lons = [r[2] for sh in placed["sheets"] for r in sh["rows"] if r[2] is not None]
+        lats = [r[3] for sh in placed["sheets"] for r in sh["rows"] if r[3] is not None]
+        box = [min(lons), min(lats), max(lons), max(lats)] if lons else None
+        return (f'Placed "{name}" in EPSG:{code} ({(placed["spatial"].get("placement") or {}).get("name")}). '
+                f"It lands within lon/lat {box}: tell the user where that is and ask them to confirm it is the right "
+                f"place. Its sheets now have lon, lat, area_m2, length_m and geometry columns.")
+
+    def _make_layout(self, args: dict) -> str:
+        from app.agent import layout
+
+        folder = sandbox.workdir(self.ctx.user_id or "anyone", self.ctx.conversation_id)
+        try:
+            out = layout.make(self.ctx.files, folder, file=args.get("file"),
+                              area_layers=list(args.get("area_layers") or []),
+                              blocked_layers=list(args.get("blocked_layers") or []),
+                              label_layer=args.get("label_layer"), items=list(args.get("items") or []),
+                              aisle=float(args.get("aisle") or 0), aisle_side=str(args.get("aisle_side") or "any"),
+                              step=float(args["step"]) if args.get("step") else None)
+        except (layout.LayoutRefused, TypeError, ValueError) as e:
+            return f"Could not lay it out: {e}"
+        for name in out["files"]:
+            with open(os.path.join(folder, name), "rb") as f:
+                parsed = agent_files.parse(name, f.read(), max_rows=agent_files.MAX_GENERATED_ROWS)
+            self.ctx.files = [x for x in self.ctx.files if x.get("name") != name] + [parsed]
+            self.events.append({"type": "file", "file": parsed})
+        spec = out.pop("spec")
+        return ("LAYOUT made (files attached: " + ", ".join(out["files"]) + "):\n" + json.dumps(out, default=str)
+                + "\n\nTHE PLAN, ready: give it to check_spec as it is, adding only domain_id (the domain the drawing "
+                "is imported into; import it first if it is not) or domain_name, and problem_name. Tell the user the "
+                "numbers (candidates, grid step, the aisle as modelled, the upper bound) and what is not modelled, in "
+                "words, before proposing.\n" + json.dumps(spec))
+
+    def _check_spec(self, spec: Any) -> str:
+        try:
+            expanded = self._spec({"spec": spec})
+        except agent_files.FileRefused as e:
+            return f"Not valid yet: {e}"
+        faults = self._order_faults(expanded)
+        if faults:
+            return "Not valid yet; fix these: " + " ".join(faults)
+        res = self.call("POST", "/api/v1/problems/from-spec", None, {**_sendable(expanded), "dry_run": True})
+        if res.get("ok"):
+            return ("SPEC_OK: it would build " + json.dumps((res.get("body") or {}).get("would_create"), default=str)
+                    + "\n\n" + agent_readback.readback(expanded) + "\n\n" + READBACK_CHECK)
+        return "Not valid yet; fix these: " + clip(res.get("body"), 4000)
+
+    def _run_python(self, code: str, timeout: Any) -> str:
+        if not self.ctx.can_run_python:
+            return "run_python is not available here (it is off on this server, or you may not publish models)."
+        if not code.strip():
+            return "Send the Python code to run."
+        folder = sandbox.workdir(self.ctx.user_id, self.ctx.conversation_id)
+        sandbox.write_attachments(folder, self.ctx.files)
+        result = sandbox.run(code, folder, int(timeout or 120))
+        if result.get("error"):
+            return result["error"]
+        attached, skipped = [], []
+        for name, data in sandbox.read_outputs(folder, result.get("files_written") or []):
+            try:
+                parsed = agent_files.parse(name, data)
+            except agent_files.FileRefused as e:
+                skipped.append(f"{name}: {e}")
+                continue
+            self.ctx.files = [f for f in self.ctx.files if f.get("name") != name] + [parsed]
+            self.events.append({"type": "file", "file": parsed})
+            attached.append(name)
+        result["attached"] = attached
+        if skipped:
+            result["not_attached"] = skipped
+        return json.dumps(result, ensure_ascii=False)
+
+    # -- the plan: checked before the person sees it, built exactly as approved --
+    def _spec(self, args: dict, expand: bool = True) -> dict:
+        """The spec as the model wrote it; expanded, its file references become rows."""
+        spec = args.get("spec") if isinstance(args.get("spec"), dict) else {}
+        spec = {k: v for k, v in spec.items() if k != "dry_run"}
+        if "domain_id" not in spec and not spec.get("domain_name") and self.ctx.domain_id is not None:
+            spec["domain_id"] = self.ctx.domain_id
+        if expand and isinstance(spec.get("seed"), dict):
+            self._typed_cells = len(spec["seed"].get("parameter_values") or [])
+            spec["seed"] = agent_files.expand(spec["seed"], self._load_files(spec["seed"]))  # FileRefused: told
+        if isinstance(spec.get("ir"), dict):
+            spec["ir"] = json.loads(json.dumps(spec["ir"]))  # never the model's own copy
+            for term in ((spec["ir"].get("objective") or {}).get("terms") or []):
+                # A goal term has no "note" (rules do): a refusal for it cost Qwen a whole 2-minute reply.
+                if isinstance(term, dict):
+                    term.pop("note", None)
+            bound = bind_literal_keys(spec["ir"])
+            if bound:
+                self.joined.append("records named by their key where an index belongs were bound to them: "
+                                   + "; ".join(bound))
+        return spec
+
+    def _load_files(self, seed: dict) -> list[dict]:
+        """The files a plan loads from: the attached ones, and -- read whole, on the server -- files run_python
+        wrote in this conversation's folder, which as attachments are cut to 5,000 rows a sheet and travel
+        through the chat (the camp-bed retest generated more candidates than that)."""
+        files = list(self.ctx.files)
+        if not self.ctx.can_run_python:
+            return files
+        folder = sandbox.workdir(self.ctx.user_id, self.ctx.conversation_id)
+        wanted = {str(e.get("file")) for key in ("entities_from_file", "parameter_values_from_file",
+                                                "relationships_from_file") for e in seed.get(key) or []
+                  if isinstance(e, dict) and e.get("file")}
+        for name in wanted:
+            path = os.path.join(folder, os.path.basename(name))
+            attached = next((f for f in files if f.get("name") == name), None)
+            whole = attached is not None and not any(s.get("truncated") for s in attached.get("sheets") or [])
+            if whole or not os.path.isfile(path) or attached is not None and attached.get("spatial"):
+                continue
+            with open(path, "rb") as fh:
+                parsed = agent_files.parse(name, fh.read(), max_rows=agent_files.MAX_GENERATED_ROWS,
+                                           max_bytes=64 * 1024 * 1024)
+            files = [f for f in files if f.get("name") != name] + [parsed]
+        return files
+
+    def _workspace(self, spec: dict) -> dict | None:
+        """What the domain the spec builds in already holds (None for a new domain)."""
+        domain = spec.get("domain_id")
+        if not domain:
+            return None
+        res = self.call("GET", "/api/v1/agent/workspace", {"domain_id": int(domain)})
+        return res.get("body") if isinstance(res, dict) and res.get("ok") else None
+
+    def _existing_records(self, spec: dict, workspace: dict | None = None) -> dict[str, int]:
+        """Records per kind already in the domain the spec builds in (none for a new domain)."""
+        body = workspace if workspace is not None else self._workspace(spec)
+        return {k.get("name"): int(k.get("records") or 0) for k in (body or {}).get("kinds_of_record") or []
+                if isinstance(k, dict)}
+
+    def _known_numbers(self) -> set[float]:
+        """Numbers the person gave, the attached files hold, and the tools computed in this conversation."""
+        known = _numbers_from(self.messages)
+        for m in self.messages:
+            if agent_compact.is_summary(m):
+                # Carried by code when the conversation was summarized: the same sources, from before.
+                known |= agent_compact.recorded_numbers(m)
+        for f in self.ctx.files:
+            for sheet in f.get("sheets") or []:
+                for row in sheet.get("rows") or []:
+                    for v in row:
+                        if isinstance(v, (int, float)) and not isinstance(v, bool):
+                            known.add(round(float(v), 6))
+        return known
+
+    def _order_faults(self, spec: dict) -> list[str]:
+        """The platform's order (map data, records, relationships, data values) and the data checks."""
+        workspace = self._workspace(spec)
+        return (_platform_order_faults(spec, workspace, self.ctx.files, self._known_numbers(), self._typed_cells)
+                + _sets_without_data(spec, self._existing_records(spec, workspace)) + _empty_parameters(spec))
+
+    def _user_turns(self) -> int:
+        return sum(1 for m in self.messages
+                   if m["role"] == "user" and not str(m.get("content") or "").startswith(PLATFORM))
+
+    def _check_plan(self, args: dict) -> str:
+        """The dry run. "PLAN_OK" lets the plan through to the person; anything else goes back to the model."""
+        if self._user_turns() < MIN_USER_TURNS_BEFORE_PLAN:
+            return ("Refused: you have not discussed the problem with the user yet. Restate what you "
+                    "understood, ask your open questions (decisions, goal, rules hard/soft, data and units), "
+                    "and propose only after they answer.")
+        if not str(args.get("summary") or "").strip():
+            return "Refused: summary is empty; write the plan for the user."
+        try:
+            spec = self._spec(args)
+        except agent_files.FileRefused as e:
+            return f"The spec does not build yet (the user has not seen it): {e}. Fix it and call propose_plan again."
+        faults = self._order_faults(spec)
+        if faults:
+            return ("The spec does not build yet; fix these and call propose_plan again (the user has not seen it): "
+                    + " ".join(faults))
+        res = self.call("POST", "/api/v1/problems/from-spec", None, {**_sendable(spec), "dry_run": True})
+        if res.get("ok"):
+            return "PLAN_OK " + json.dumps(res.get("body"), default=str)
+        return ("The spec does not build yet; fix these and call propose_plan again (the user has not "
+                "seen it): " + clip(res.get("body"), 4000))
+
+    def _build(self, args: dict) -> str:
+        try:
+            spec = self._spec(args)
+        except agent_files.FileRefused as e:
+            return (f"The build was refused (nothing was kept): {e}. The attached file may have been removed; "
+                    "ask the user to attach it again, then propose again.")
+        res = self.call("POST", "/api/v1/problems/from-spec", None, {**_sendable(spec), "dry_run": False})
+        if not res.get("ok"):
+            return ("The build was refused (nothing was kept): " + clip(res.get("body"), 3000) +
+                    " Tell the user, fix the spec and propose again.")
+        self.built = res["body"]
+        b = self.built
+        base = f"/domains/{b.get('domain_id')}/problems/{b.get('problem_id')}"
+        mapped = self._import_drawings(b.get("domain_id"))
+        return ("BUILT " + json.dumps(b, default=str) + (f" {mapped}" if mapped else "") +
+                f" Now, without asking: solve it -- call_api POST /api/v1/scenarios/{b.get('scenario_id')}/runs "
+                f"with body {{}}, then GET /api/v1/runs/<run_id> (wait 3-5 s between polls) until its status is "
+                f"no longer queued or running. Then tell the user (1) what was built, in the editor's terms "
+                f"(sets, parameters, variables, rules, goals), with links [the problem]({base}), "
+                f"[the model]({base}/model); and (2) the results in their words: status, the goal's value, the "
+                f"decisions taken (assignments: the index tuples chosen, by their labels; amounts for whole or "
+                f"continuous decisions) as a table, and, if infeasible, which rules conflict (rule_notes) and "
+                f"what could be relaxed. Link [the run]({base}/runs/<run_id>).")
+
+    def _import_drawings(self, domain_id: Any) -> str:
+        """Every attached drawing the domain does not hold yet goes into its map data, as it was read (the
+        same placement): the model never has to find an upload id."""
+        if not domain_id:
+            return ""
+        drawings = [f for f in self.ctx.files if f.get("spatial") and (f["spatial"] or {}).get("upload_id")]
+        if not drawings:
+            return ""
+        have = self.call("GET", "/api/v1/agent/workspace", {"domain_id": int(domain_id)})
+        held = {str(m.get("file")) for m in ((have.get("body") or {}).get("map_data") or [])} if have.get("ok") else set()
+        notes = []
+        for f in drawings:
+            if f.get("name") in held:
+                continue
+            spatial = f["spatial"]
+            body = {"upload_id": spatial["upload_id"], "domain_id": int(domain_id), "name": str(f.get("name")),
+                    "placement": spatial.get("placement")}
+            res = self.call("POST", "/api/v1/gis/datasets", None, body)
+            notes.append(f'The drawing "{f.get("name")}" is now on the domain\'s map.' if res.get("ok") else
+                         f'The drawing "{f.get("name")}" could not be put on the map ({clip(res.get("body"), 300)}); '
+                         "the model is built anyway. If the upload has expired, the user can attach it again.")
+        return " ".join(notes)
+
+    def _execute(self, calls: list[dict], messages: list[dict], allow: bool | None) -> Iterator[dict]:
+        for c in calls:
+            name, args = c["function"]["name"], _args(c)
+            yield {"type": "tool", "name": name, "args": _shown(name, args)}
+            if name == "propose_plan":
+                if allow:
+                    result = self._build(args)
+                    self.wrote |= self.built is not None
+                    if self.built:
+                        yield {"type": "built", **self.built}
+                else:
+                    result = "The user did not approve this plan. Their reply follows; adjust and propose again."
+            elif self._needs_ok(c) and not allow:
+                result = "The user declined this call. Don't retry it; ask what they want instead."
+            else:
+                result = self.run_tool(name, args)
+            while self.events:
+                yield self.events.pop(0)
+            ok = not (result.startswith(("tool error", "Refused", "Could not", "The build was refused", "Not valid yet",
+                                         "The spec does not build", "run_python is not", "No attached"))
+                      or '"ok": false' in result[:40] or '"exit_code": -' in result[:30]
+                      or (result.startswith('{"exit_code":') and not result.startswith('{"exit_code": 0')))
+            if ok and (name == "place_file" or (name == "propose_plan" and allow and self.built)
+                       or (name == "call_api" and str(args.get("method", "GET")).upper() != "GET"
+                           and '"ok": true' in result[:40])):
+                self.did_work = True
+            yield {"type": "result", "name": name, "ok": ok, "preview": result[:300]}
+            messages.append({"role": "tool", "tool_call_id": c["id"], "name": name,
+                             "content": result if name in WHOLE_RESULTS else self._preview(result)})
+
+    def _outputs(self) -> str:
+        return os.path.join(sandbox.workdir(self.ctx.user_id or "anyone", self.ctx.conversation_id), "_outputs")
+
+    def _preview(self, result: str) -> str:
+        """A long result as its start and end, the whole of it saved for read_output."""
+        if len(result) <= PREVIEW_CHARS:
+            return result
+        try:
+            folder = self._outputs()
+            os.makedirs(folder, exist_ok=True)
+            number = len([n for n in os.listdir(folder) if n.endswith(".txt")]) + 1
+            with open(os.path.join(folder, f"{number}.txt"), "w", encoding="utf-8") as f:
+                f.write(result)
+        except OSError:
+            return clip(result, PREVIEW_CHARS)
+        head, tail = result[:PREVIEW_CHARS - 1500], result[-1200:]
+        return (f"{head}\n...[output {number}: {len(result):,} characters, shortened here; read_output(output="
+                f"{number}, offset=...) or find=\"...\" reads any part]...\n{tail}")
+
+    def _read_output(self, args: dict) -> str:
+        try:
+            number = int(args.get("output") or 0)
+            with open(os.path.join(self._outputs(), f"{number}.txt"), encoding="utf-8") as f:
+                text_ = f.read()
+        except (OSError, ValueError):
+            return "No such output: use the number a shortened result names."
+        start = max(0, int(args.get("offset") or 0))
+        if args.get("find"):
+            at = text_.find(str(args["find"]), start)
+            if at < 0:
+                return f"\"{args['find']}\" is not in output {number} after character {start}."
+            start = at
+        part = text_[start:start + PREVIEW_CHARS]
+        more = len(text_) - start - len(part)
+        return part + (f"\n...[{more:,} characters more: offset={start + len(part)}]" if more > 0 else "\n[end]")
+
+    def _summary_tokens(self) -> int:
+        return max(800, min(3000, self.s.context // 10))
+
+    def _summarize(self, piece: str, so_far: str) -> str:
+        """One summarizing call: the notes so far, with this part of the conversation folded in. No tools and
+        no thinking (the summary is the answer)."""
+        words = self._summary_tokens() // 2
+        system = {"role": "system", "content": agent_compact.SUMMARIZER.format(words=words)}
+        user = {"role": "user", "content": (f"The summary so far:\n{so_far}\n\n" if so_far else "")
+                + f"The conversation{' that followed' if so_far else ''}:\n\n{piece}\n\n"
+                + ("Write the updated summary." if so_far else "Write the summary.")}
+        msg, _ = llm_chat(replace(self.s, thinking="off"), [system, user], False,
+                          None, self._summary_tokens())
+        text = clean(msg.get("content") or "")
+        if not text.strip():
+            raise LlmError(0, "the model returned an empty summary")
+        return text
+
+    def _compact(self, messages: list[dict], force: bool = False) -> dict | None:
+        reply = self.reply_tokens
+        window = min(self.s.context - reply, self.s.working_tokens)
+        keep = int(max(4000, window * 0.35) * CHARS_PER_TOKEN)
+        piece = int(max(4000, (self.s.context - self._summary_tokens() - 3000) * 0.8) * CHARS_PER_TOKEN)
+        return agent_compact.compact(messages, summarize=self._summarize, keep_chars=keep, piece_chars=piece,
+                                     numbers=_numbers_from, force=force)
+
+    def _maybe_compact(self, sys_msg: dict, messages: list[dict]) -> str | None:
+        """Past `compact_at` of the context: summarize the older conversation (in place). The note says so; a
+        summary that fails leaves the history to `fit()`, as before."""
+        used = agent_compact.size([sys_msg] + messages) / CHARS_PER_TOKEN
+        if used <= min(self.s.compact_at * (self.s.context - self.reply_tokens), self.s.working_tokens):
+            return None
+        try:
+            done = self._compact(messages)
+        except (LlmError, ToolModeChanged):
+            return None
+        if done is None:
+            return None
+        return (f"The conversation was getting long ({int(used):,} tokens to re-read at every step), so I "
+                f"summarized the earlier part ({done['summarized']} messages) and kept the recent "
+                f"{done['kept']} word for word.")
+
+    def _compact_attempts(self, messages: list[dict]) -> None:
+        """Only the latest spec attempt stays in the conversation, in full: each earlier check_spec /
+        propose_plan keeps its summary, and its result the first lines of the error. The camp-bed test's
+        history grew by a whole spec and its error on each of 24 retries until the 32k context overflowed."""
+        at = [i for i, m in enumerate(messages) if m["role"] == "assistant" and any(
+            c["function"]["name"] in ("check_spec", "propose_plan") for c in m.get("tool_calls") or [])]
+        old_ids = set()
+        for i in at[:-1]:
+            calls = []
+            for c in messages[i]["tool_calls"]:
+                if c["function"]["name"] in ("check_spec", "propose_plan"):
+                    old_ids.add(c["id"])
+                    args = _args(c)
+                    if args.get("spec") != "(superseded by a later attempt)":
+                        c = {**c, "function": {**c["function"], "arguments": json.dumps(
+                            {"summary": str(args.get("summary", ""))[:300], "spec": "(superseded by a later attempt)"})}}
+                calls.append(c)
+            messages[i]["tool_calls"] = calls
+        for m in messages:
+            if m["role"] == "tool" and m.get("tool_call_id") in old_ids and len(m.get("content") or "") > 400:
+                m["content"] = m["content"][:400] + " ...(an earlier attempt; the latest one is below)"
+
+    def _stuck(self, calls: list[dict], messages: list[dict]) -> str | None:
+        """The same refusal three times: stop, and show the person the error and the part of the plan it is
+        about, instead of looping (the camp-bed test: "The plan needed fixing" 24 times, then a crash)."""
+        for c in calls:
+            if c["function"]["name"] not in ("check_spec", "propose_plan"):
+                continue
+            result = next((m.get("content") or "" for m in reversed(messages)
+                           if m["role"] == "tool" and m.get("tool_call_id") == c["id"]), "")
+            if not result.startswith(("Not valid yet", "The spec does not build")):
+                continue
+            key = re.sub(r"\d+", "#", result)[:400]
+            self.refusals[key] = self.refusals.get(key, 0) + 1
+            if self.refusals[key] < MAX_SAME_ERROR:
+                continue
+            spec = _args(c).get("spec") if isinstance(_args(c).get("spec"), dict) else {}
+            fragment = ""
+            loc = re.search(r'"loc":\s*(\[[^\]]*\])', result)
+            if loc:
+                try:
+                    node: Any = spec
+                    for step in json.loads(loc.group(1)):
+                        if step == "parameter_values" or step == "entities":
+                            break  # expanded from files: not in what the model wrote
+                        node = node[step]
+                    fragment = json.dumps(node, ensure_ascii=False)[:600]
+                except (KeyError, IndexError, TypeError, ValueError):
+                    fragment = ""
+            error = result.split(":", 1)[-1].strip()[:900]
+            return ("I could not get the model past the platform's check: the same problem came back "
+                    f"{MAX_SAME_ERROR} times, so I stopped instead of trying again.\n\n**The check says:** {error}"
+                    + (f"\n\n**The part of the plan it is about:**\n```json\n{fragment}\n```" if fragment else "")
+                    + "\n\nTell me how you want to handle it (or answer the question it raises), and I will continue.")
+        return None
+
+    def _complete(self, sys_msg: dict, messages: list[dict], native: bool | None,
+                  settings: Settings) -> tuple[dict, bool]:
+        """One completion, fitted to the context. If the server still finds it too long (the roster field
+        test: 24,577 + 8,192 > 32,768, and the turn ended on the error), shorten the reply allowance or the
+        history by what it says, and ask again."""
+        reply, spare = self.reply_tokens, 0
+        for attempt in range(4):
+            try:
+                try:
+                    wire = to_wire(fit([sys_msg] + messages, self.s, reply, spare), native is not False)
+                    # The reply gets the room the prompt leaves, never more (the camp-bed test: 25,348 +
+                    # 7,421 > 32,768): min(planned, context - prompt - 512), at least 1,024.
+                    prompt = int(len(json.dumps(wire, ensure_ascii=False, default=str)) / CHARS_PER_TOKEN)
+                    room = max(1024, min(reply, self.s.context - prompt - 512))
+                    return llm_chat(settings, wire, native, self.tools, room)
+                except ToolModeChanged:
+                    sys_msg["content"] = system_prompt(self.index, self.ctx, False)
+                    return llm_chat(settings, to_wire(fit([sys_msg] + messages, self.s, reply, spare), False),
+                                    False, self.tools, reply)
+            except LlmError as e:
+                if e.status != 400 or "context length" not in e.body or attempt == 3:
+                    raise
+                found = re.search(r"contains at least (\d+) input tokens", e.body)
+                over = (int(found.group(1)) + reply - self.s.context) if found else 2000
+                if reply - over - 256 >= 2048:
+                    reply = reply - over - 256  # a shorter reply is enough room
+                else:
+                    spare += max(over, 0) + 2000  # trim the history further
+        raise AssertionError("unreachable")
+
+    def _calls(self, msg: dict, content: str, finish: str | None) -> tuple[list[dict], list[str]]:
+        """The calls a reply makes, native or written as text, and why any could not be run."""
+        errors: list[str] = []
+        calls: list[dict] = []
+        native = msg.get("tool_calls") or []
+        if native:
+            for c in native:
+                fn = c.get("function") or {}
+                name, raw = fn.get("name"), fn.get("arguments")
+                try:
+                    try:
+                        args = toolcall.strict_loads(raw, self.joined) if isinstance(raw, str) and raw.strip() \
+                            else (raw or {})
+                    except json.JSONDecodeError:
+                        # A long spec closed in the wrong order (toolcall.fix_closers): put right, for the two
+                        # tools whose spec the platform checks and the person reads before anything is built.
+                        fixed = toolcall.fix_spec(raw) if name in ("check_spec", "propose_plan") \
+                            and finish != "length" else None
+                        if fixed is None:
+                            raise
+                        args = toolcall.strict_loads(fixed, self.joined)
+                        self.joined.append("your call's JSON had a slip (a rule's \"right\" key left out, or the "
+                                           "closing brackets out of order) and was put right; write it correctly "
+                                           "next time")
+                    if not isinstance(args, dict):
+                        raise ValueError("arguments must be a JSON object")
+                    if name not in self.tool_names:
+                        raise ValueError(f'unknown tool "{name}"; available: {", ".join(sorted(self.tool_names))}')
+                except Exception as e:  # noqa: BLE001 -- told to the model
+                    errors.append(f"{name}: {e}")
+                    continue
+                calls.append({"id": c.get("id") or "call_" + uuid.uuid4().hex[:10], "type": "function",
+                              "function": {"name": name, "arguments": json.dumps(args, ensure_ascii=False)}})
+            return calls, errors
+        found, _prose, errors = toolcall.extract_tool_calls(content, self.tool_names, allow_repair=finish != "length")
+        self.joined.extend(e[5:].strip() for e in errors if e.startswith("note:"))
+        errors = [e for e in errors if not e.startswith("note:")]
+        for f in found:
+            calls.append({"id": "call_" + uuid.uuid4().hex[:10], "type": "function",
+                          "function": {"name": f["name"], "arguments": json.dumps(f["arguments"], ensure_ascii=False)}})
+        return calls, errors
+
+    def run(self, messages: list[dict], allow: bool | None = None) -> Iterator[dict]:
+        """Advance the conversation. Yields events; the last is always `state`."""
+        self.wrote = False
+        try:
+            yield from self._run(messages, allow)
+        except LlmError as e:
+            yield {"type": "error", "text": str(e)}
+        except Exception as e:  # noqa: BLE001 -- the conversation so far is still returned
+            yield {"type": "error", "text": f"{type(e).__name__}: {e}"}
+        yield {"type": "state", "messages": messages, "wrote": self.wrote}
+
+    def _is_write(self, c: dict) -> bool:
+        return c["function"]["name"] == "call_api" and str(_args(c).get("method", "GET")).upper() != "GET"
+
+    def _run(self, messages: list[dict], allow: bool | None) -> Iterator[dict]:
+        self.messages = messages
+        # Built earlier in this conversation: solving it is allowed.
+        for m in messages:
+            if agent_compact.is_summary(m) and agent_compact.recorded_build(m):
+                self.built = agent_compact.recorded_build(m)
+            if m["role"] == "tool" and m.get("name") == "propose_plan" and str(m.get("content", "")).startswith("BUILT "):
+                try:
+                    self.built = json.loads(m["content"][6:].split(" Now explain")[0])
+                except ValueError:
+                    self.built = {"built": True}
+        native = _NATIVE_TOOLS.get(self.s.base_url) if self.s.tool_mode == "auto" else self.s.tool_mode == "native"
+        if messages and str(messages[-1].get("content") or "").strip().lower() in agent_compact.RESETS \
+                and messages[-1]["role"] == "user":
+            # "/reset": a new conversation. The browser clears its own copy; this answers any other client.
+            messages.clear()
+            yield {"type": "answer", "text": "Started a new conversation. Tell me about the problem."}
+            return
+        if messages and agent_compact.is_command(messages[-1]):
+            # "/compact": summarize the conversation now, and show the summary.
+            messages.pop()
+            done = self._compact(messages, force=True)
+            text = ("Nothing to summarize yet: the conversation is still short." if done is None else
+                    f"I summarized our conversation ({done['summarized']} messages into one; about "
+                    f"{done['chars_before'] // 2:,} tokens down to {done['chars_after'] // 2:,}). We continue from "
+                    f"this summary:\n\n{done['notes']}")
+            if done is not None:
+                messages.append({"role": "assistant", "content": text})
+            yield {"type": "answer", "text": text}
+            return
+        # A turn that stopped for an OK: run (or decline) its calls first.
+        last = messages[-1] if messages else None
+        if last and last["role"] == "assistant" and last.get("tool_calls"):
+            done = {m.get("tool_call_id") for m in messages if m["role"] == "tool"}
+            pending = [c for c in last["tool_calls"] if c["id"] not in done]
+            self.wrote |= any(self._is_write(c) and (allow or not self._needs_ok(c)) for c in pending)
+            yield from self._execute(pending, messages, allow)
+
+        claimed, pending_feedback = False, None
+        # Each kind of correction has its own budget (the roster field test: three broken calls used up a
+        # shared budget of three, and an empty reply then ended the turn), with a cap on them all.
+        spent: dict[str, int] = {}
+
+        def nudge(kind: str) -> bool:
+            if spent.get(kind, 0) >= MAX_NUDGES or sum(spent.values()) >= MAX_TOTAL_NUDGES:
+                return False
+            spent[kind] = spent.get(kind, 0) + 1
+            return True
+
+        settings, rethought = self.s, False
+        for _ in range(self.s.max_steps):
+            sys_msg = {"role": "system", "content": system_prompt(self.index, self.ctx, native is not False)}
+            yield {"type": "thinking"}
+            self._compact_attempts(messages)
+            note = self._maybe_compact(sys_msg, messages)
+            if note:
+                yield {"type": "note", "text": note}
+            msg, native = self._complete(sys_msg, messages, native, settings)
+            settings = self.s
+
+            finish = msg.get("_finish")
+            raw_content = msg.get("content") or ""
+            thought = msg.get("reasoning_content") or msg.get("reasoning") or ""
+            if not msg.get("tool_calls") and not clean(raw_content) and thought and (
+                    toolcall.looks_like_unrun_call(thought) or (self.modelling and _spec_in_text(thought))):
+                # An empty reply whose call stayed in the model's thinking (the roster field test ended on
+                # empty replies): the call is taken from there, as one written into the reply would be.
+                found = None if toolcall.looks_like_unrun_call(thought) else _spec_in_text(thought)
+                raw_content = ("```json\n" + json.dumps(found, ensure_ascii=False) + "\n```" if found is not None
+                               else thought[thought.rfind("<tool_call>"):] if "<tool_call>" in thought else thought)
+            content = clean(raw_content)
+            calls, errors = self._calls(msg, content, finish)
+            if calls or errors:
+                content = toolcall.extract_tool_calls(content, self.tool_names)[1] if not msg.get("tool_calls") else content
+
+            if finish == "length" and (calls or errors or toolcall.looks_like_unrun_call(raw_content)):
+                # Never run a call from a reply that did not finish: a repaired half-spec builds the wrong thing.
+                if nudge("cut_off"):
+                    messages.append({"role": "assistant", "content": content or "(my reply was cut off)"})
+                    messages.append({"role": "user", "content": CUT_OFF})
+                    yield {"type": "note", "text": "The reply was cut off at the length limit; asking for a smaller call."}
+                    continue
+                calls, errors = [], ["the reply was cut off again"]
+
+            if finish == "length" and not calls and not errors:
+                # Ran to the limit and called nothing: thinking that never ended, or a spec drafted in prose.
+                # Never shown. First the same step again with thinking off (the history is unchanged), then
+                # the model is told; at the end, a short honest line instead of the ramble.
+                if not rethought:
+                    rethought, settings = True, replace(self.s, thinking="off")
+                    yield {"type": "note", "text": "The model's reply ran too long; asking again, without thinking aloud."}
+                    continue
+                if nudge("rambled"):
+                    messages.append({"role": "assistant", "content": "(a reply that ran to the length limit; not shown)"})
+                    messages.append({"role": "user", "content": RAMBLED})
+                    continue
+                content = ("I could not finish this step: my replies kept running too long. Say \"continue\" and "
+                           "I will try again, or tell me which part to do first.")
+                messages.append({"role": "assistant", "content": content})
+                yield {"type": "answer", "text": content}
+                return
+
+            if not calls and not errors and self.modelling and "check_spec" in self.tool_names:
+                spec = _spec_in_text(content)
+                if spec is not None and nudge("spec_as_text"):
+                    # The spec written into the reply: run it through check_spec, as the model meant to.
+                    calls = [{"id": "call_" + uuid.uuid4().hex[:10], "type": "function",
+                              "function": {"name": "check_spec", "arguments": json.dumps({"spec": spec},
+                                                                                         ensure_ascii=False)}}]
+                    content = _SPEC_TEXT.sub("", content).strip()
+                    pending_feedback = SPEC_AS_TEXT
+
+            if errors and not calls:
+                if nudge("broken_call"):
+                    messages.append({"role": "assistant", "content": content or "(a tool call that could not be read)"})
+                    messages.append({"role": "user", "content": PLATFORM + "Your tool call was NOT run: " + "; ".join(errors)
+                                     + ". Send it again through the tool interface, as valid JSON with unique keys."})
+                    yield {"type": "result", "name": "tool call", "ok": False, "preview": "; ".join(errors)[:300]}
+                    continue
+
+            if not calls:
+                if toolcall.looks_like_unrun_call(raw_content) and nudge("call_as_text"):
+                    messages.append({"role": "assistant", "content": content})
+                    messages.append({"role": "user", "content": PLATFORM + "That message contains a tool call written "
+                                     "as text; it did NOT run. Call the tool through the tool interface."})
+                    continue
+                if not claimed and not self.did_work and _CLAIM.search(content) and nudge("claim"):
+                    claimed = True
+                    messages.append({"role": "assistant", "content": content})
+                    messages.append({"role": "user", "content": PLATFORM + "No tool built, imported, placed or solved "
+                                     "anything in this turn, so do not say it was done. Run the tool now, or say plainly "
+                                     "that nothing ran yet."})
+                    continue
+                if not content.strip():
+                    if nudge("empty"):
+                        messages.append({"role": "assistant", "content": "(an empty reply)"})
+                        messages.append({"role": "user", "content": EMPTY})
+                        continue
+                    content = "I have no answer for that yet. Say \"continue\", or tell me what to do next."
+                messages.append({"role": "assistant", "content": content})
+                yield {"type": "answer", "text": content}
+                return
+            messages.append({"role": "assistant", "content": content or None, "tool_calls": calls})
+            if content:
+                yield {"type": "note", "text": content[:600]}
+            if errors:
+                # Some calls ran; the broken ones are reported after their results.
+                pending_feedback = PLATFORM + "These tool calls were NOT run: " + "; ".join(errors)
+            if self.joined:
+                joins = PLATFORM + "Note: " + "; ".join(self.joined) + ". Check that is what you meant."
+                pending_feedback = joins if not pending_feedback else pending_feedback + "\n" + joins
+                self.joined = []
+
+            plans = [c for c in calls if c["function"]["name"] == "propose_plan"]
+            if plans:
+                # Only the plan this turn; any other call beside it is dropped (the model re-asks if needed).
+                plan = plans[-1]
+                messages[-1]["tool_calls"] = [plan]
+                args = _args(plan)
+                yield {"type": "tool", "name": "propose_plan", "args": _shown("propose_plan", args)}
+                verdict = self._check_plan(args)
+                if verdict.startswith("PLAN_OK"):
+                    counts = json.loads(verdict[8:]).get("would_create", {}) if verdict[8:].strip() else {}
+                    # What will be built, read back by the platform beside the model's own account of it.
+                    built_as = agent_readback.readback(self._spec(args)).split("\n", 1)[-1]
+                    yield {"type": "plan", "summary": str(args.get("summary")) + "\n\n**As built** (read back "
+                           "from the spec by the platform; check it says what you meant)\n```\n" + built_as + "\n```",
+                           "counts": counts, "spec": self._spec(args, expand=False), "readback": built_as}
+                    return  # waits for the person: confirm {allow} builds it, a new message is feedback
+                yield {"type": "result", "name": "propose_plan", "ok": False, "preview": verdict[:300]}
+                messages.append({"role": "tool", "tool_call_id": plan["id"], "name": "propose_plan",
+                                 "content": verdict})
+                stop = self._stuck([plan], messages)
+                if stop:
+                    self._compact_attempts(messages)
+                    messages.append({"role": "assistant", "content": stop})
+                    yield {"type": "answer", "text": stop}
+                    return
+                continue
+
+            risky = [c for c in calls if self._needs_ok(c)]
+            if risky:
+                yield {"type": "confirm", "calls": [
+                    {"method": _args(c).get("method"), "path": _args(c).get("path"), "body": _args(c).get("body")}
+                    for c in risky]}
+                return
+            self.wrote |= any(self._is_write(c) for c in calls)
+            yield from self._execute(calls, messages, None)
+            stop = self._stuck(calls, messages)
+            if stop:
+                self._compact_attempts(messages)
+                messages.append({"role": "assistant", "content": stop})
+                yield {"type": "answer", "text": stop}
+                return
+            if pending_feedback:
+                messages.append({"role": "user", "content": pending_feedback})
+                pending_feedback = None
+
+        messages.append({"role": "assistant", "content":
+                         f"I stopped after {self.s.max_steps} steps. Say \"continue\" to let me carry on."})
+        yield {"type": "answer", "text": messages[-1]["content"]}

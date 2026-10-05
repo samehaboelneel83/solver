@@ -186,6 +186,28 @@ export const makeRecords = (datasetId: number, layers: string[], plan: RecordsPr
 export const attachShapes = (datasetId: number, body: { layers: string[]; type: string; match: string; field?: string }) =>
   apiFetch<ShapesAttached>(`/api/v1/gis/datasets/${datasetId}/records/attach`, { method: "POST", ...json(body) });
 
+// --- All of a domain's map data onto its kinds of record (backend app/gis/auto_records.py) ----
+
+export type AutoField = { property: string; name: string; data_type: string; enum_values: string[] | null; new: boolean; skip: boolean };
+export type AutoMapping = {
+  action: "existing" | "new" | "skip"; dataset_id: number; dataset: string; layer: string; features: number; skipped_text: number;
+  type: string; confidence: number; reasons: string[]; key: string | null; key_candidates: string[]; label: string | null;
+  fields: AutoField[]; geometry_field: string; updates: number; creates: number; create_missing: boolean;
+  required_unfilled: string[]; faults: string[]; alternatives: { type: string; confidence: number }[];
+};
+export type AutoProposal = { domain_id: number; types: string[]; mappings: AutoMapping[] };
+export type AutoChoice = { dataset_id: number; layer: string; type: string | null; key?: string | null };
+export type AutoApplied = {
+  domain_id: number; faults: string[];
+  results: { dataset_id: number; layer: string; type: string; entity_type_id: number; made: number; updated: number }[];
+};
+
+export const proposeDomainRecords = (domainId: number, choices: AutoChoice[] = [], datasetIds?: number[]) =>
+  apiFetch<AutoProposal>(`/api/v1/gis/domains/${domainId}/records/propose`, {
+    method: "POST", ...json({ choices, ...(datasetIds ? { dataset_ids: datasetIds } : {}) }) });
+export const applyDomainRecords = (domainId: number, mappings: AutoMapping[]) =>
+  apiFetch<AutoApplied>(`/api/v1/gis/domains/${domainId}/records`, { method: "POST", ...json({ mappings }) });
+
 /** A new layer made from records: a buffer round each, the places each reaches by 0/1 data, or the places none reaches
  * (benchmark round 5). */
 export type DeriveLayer = { domain_id: number; name: string; how: "buffer" | "service_area" | "not_reached"; entity_type_id: number;

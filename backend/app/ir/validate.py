@@ -1435,7 +1435,8 @@ class _ShapeChecker:
             return Refusal(
                 "where_filter_malformed",
                 [*here, "attr"],
-                "a filter names an attribute of the set its binding ranges over",
+                "a filter names an attribute of the set its binding ranges over, as a plain name "
+                f"(got {json.dumps(entry.get('attr'))}): {{\"attr\": \"grade\", \"op\": \"=\", \"value\": \"senior\"}}",
             )
         operator = entry.get("op")
         if not isinstance(operator, str):
@@ -1518,7 +1519,11 @@ class _ShapeChecker:
             return Refusal(
                 "term_kind_unknown",
                 loc,
-                f"a term names one of {', '.join(sorted(TERM_KINDS))}; this names none of them",
+                f"a term names one of {', '.join(sorted(TERM_KINDS))}; this names none of them "
+                f"(it has {', '.join(sorted(map(str, term))) or 'no keys'})"
+                + ("; there is no if/else: a number that depends on a record (night pays 1.3) is a "
+                   "parameter indexed by that record's set, multiplied in" if {"if", "then", "else", "cond", "case"} & set(term)
+                   else ""),
             )
         if len(kinds) > 1:
             return Refusal(
@@ -1604,7 +1609,9 @@ class _ShapeChecker:
                     "index_not_bound",
                     [*loc, "index", j],
                     f"{json.dumps(index)} is not bound by any enclosing forall or over, so it "
-                    "has no range",
+                    "has no range; to mean one particular record, bind an index to it: "
+                    f'{{"index": "k", "set": {json.dumps(index_types[j])}, "where": [{{"attr": "id", "op": "=", '
+                    f'"value": {json.dumps(index)}}}]}}',  # the roster field test: work[n, d, "night"]
                 )
             if scope[index] != index_types[j]:
                 return Refusal(
@@ -1841,7 +1848,8 @@ class _ShapeChecker:
             return Refusal(
                 "mul_arity",
                 [*loc, "mul"],
-                "mul has exactly two factors, so linearity is a check on a pair",
+                "mul has exactly two factors, so linearity is a check on a pair; nest a longer product: "
+                'a * b * c is {"mul": [{"mul": [a, b]}, c]}',
             )
         for i, factor in enumerate(factors):
             problem = self.check_term(factor, [*loc, "mul", i], scope, depth + 1)

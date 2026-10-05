@@ -23,9 +23,6 @@ const Dashboard = lazy(() => import("./pages/Dashboard"));
 const FieldPlan = lazy(() => import("./pages/FieldPlan"));
 const People = lazy(() => import("./pages/People"));
 const StartProblem = lazy(() => import("./pages/StartProblem"));
-const CampList = lazy(() => import("./pages/CampList"));
-const CampEditor = lazy(() => import("./pages/CampEditor"));
-const CampRedirect = lazy(() => import("./pages/CampEditor").then((m) => ({ default: m.CampRedirect })));
 const MapData = lazy(() => import("./pages/MapData"));
 const MapImport = lazy(() => import("./pages/MapImport"));
 const MapView = lazy(() => import("./pages/MapView"));
@@ -126,11 +123,7 @@ export default function App() {
           <Route path="structure/relationship-types/:id" element={<RelationshipTypeDetail />} />
           <Route path="problems" element={<DomainOverview listing />} />
           <Route path="start" element={<StartProblem />} />
-          <Route path="camps" element={<Navigate to="../map-data/camps" relative="path" replace />} />
-          <Route path="camps/:campId" element={<CampRedirect />} />
           <Route path="map-data" element={<MapData />} />
-          <Route path="map-data/camps" element={<CampList />} />
-          <Route path="map-data/camps/:campId" element={<CampEditor />} />
           <Route path="map-data/import" element={<MapImport />} />
           <Route path="map-data/:datasetId" element={<MapView />} />
           <Route path="problems/:problemId" element={<ProblemQueryBridge />}>
@@ -175,8 +168,6 @@ export default function App() {
         <Route path="predictors" element={<LegacyDomainRedirect page="predictors" />} />
         <Route path="map-data" element={<LegacyDomainRedirect page="map-data" />} />
         <Route path="workbench" element={<LegacyDomainRedirect page="workbench" />} />
-        <Route path="camps" element={<LegacyDomainRedirect page="camps" />} />
-        <Route path="map-data/camps" element={<LegacyDomainRedirect page="camps" />} />
         <Route path="api-keys" element={<ApiKeys />} />
         <Route path="solvers" element={<Solvers />} />
         <Route path="ops/queue" element={<OpsQueue />} />

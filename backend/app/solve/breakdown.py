@@ -13,6 +13,9 @@ from app.solve.compile import Compiled, number, quadratic_at
 TOP = 15
 
 
+CELLS = 25  # the cells that make a goal, largest first, kept with the run
+
+
 def objective_breakdown(ir: dict[str, Any], compiled: Compiled, assignments: dict[Any, Any], top: int = TOP) -> dict[str, Any] | None:
     if not assignments or not compiled.objective_terms:
         return None
@@ -29,6 +32,9 @@ def objective_breakdown(ir: dict[str, Any], compiled: Compiled, assignments: dic
         # did not add up to the goal).
         value = linear.evaluated_at(assignments) + (quadratic_at(square, assignments) if square else Decimal(0))
         by_record: dict[tuple[str, str], Decimal] = {}
+        # And by cell, whole index: a person asks WHICH requests were broken -- "Basma, Fri" -- and a record
+        # alone cannot say (the roster field test reported Eman's broken request on the wrong day).
+        by_cell: dict[tuple[str, tuple], Decimal] = {}
 
         def count(key_var: Any, amount: Decimal) -> None:
             name, index = key_var
@@ -41,17 +47,21 @@ def objective_breakdown(ir: dict[str, Any], compiled: Compiled, assignments: dic
             if got is None or coeff * number(got) == 0:
                 continue
             count((name, index), coeff * number(got))
+            by_cell[(name, tuple(index))] = by_cell.get((name, tuple(index)), Decimal(0)) + coeff * number(got)
         for (a, b), coeff in square.items():
             x, y = assignments.get(a), assignments.get(b)
             if x is None or y is None or coeff * number(x) * number(y) == 0:
                 continue
             count(a, coeff * number(x) * number(y))
+        cells = sorted(((k, v) for k, v in by_cell.items() if v != 0), key=lambda kv: (-abs(kv[1]), str(kv[0])))
         ranked = sorted(by_record.items(), key=lambda kv: -abs(kv[1]))
         rest = sum((v for _, v in ranked[top:]), Decimal(0))
         terms.append({
             "id": term_id, "weight": float(weight), "value": float(value), "contribution": float(weight * value),
             "records": [{"kind": k, "key": r, "value": float(v)} for (k, r), v in ranked[:top]],
             **({"rest": {"records": len(ranked) - top, "value": float(rest)}} if len(ranked) > top else {}),
+            "cells": [{"var": n, "index": [str(i) for i in ix], "value": float(v)} for (n, ix), v in cells[:CELLS]],
+            "cell_count": len(cells),
         })
     penalties = float(compiled.penalty_objective.evaluated_at(assignments)) if compiled.penalty_objective.coeffs else 0.0
     whole = sum(abs(t["contribution"]) for t in terms) + abs(penalties)

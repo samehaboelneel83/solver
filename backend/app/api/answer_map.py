@@ -39,6 +39,9 @@ from app.models.iam import UserAccount
 router = APIRouter(prefix="/api/v1", tags=["spatial"])
 
 MAX_FEATURES = 20_000
+#: A placed set this big draws only what was chosen: a layout's tens of thousands of unchosen candidates
+#: would bury the answer, and the feature limit would cut the chosen ones off.
+CHOSEN_ONLY_ABOVE = 5_000
 SHAPES = ("Point", "Polygon", "MultiPolygon", "LineString", "MultiLineString")
 
 
@@ -74,8 +77,8 @@ def _numbers(row: dict[str, Any]) -> dict[str, float]:
 
 
 def answer_map(ir: dict[str, Any], data: dict[str, Any], assignments: dict[str, Any] | None,
-               amounts: dict[str, Any] | None, results: list[dict[str, Any]], labels: dict[str, dict[str, str]] | None = None
-               ) -> dict[str, Any]:
+               amounts: dict[str, Any] | None, results: list[dict[str, Any]], labels: dict[str, dict[str, str]] | None = None,
+               limit: int = MAX_FEATURES) -> dict[str, Any]:
     """The map of one answered run, from its model, frozen data, answer and rule results."""
     sets = data.get("sets") or {}
     labels = labels or data.get("labels") or {}
@@ -99,7 +102,7 @@ def answer_map(ir: dict[str, Any], data: dict[str, Any], assignments: dict[str, 
     features: list[dict[str, Any]] = []
 
     def add(feature: dict[str, Any]) -> None:
-        if len(features) < MAX_FEATURES:
+        if len(features) < limit:
             features.append(feature)
 
     drawn_sets: set[str] = set()
@@ -116,7 +119,11 @@ def answer_map(ir: dict[str, Any], data: dict[str, Any], assignments: dict[str, 
             s = index[0]
             drawn_sets.add(s)
             on = 0
+            only_chosen = len(placed[s]) > CHOSEN_ONLY_ABOVE
             for key, member in placed[s].items():
+                if only_chosen and not (binary and (key,) in chosen.get(var, set())) and not (
+                        not binary and abs(amount.get(var, {}).get((key,), 0.0)) > 1e-9):
+                    continue
                 if binary:
                     is_on = (key,) in chosen.get(var, set())
                     on += is_on
@@ -131,7 +138,8 @@ def answer_map(ir: dict[str, Any], data: dict[str, Any], assignments: dict[str, 
                 add({"type": "Feature", "geometry": member["geometry"],
                      "properties": {"layer": var, "set": s, "key": key, "label": member["label"], "value": value,
                                     "status": status, "title": title, "data": member["data"]}})
-            layers.append({"id": var, "kind": "places", "set": s, "title": f"{var}: {on} of {len(placed[s])} {_words(s)}"})
+            layers.append({"id": var, "kind": "places", "set": s, "title": f"{var}: {on} of {len(placed[s])} {_words(s)}"
+                           + (" (only the chosen drawn)" if only_chosen else "")})
         elif len(index) == 2 and len(placed_positions) == 2:
             a, b = index
             drawn_sets.update(index)
@@ -271,7 +279,7 @@ def answer_map(ir: dict[str, Any], data: dict[str, Any], assignments: dict[str, 
                  "properties": {"layer": s, "set": s, "key": key, "label": member["label"], "value": None,
                                 "status": "place", "title": member["label"], "data": member["data"]}})
         layers.append({"id": s, "kind": "context", "set": s, "title": f"{_words(s)}: {len(members)}"})
-    return {"layers": layers, "features": features, "truncated": len(features) >= MAX_FEATURES}
+    return {"layers": layers, "features": features, "truncated": len(features) >= limit}
 
 
 def _coverage(ir: dict[str, Any], data: dict[str, Any], placed: dict[str, dict[str, dict[str, Any]]],
@@ -330,10 +338,63 @@ def _gap(a: list[float], b: list[float]) -> float:
     return dx * dx + (a[1] - b[1]) ** 2
 
 
+def with_metre_shapes(db: Session | None, domain_id: int | None, data: dict[str, Any]) -> dict[str, Any]:
+    """Records placed by metre fields (a layout's candidates: min_x_m, min_y_m, width_m, height_m, or x_m and
+    y_m, or shape_m), given a shape on the map through the domain's drawing: its local placement says where
+    the drawing's corner is. Records that already have a shape are left as they are."""
+    if db is None or domain_id is None:
+        return data
+    placement = next((r[0] for r in db.execute(
+        text("SELECT placement FROM gis_dataset WHERE domain_id = :d ORDER BY id DESC"), {"d": domain_id})
+        if (r[0] or {}).get("kind") == "local"), None)
+    if placement is None:
+        return data
+    from shapely.geometry import mapping
+    from shapely.ops import transform
+
+    from app.api.run_dxf import metre_shape
+    from app.gis.crs import Placement
+
+    try:
+        forward = Placement.parse(placement, float(placement.get("units") or 1.0)).transformer()
+    except Exception:  # noqa: BLE001 -- a placement that cannot be read: nothing is drawn by metres
+        return data
+    units = float(placement.get("units") or 1.0)
+    ax, ay = placement["anchor"]
+
+    def to_lonlat(x, y, z=None):
+        import numpy as np
+
+        lon, lat = forward(ax + np.asarray(x) / units, ay + np.asarray(y) / units)
+        return lon, lat
+
+    sets = {}
+    changed = False
+    for name, rows in (data.get("sets") or {}).items():
+        out = []
+        for row in rows if isinstance(rows, list) else []:
+            if isinstance(row, dict) and _shape_of(row) is None:
+                shape = metre_shape(row)
+                if shape is not None:
+                    row = {**row, "_shape": _lists(mapping(transform(to_lonlat, shape)))}
+                    changed = True
+            out.append(row)
+        sets[name] = out
+    return {**data, "sets": sets} if changed else data
+
+
+def _lists(g: dict[str, Any]) -> dict[str, Any]:
+    def walk(c):
+        return [walk(v) for v in c] if isinstance(c, (list, tuple)) and c and isinstance(c[0], (list, tuple)) else \
+            [round(float(v), 8) for v in c]
+    return {"type": g["type"], "coordinates": walk(g["coordinates"])}
+
+
 def _map_of(db: Session, run_id: int) -> dict[str, Any]:
     row = db.execute(
-        text("SELECT r.status, r.params, s.patch, mv.ir, d.data, sol.assignments, sol.amounts FROM run r"
-             " JOIN scenario s ON s.id = r.scenario_id JOIN model_version mv ON mv.id = r.model_version_id"
+        text("SELECT r.status, r.params, s.patch, mv.ir, d.data, sol.assignments, sol.amounts, p.domain_id FROM run r"
+             " JOIN scenario s ON s.id = r.scenario_id JOIN problem p ON p.id = s.problem_id"
+             " JOIN model_version mv ON mv.id = r.model_version_id"
              " JOIN dataset d ON d.id = r.dataset_id LEFT JOIN solution sol ON sol.run_id = r.id WHERE r.id = :r"),
         {"r": run_id},
     ).mappings().one_or_none()
@@ -345,6 +406,7 @@ def _map_of(db: Session, run_id: int) -> dict[str, Any]:
         text("SELECT constraint_id, satisfied, violations FROM constraint_result WHERE run_id = :r"), {"r": run_id}
     ).mappings()]
     ir, data = solved_with(row["ir"], row["data"] or {}, row["params"] or {}, row["patch"] or {})
+    data = with_metre_shapes(db, row["domain_id"], data)
     return answer_map(ir, data, row["assignments"], row["amounts"], results)
 
 

@@ -117,6 +117,10 @@ def tenants(db):
     db.execute(text("SELECT set_config('app.audit_prune', '1', true)"))
     db.execute(text("DELETE FROM iam.audit_event WHERE organization_id = :o"), {"o": org_b})
     db.execute(text("SELECT set_config('app.audit_prune', '', true)"))
+    # Record history (migration 0100) outlives the records, and names the organization.
+    db.execute(text("DELETE FROM entity_change WHERE organization_id = :o"), {"o": org_b})
+    # Map files uploaded but not imported (Map Import, the assistant's attachments).
+    db.execute(text("DELETE FROM gis_upload WHERE organization_id = :o"), {"o": org_b})
     db.execute(text("DELETE FROM iam.organization WHERE id = :o"), {"o": org_b})
     db.commit()
 

@@ -1,7 +1,7 @@
 """Distances and travel times along a lines layer the person imported (improvement plan 2.9).
 
 `app.spatial.roads` reads the road network from map tiles. A site has its own
-network as often: a camp's corridors, a plant's internal roads, a city's
+network as often: a site's corridors, a plant's internal roads, a city's
 drainage-truck routes, pipes. Any lines layer of an imported map dataset is
 read as one here: each line's vertices are nodes (a vertex two lines share,
 to within `JOIN_M`, is one node -- that is what makes a junction), each

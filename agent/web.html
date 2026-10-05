@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solver Agent</title>
+<style>
+:root{--bg:#f6f7f9;--panel:#fff;--ink:#16191d;--mute:#6b7280;--line:#e3e6ea;--acc:#1f5eff;--tool:#eef3ff;--warn:#fff6e0;--err:#fdecec}
+@media (prefers-color-scheme:dark){:root{--bg:#111316;--panel:#1a1d21;--ink:#e8eaed;--mute:#9aa1ab;--line:#2b2f35;--acc:#6d95ff;--tool:#1c2433;--warn:#33290f;--err:#3a1b1b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;height:100vh;display:flex;flex-direction:column}
+header{padding:12px 20px;border-bottom:1px solid var(--line);background:var(--panel);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+header b{font-size:16px}
+header .meta{color:var(--mute);font-size:13px;flex:1}
+button{font:inherit;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;padding:6px 12px;cursor:pointer}
+button.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+button:disabled{opacity:.5;cursor:default}
+#log{flex:1;overflow:auto;padding:20px;display:flex;flex-direction:column;gap:10px;max-width:980px;width:100%;margin:0 auto}
+.msg{padding:10px 14px;border-radius:10px;max-width:100%;overflow-wrap:anywhere}
+.user{align-self:flex-end;background:var(--acc);color:#fff;max-width:80%}
+.answer{background:var(--panel);border:1px solid var(--line)}
+.answer table{border-collapse:collapse;margin:6px 0;font-size:14px}
+.answer td,.answer th{border:1px solid var(--line);padding:4px 8px;text-align:left}
+.answer pre{background:var(--bg);padding:8px;border-radius:6px;overflow:auto}
+.tool{background:var(--tool);font:12.5px/1.4 ui-monospace,Consolas,monospace;padding:6px 10px;color:var(--mute)}
+.tool .n{color:var(--acc);font-weight:600}
+.thought{color:var(--mute);font-style:italic;font-size:13px}
+.confirm{background:var(--warn);border:1px solid var(--line)}
+.confirm pre{white-space:pre-wrap;font-size:12.5px;margin:6px 0}
+.error{background:var(--err)}
+footer{border-top:1px solid var(--line);background:var(--panel);padding:12px 16px}
+footer form{display:flex;gap:8px;max-width:980px;margin:0 auto}
+textarea{flex:1;font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);resize:none;height:44px}
+.spin{color:var(--mute);font-size:13px}
+</style>
+</head>
+<body>
+<header><b>Solver Agent</b><span class="meta" id="meta">connecting…</span><button id="reset">New chat</button></header>
+<div id="log"></div>
+<footer><form id="f"><textarea id="t" placeholder="e.g. Show my problems, then solve the newest scenario and summarise the result"></textarea><button class="primary" id="send">Send</button></form></footer>
+<script>
+const log=document.getElementById('log'),t=document.getElementById('t'),send=document.getElementById('send');
+let since=0,busy=false,spin=null;
+function esc(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+function md(s){ // small markdown: code blocks, tables, bold, inline code, lists
+  s=esc(s);
+  s=s.replace(/```[\w]*\n([\s\S]*?)```/g,(_,c)=>'<pre>'+c+'</pre>');
+  s=s.replace(/((?:^\|.*\|\s*$\n?)+)/gm,blk=>{const rows=blk.trim().split('\n').filter(r=>!/^\|\s*:?-+/.test(r));
+    return '<table>'+rows.map((r,i)=>'<tr>'+r.replace(/^\||\|$/g,'').split('|').map(c=>i?'<td>'+c.trim()+'</td>':'<th>'+c.trim()+'</th>').join('')+'</tr>').join('')+'</table>'});
+  s=s.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>');
+  s=s.replace(/^#{1,4} (.*)$/gm,'<b>$1</b>').replace(/^[-*] (.*)$/gm,'• $1');
+  return s.replace(/\n/g,'<br>').replace(/<\/pre><br>/g,'</pre>').replace(/<\/table><br>/g,'</table>');
+}
+function add(cls,html){const d=document.createElement('div');d.className='msg '+cls;d.innerHTML=html;log.appendChild(d);log.scrollTop=log.scrollHeight;return d}
+function setBusy(b){busy=b;send.disabled=b;if(b&&!spin){spin=add('spin','working…')}if(!b&&spin){spin.remove();spin=null}else if(spin){log.appendChild(spin)}}
+function render(e){
+  const d=e.data;
+  if(e.kind==='user')add('user',esc(d));
+  else if(e.kind==='tool'){const a=d.args;let s=d.name==='call_api'?`${a.method} ${a.path}`+(a.query?' '+JSON.stringify(a.query):''):JSON.stringify(a);add('tool',`<span class="n">${esc(d.name)}</span> ${esc(s.slice(0,300))}`)}
+  else if(e.kind==='result'){}
+  else if(e.kind==='thought')add('thought',esc(d.slice(0,400)));
+  else if(e.kind==='answer')add('answer',md(d));
+  else if(e.kind==='error')add('error',esc(d));
+  else if(e.kind==='confirm'){const c=add('confirm',`<b>Allow this action?</b><pre>${esc(d.desc)}</pre>`);
+    const y=document.createElement('button');y.textContent='Allow';y.className='primary';const n=document.createElement('button');n.textContent='Deny';n.style.marginLeft='8px';
+    const go=allow=>{fetch('/confirm',{method:'POST',body:JSON.stringify({id:d.id,allow})});y.remove();n.remove();c.append(allow?' ✓ allowed':' ✗ denied')};
+    y.onclick=()=>go(true);n.onclick=()=>go(false);c.append(y,n)}
+}
+async function poll(){
+  while(true){try{const r=await fetch('/events?since='+since);const j=await r.json();
+    for(const e of j.events){render(e);since=e.i+1} setBusy(j.busy)}catch(e){await new Promise(r=>setTimeout(r,2000))}}
+}
+document.getElementById('f').onsubmit=async ev=>{ev.preventDefault();const text=t.value.trim();if(!text||busy)return;t.value='';setBusy(true);
+  await fetch('/ask',{method:'POST',body:JSON.stringify({text})})};
+t.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();document.getElementById('f').requestSubmit()}});
+document.getElementById('reset').onclick=async()=>{await fetch('/reset',{method:'POST'});log.innerHTML='';};
+fetch('/info').then(r=>r.json()).then(i=>{since=i.next;document.getElementById('meta').textContent=`${i.model} · ${i.platform} · ${i.endpoints} endpoints · confirm: ${i.confirm}`;poll()});
+</script>
+</body>
+</html>

@@ -71,14 +71,17 @@ def test_a_rule_with_no_arithmetic_blocks_the_run_and_says_what_to_do(scenario, 
     assert finding["kind"] == "blocker" and finding["rules"] == ["c_policy"] and "Model editor" in finding["says"]
 
 
-def test_a_set_with_no_records_is_a_warning_not_a_blocker(scenario, auth_headers):  # noqa: F811
-    ir = {"version": 2, "sets": ["nobody_here"], "parameters": {},
+def test_an_empty_set_the_decisions_range_over_blocks_and_one_only_rules_read_warns(scenario, auth_headers):  # noqa: F811
+    """Since the camp-bed evaluation (October 2026) an empty set the decisions are indexed by blocks Solve: there
+    is nothing to decide. A set only rules read (a list that may be empty) still warns."""
+    ir = {"version": 2, "sets": ["nobody_here", "maybe_none"], "parameters": {},
           "variables": {"x": {"index": ["nobody_here"], "domain": "binary"}},
           "constraints": [], "objective": {"sense": "maximize", "terms": [{"id": "o", "weight": 1, "expression":
               {"sum": {"var": "x", "index": ["n"]}, "over": [{"index": "n", "set": "nobody_here"}]}}]}}
     sid = scenario(ir)
     body = TestClient(app).get(f"/api/v1/scenarios/{sid}/preflight", headers=auth_headers).json()
-    assert any(f["code"] == "set_empty" and f["kind"] == "warning" for f in body["findings"])
+    kinds = {f["set"]: f["kind"] for f in body["findings"] if f["code"] == "set_empty"}
+    assert kinds == {"nobody_here": "blocker", "maybe_none": "warning"}
 
 
 def test_workers_are_online_when_one_beat_recently(db, scenario, auth_headers):  # noqa: F811

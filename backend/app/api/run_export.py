@@ -1,6 +1,6 @@
 """A run's answer as files (improvement plan 3.2).
 
-    GET /api/v1/runs/{id}/export?format=xlsx|csv|geojson|html|pdf
+    GET /api/v1/runs/{id}/export?format=xlsx|csv|geojson|dxf|html|pdf
 
 What a field supervisor, a dispatcher or a spreadsheet downstream needs, from
 the run's own frozen record (never today's data):
@@ -12,6 +12,8 @@ the run's own frozen record (never today's data):
   slack, what bending it cost, where it fell short;
 - **csv**: every decision in one long table: decision, keys, value;
 - **geojson**: the answer map (`app.api.answer_map`), for GIS tools;
+- **dxf**: the answer as a CAD drawing, in the domain's drawing's own coordinates and over it
+  (`app.api.run_dxf`), for AutoCAD;
 - **html**: a printable report -- summary, goals, the answer map drawn, the rules and each decision --
   that the browser prints (`print=true` opens the print dialog);
 - **pdf**: that same report as a PDF file, laid out by WeasyPrint on A4 (user trial: "a real download").
@@ -543,7 +545,7 @@ def to_pdf(rec: dict[str, Any], *, basemap: tuple[str, str] | None = None) -> by
 
 
 @router.get("/runs/{run_id}/export")
-def export_run(run_id: int, format: str = Query("xlsx", pattern="^(xlsx|csv|geojson|html|pdf)$"),
+def export_run(run_id: int, format: str = Query("xlsx", pattern="^(xlsx|csv|geojson|dxf|html|pdf)$"),
                print: bool = Query(False),  # noqa: A002 -- the query word a person types
                basemap: str | None = Query(None, max_length=255),
                db: Session = Depends(get_db), user: UserAccount = Depends(get_current_user)) -> Response:
@@ -561,11 +563,18 @@ def export_run(run_id: int, format: str = Query("xlsx", pattern="^(xlsx|csv|geoj
     if format == "xlsx":
         return Response(to_xlsx(rec), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         headers={"Content-Disposition": f'attachment; filename="{_filename(rec, "xlsx")}"'})
+    if format == "dxf":
+        from app.api.run_dxf import to_dxf
+
+        return Response(to_dxf(rec, db, _labels(rec["data"] or {})), media_type="image/vnd.dxf",
+                        headers={"Content-Disposition": f'attachment; filename="{_filename(rec, "dxf")}"'})
     if format == "csv":
         return Response(to_csv(rec), media_type="text/csv",
                         headers={"Content-Disposition": f'attachment; filename="{_filename(rec, "csv")}"'})
-    mapped = answer_map(rec["ir"] or {}, rec["data"] or {}, rec["assignments"], rec["amounts"], rec["results"],
-                        _labels(rec["data"] or {}))
+    from app.api.answer_map import with_metre_shapes
+
+    mapped = answer_map(rec["ir"] or {}, with_metre_shapes(db, rec.get("domain_id"), rec["data"] or {}),
+                        rec["assignments"], rec["amounts"], rec["results"], _labels(rec["data"] or {}))
     body = {"type": "FeatureCollection", "name": f"{rec['problem']} run {rec['id']}", "layers": mapped["layers"],
             "features": mapped["features"]}
     return Response(json.dumps(body), media_type="application/geo+json",

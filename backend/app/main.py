@@ -7,6 +7,8 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import TimeoutError as PoolTimeout
 
+from app.api.agent import router as agent_router
+from app.api.model_spec import router as model_spec_router
 from app.api.api_keys import router as api_keys_router
 from app.api.auth import router as auth_router
 from app.api.entities import router as entities_router
@@ -53,7 +55,6 @@ from app.api.preflight import router as preflight_router
 from app.api.workflow import router as workflow_router
 from app.api.predictors import router as predictors_router
 from app.api.derive import router as derive_router
-from app.api.camps import router as camps_router
 from app.api.gis import router as gis_router
 from app.api.eta import router as eta_router
 from app.api.settings import router as settings_router
@@ -222,9 +223,9 @@ app.include_router(relationships_router)
 app.include_router(parameters_router)
 app.include_router(predictors_router)
 app.include_router(derive_router)
-app.include_router(camps_router)
 app.include_router(gis_router)
 app.include_router(eta_router)
+app.include_router(model_spec_router)  # /problems/from-spec, before /problems/{id}
 app.include_router(problems_router)
 app.include_router(runs_router)
 app.include_router(approvals_router)
@@ -269,4 +270,5 @@ app.include_router(settings_router)
 app.include_router(graph_router)
 app.include_router(start_router)
 app.include_router(people_router)
+app.include_router(agent_router)
 app.include_router(crud_router)

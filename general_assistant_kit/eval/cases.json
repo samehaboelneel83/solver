@@ -1,0 +1,10 @@
+[
+ {
+  "name": "example_template",
+  "domain_id": 0,
+  "problem_id": 0,
+  "brief": "Write a plain-language problem whose data is already loaded in a workspace (records, relationships, data values). Set domain_id to that workspace and problem_id to any problem in it (used only to validate the model). Add one case per problem type you care about.",
+  "expect_goal_order": [],
+  "follow_ups": []
+ }
+]

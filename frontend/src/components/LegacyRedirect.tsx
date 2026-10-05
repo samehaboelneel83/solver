@@ -38,7 +38,6 @@ export const DOMAIN_PAGES: Record<string, string> = {
   quality: "data/quality",
   predictors: "data/predictors",
   "map-data": "map-data",
-  camps: "map-data/camps",
   workbench: "data/workbench",
 };
 

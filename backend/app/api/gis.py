@@ -571,6 +571,66 @@ def attach_shapes(dataset_id: int, body: RecordsAttach, db: Session = Depends(ge
             "records_without_shape": sorted(keys - set(shapes))[:200], "unmatched_features": unmatched[:200]}
 
 
+class AutoChoice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    dataset_id: int
+    layer: str = Field(min_length=1, max_length=255)
+    #: The kind to map the layer onto (an existing one, or a new name); null leaves the layer out.
+    type: str | None = Field(default=None, max_length=63)
+    #: The property whose values are the records' keys.
+    key: str | None = Field(default=None, max_length=255)
+
+
+class AutoPropose(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    dataset_ids: list[int] | None = Field(default=None, max_length=200)
+    choices: list[AutoChoice] = Field(default_factory=list, max_length=200)
+
+
+class AutoApply(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mappings: list[dict[str, Any]] = Field(min_length=1, max_length=200)
+
+
+@router.post("/domains/{domain_id}/records/propose")
+def propose_domain_records(domain_id: int, body: AutoPropose, db: Session = Depends(get_db),
+                           user: UserAccount = Depends(get_current_user)) -> dict[str, Any]:
+    """Every layer of the domain's map data mapped onto its kinds of record, chosen automatically
+    (`app.gis.auto_records`): which kind, which key, which fields, what it would update and make.
+    Nothing is written. `choices` sets a layer's kind (or null to leave it out) and maps it again."""
+    from app.gis import auto_records
+
+    _domain(db, domain_id, user)
+    choices = {(c.dataset_id, c.layer): {"type": c.type or None, "key": c.key} for c in body.choices}
+    return auto_records.propose(db, domain_id, body.dataset_ids, choices)
+
+
+@router.post("/domains/{domain_id}/records", status_code=201)
+def apply_domain_records(domain_id: int, body: AutoApply, db: Session = Depends(get_db),
+                         user: UserAccount = Depends(requires("domain.edit"))) -> dict[str, Any]:
+    """The (reviewed) mappings written: every layer's records made or refreshed by key, all or nothing."""
+    from sqlalchemy.exc import DBAPIError
+
+    from app.gis import auto_records
+
+    _domain(db, domain_id, user)
+    try:
+        done = auto_records.apply(db, domain_id, body.mappings)
+        if done["faults"]:
+            db.rollback()
+            raise HTTPException(422, {"message": "Nothing was made: fix these first.", "faults": done["faults"][:50],
+                                      "more": max(0, len(done["faults"]) - 50)})
+        audit.record(db, organization_id=user.organization_id, actor_id=user.id,
+                     api_key_id=getattr(user, "api_key_id", None), action="gis.domain.records",
+                     object_type="domain", object_id=domain_id)
+        db.commit()
+    except DBAPIError as exc:
+        db.rollback()
+        says = str(getattr(exc, "orig", exc)).splitlines()[0]
+        raise HTTPException(422, {"message": "Nothing was made: fix these first.", "faults": [says], "more": 0}) from exc
+    return {"domain_id": domain_id, **done}
+
+
 @router.get("/crs")
 def search_crs(q: str = Query(..., min_length=1, max_length=80),
                user: UserAccount = Depends(get_current_user)) -> dict[str, Any]:

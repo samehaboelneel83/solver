@@ -1,6 +1,6 @@
 """The platform's number, on the wire.
 
-Since migration 0015 a quantity is `numeric(15, 6)` in the database and a
+Since migration 0015 a quantity is a `numeric` in the database (`(24, 6)` since 0107) and a
 `Decimal` in Python. Neither of those is a JSON type, and the two obvious ways
 to bridge that are both wrong on their own:
 
@@ -29,10 +29,13 @@ from typing import Annotated
 
 from pydantic import BeforeValidator, Field, PlainSerializer
 
-# Nine integer digits and six decimal places: the widest `numeric(15, 6)`
-# holds. Out of range reaches the driver as SQLSTATE 22003, which
-# `translate_db_error` re-raises untouched -- a 500 where a 422 belongs.
-NUMERIC_LIMIT = Decimal(10) ** 9 - Decimal(10) ** -6
+# Migration 0107: the column is `numeric(24, 6)`, eighteen integer digits. `numeric(15, 6)` meant to
+# hold fifteen significant digits but held only nine before the point, so a cost of 1.2 billion (or
+# an objective adding up to one) failed -- a run then crashed while saving its answer (the field
+# test of October 2026). The fifteen digits a double keeps exactly are still the bound on what comes
+# in (`max_digits` below); the column is no longer the narrower of the two. Out of range reaches the
+# driver as SQLSTATE 22003, which `translate_db_error` re-raises untouched -- a 500 where a 422 belongs.
+NUMERIC_LIMIT = Decimal(10) ** 18 - Decimal(10) ** -6
 
 
 def as_decimal(value):

@@ -3,7 +3,7 @@ GeoPackage and CSV (step 1: parse, as `app.gis.cad` does for drawings).
 
 Each reader gives the same `CadDrawing` a DXF gives -- layers of point, line
 and polygon features in the file's own coordinates, with their attributes as
-properties -- so placing, storing, viewing and making a camp from a layer work
+properties -- so placing, storing, viewing and making records from a layer work
 the same for every format.
 
 | format       | files                         | layers are                     | coordinate system |

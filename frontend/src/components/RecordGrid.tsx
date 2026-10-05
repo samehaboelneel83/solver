@@ -1,6 +1,6 @@
 import { ClipboardEvent, useEffect, useState } from "react";
 import { attrField, buildAttrs, draftsFromAttrs, type AttrDrafts } from "./AttrsForm";
-import { parseLatLon } from "../lib/campGeo";
+import { parseLatLon } from "../lib/geo";
 import { asGeometry, describeShape } from "../lib/geoShape";
 import RecordPicker from "./RecordPicker";
 import { useToast } from "./ToastProvider";

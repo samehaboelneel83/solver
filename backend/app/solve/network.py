@@ -33,6 +33,14 @@ decision takes whole numbers: a MIP solver would branch there (CP-SAT runs
 out of memory on a 400 x 400 assignment this proves in a second), while on a
 continuous network an LP solver is nearly as quick and also gives shadow
 prices, which min-cost flow does not (bench/results/2026-09-25-network.md).
+
+**Two engines** walk the same network: NetworkX's network simplex
+(`networkx.network_simplex`, the default, setting `solve.network_engine`) and
+OR-Tools' `SimpleMinCostFlow`. Both are exact on whole numbers and prove the
+same optimum; OR-Tools is about ten times quicker (a 400 x 400 assignment:
+0.1 s against 1.1 s). NetworkX is also a solver of its own, `networkx` in the
+registry (app.solve.backends), asked for by name: it takes a network model,
+continuous or whole, and refuses anything else with the reason.
 """
 
 from __future__ import annotations
@@ -56,8 +64,17 @@ def _whole(value: Decimal) -> bool:
     return value == value.to_integral_value()
 
 
-def _shape(compiled: Compiled):
-    """(rows, flips, columns) of the model read as a network, or why it is not one."""
+ENGINES = ("networkx", "ortools")
+SOLVER_NAMES = {"networkx": "network (min-cost flow, NetworkX network simplex)",
+                "ortools": "network (min-cost flow, OR-Tools)"}
+
+
+def _shape(compiled: Compiled, ceilings: bool = False):
+    """(rows, flips, columns) of the model read as a network, or why it is not one.
+
+    `ceilings`: a decision with no declared upper bound keeps the compiler's guard ceiling as its
+    capacity (the `networkx` backend: `solve_compiled` then tells an answer resting on it apart, as for
+    every solver) instead of being an arc with no ceiling (the lane, which finds unboundedness itself)."""
     if compiled.objective_quadratic:
         return "the goal multiplies decisions together"
     if compiled.pwl or compiled.functions or compiled.intervals:
@@ -68,7 +85,7 @@ def _shape(compiled: Compiled):
         return "a goal coefficient is fractional"
     # Bounds: declared, then tightened by every rule on a single decision (a capacity written as a rule).
     lower = {k: v.lower for k, v in compiled.variables.items()}
-    upper = {k: (None if v.default_upper else v.upper) for k, v in compiled.variables.items()}
+    upper = {k: (None if v.default_upper and not ceilings else v.upper) for k, v in compiled.variables.items()}
     broken: str | None = None
     rows: list[tuple[dict[VarKey, int], str, int]] = []
     for c in compiled.constraints:
@@ -141,24 +158,35 @@ def _shape(compiled: Compiled):
     return rows, flip, columns, bounds, broken
 
 
-def applies(compiled: Compiled) -> str | None:
-    shape = _shape(compiled)
+def applies(compiled: Compiled, ceilings: bool = False) -> str | None:
+    shape = _shape(compiled, ceilings)
     return shape if isinstance(shape, str) else None
 
 
-def solve(compiled: Compiled) -> Networked:
-    """The proven optimum by min-cost flow, or a proof that there is none."""
-    from ortools.graph.python import min_cost_flow
+def networkx_available() -> bool:
+    try:
+        import networkx  # noqa: F401
+    except ImportError:
+        return False
+    return True
 
+
+def solve(compiled: Compiled, engine: str = "networkx", ceilings: bool = False) -> Networked:
+    """The proven optimum by min-cost flow, or a proof that there is none."""
     from app.solve.result import Solution
 
+    if engine not in ENGINES:
+        raise ValueError(f"no network engine called {engine!r}: {', '.join(ENGINES)}")
+    if engine == "networkx" and not networkx_available():
+        engine = "ortools"
+    name = SOLVER_NAMES[engine]
     started = time.monotonic()
-    shape = _shape(compiled)
+    shape = _shape(compiled, ceilings)
     if isinstance(shape, str):
         raise ValueError(shape)
     rows, flip, columns, bounds, broken = shape
     if broken is not None:
-        return _none(compiled, started, "infeasible", {"kind": "min-cost flow", "why": f"the rule {broken!r} reads no decision and does not hold"})
+        return _none(compiled, started, "infeasible", {"kind": "min-cost flow", "engine": engine, "why": f"the rule {broken!r} reads no decision and does not hold"}, name)
     outside = len(rows)
     sign = 1 if compiled.sense == "minimize" else -1
     # Row i, turned: sum(+1 in) - sum(-1 out) (relation) b. Node i must take in b net: supply -b.
@@ -183,7 +211,7 @@ def solve(compiled: Compiled) -> Networked:
         lower, upper = bounds[key]
         capacity = unbounded_cap if upper is None else upper - lower
         if capacity < 0:
-            return _none(compiled, started, "infeasible", {"why": f"{key[0]!r} has its upper bound below its lower"})
+            return _none(compiled, started, "infeasible", {"engine": engine, "why": f"{key[0]!r} has its upper bound below its lower"}, name)
         arcs.append((key, tail, head, lower, capacity, sign * int(compiled.objective.coeffs.get(key, 0))))
     for i, relation in enumerate(turned):
         # Slack: a `<=` rule may take in less (flow from outside), a `>=` rule more (flow to outside).
@@ -191,7 +219,6 @@ def solve(compiled: Compiled) -> Networked:
             arcs.append((None, outside, i, 0, unbounded_cap, 0))
         elif relation == ">=":
             arcs.append((None, i, outside, 0, unbounded_cap, 0))
-    flow = min_cost_flow.SimpleMinCostFlow()
     handles, fixed_cost, loops = [], 0, []
     for key, tail, head, lower, capacity, cost in arcs:
         # A lower bound moves `lower` along the arc before anything is solved.
@@ -201,37 +228,71 @@ def solve(compiled: Compiled) -> Networked:
         if tail == head:
             loops.append((key, lower, capacity, cost))
             continue
-        handles.append((flow.add_arc_with_capacity_and_unit_cost(tail, head, capacity, cost), key, lower, capacity))
-    for node, value in enumerate(supply):
-        flow.set_node_supply(node, value)
-    record = {"kind": "min-cost flow", "nodes": len(rows) + 1, "arcs": len(handles) + len(loops),
+        handles.append((tail, head, capacity, cost, key, lower))
+    record = {"kind": "min-cost flow", "engine": engine, "nodes": len(rows) + 1, "arcs": len(handles) + len(loops),
               "turned_rules": sum(flip.values())}
-    status = flow.solve()
-    if status == flow.INFEASIBLE:
-        return _none(compiled, started, "infeasible", record)
-    if status != flow.OPTIMAL:
-        return _none(compiled, started, "unknown", {**record, "why": f"min-cost flow ended {status}"})
+    walked = _walk_networkx(supply, handles) if engine == "networkx" else _walk_ortools(supply, handles)
+    if isinstance(walked, str):
+        return _none(compiled, started, walked, record if walked == "infeasible" else
+                     {**record, "why": f"min-cost flow ended {walked}"}, name)
     assignments: dict[VarKey, int] = {}
-    for arc, key, lower, capacity in handles:
-        value = flow.flow(arc)
-        if key is not None and bounds[key][1] is None and value >= unbounded_cap and flow.unit_cost(arc) < 0:
-            return _none(compiled, started, "unbounded", {**record, "why": f"{key[0]!r} can grow without end"})
+    for (tail, head, capacity, cost, key, lower), value in zip(handles, walked):
+        if key is not None and bounds[key][1] is None and value >= unbounded_cap and cost < 0:
+            return _none(compiled, started, "unbounded", {**record, "why": f"{key[0]!r} can grow without end"}, name)
         if key is not None:
             assignments[key] = lower + value
     for key, lower, capacity, cost in loops:
         if cost < 0 and bounds[key][1] is None:
-            return _none(compiled, started, "unbounded", {**record, "why": f"{key[0]!r} can grow without end"})
+            return _none(compiled, started, "unbounded", {**record, "why": f"{key[0]!r} can grow without end"}, name)
         assignments[key] = lower + (capacity if cost < 0 else 0)
     objective = float(compiled.objective.evaluated_at(assignments))
     value = int(objective) if objective == int(objective) else objective
     return Networked(Solution(status="optimal", optimal=True, objective=value, assignments=assignments,
                               wall_seconds=round(time.monotonic() - started, 3),
-                              solver="network (min-cost flow, OR-Tools)", best_bound=value), record)
+                              solver=name, best_bound=value), record)
 
 
-def _none(compiled: Compiled, started: float, status: str, record: dict[str, Any]) -> Networked:
+def _walk_ortools(supply: list[int], arcs: list[tuple]) -> list[int] | str:
+    """The flow on each arc by OR-Tools' min-cost flow, or the status that says there is none."""
+    from ortools.graph.python import min_cost_flow
+
+    flow = min_cost_flow.SimpleMinCostFlow()
+    handles = [flow.add_arc_with_capacity_and_unit_cost(tail, head, capacity, cost)
+               for tail, head, capacity, cost, _, _ in arcs]
+    for node, value in enumerate(supply):
+        flow.set_node_supply(node, value)
+    status = flow.solve()
+    if status == flow.INFEASIBLE:
+        return "infeasible"
+    if status != flow.OPTIMAL:
+        return "unknown"
+    return [flow.flow(arc) for arc in handles]
+
+
+def _walk_networkx(supply: list[int], arcs: list[tuple]) -> list[int] | str:
+    """The flow on each arc by NetworkX's network simplex, or the status that says there is none.
+
+    A multigraph, keyed by the arc's place in the list: two decisions between the same two places are
+    two arcs, not one. NetworkX's `demand` is what a node takes in: the opposite of its supply."""
+    import networkx as nx
+
+    graph = nx.MultiDiGraph()
+    for node, value in enumerate(supply):
+        graph.add_node(node, demand=-value)
+    for i, (tail, head, capacity, cost, _, _) in enumerate(arcs):
+        graph.add_edge(tail, head, key=i, capacity=capacity, weight=cost)
+    try:
+        _, flows = nx.network_simplex(graph)
+    except nx.NetworkXUnfeasible:
+        return "infeasible"
+    except nx.NetworkXUnbounded:
+        return "unbounded"
+    return [flows[tail][head][i] for i, (tail, head, *_) in enumerate(arcs)]
+
+
+def _none(compiled: Compiled, started: float, status: str, record: dict[str, Any],
+          name: str = SOLVER_NAMES["ortools"]) -> Networked:
     from app.solve.result import Solution
 
     return Networked(Solution(status=status, optimal=False, objective=None, assignments={},
-                              wall_seconds=round(time.monotonic() - started, 3),
-                              solver="network (min-cost flow, OR-Tools)"), record)
+                              wall_seconds=round(time.monotonic() - started, 3), solver=name), record)

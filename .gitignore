@@ -36,3 +36,8 @@ backend/bench/nightly_results/
 # The default is a sibling ../solver-backups/ (outside git).
 solver-backups/
 **/solver-backups/
+
+# solver agent
+agent/.env
+agent/logs/
+.agent_tmp/

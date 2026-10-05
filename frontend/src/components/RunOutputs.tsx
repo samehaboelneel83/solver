@@ -3,7 +3,7 @@
  *
  * - **on the map** -- any run whose sets have shapes: the places a decision
  *   chose, the links it made, the places a rule fell short at (3.1);
- * - **downloads** -- Excel (a sheet per decision, the rules), CSV, GeoJSON, a printable report (3.2);
+ * - **downloads** -- Excel (a sheet per decision, the rules), CSV, GeoJSON, DXF (CAD), a printable report (3.2);
  * - **compared** -- two answers on one map, only what changed (3.4, `CompareMap`);
  * - **kept as data** -- one decision written into the workspace as a
  *   relationship or a parameter, so the next problem can read it (3.5).
@@ -11,7 +11,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiDownload, apiFetch } from "../api/client";
-import { downloadFrom } from "../api/camps";
+import { downloadFrom } from "../api/download";
 import { formatApiError } from "../api/errors";
 import { BASEMAP_STORAGE_KEY, useBasemaps } from "../hooks/useBasemaps";
 import type { Id } from "../api/v1";
@@ -294,7 +294,7 @@ export default function RunOutputs({ runId, status, ir }: { runId: Id; status: s
       .catch((e) => setFailed(formatApiError(e)))
       .finally(() => setPdfBusy(false));
   };
-  const download = (format: "xlsx" | "csv" | "geojson") => {
+  const download = (format: "xlsx" | "csv" | "geojson" | "dxf") => {
     setFailed(null);
     downloadFrom(`/api/v1/runs/${runId}/export?format=${format}`).catch((e) => setFailed(formatApiError(e)));
   };
@@ -309,6 +309,8 @@ export default function RunOutputs({ runId, status, ir }: { runId: Id; status: s
         </button>
         <button type="button" onClick={report} className="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-50" title="Opens the same report with the print dialog.">Print</button>
         {drawn && <button type="button" onClick={() => download("geojson")} className="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-50">GeoJSON (map)</button>}
+        <button type="button" onClick={() => download("dxf")} className="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-50"
+          title="The answer as a CAD drawing, on the domain's drawing in its own coordinates: chosen, not chosen (layer off) and unmet on layers of their own.">DXF (CAD)</button>
         {failed && <span role="alert" className="text-xs text-red-700">{failed}</span>}
       </div>
       {drawn && (

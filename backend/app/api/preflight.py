@@ -218,10 +218,20 @@ def model_findings(db: Session, domain_id: int, problem_id: int, ir: dict[str, A
 
     if whatif.has_data_changes(patch):
         data = whatif.apply(data, ir, patch)
+    from app.solve.service import empty_decision_sets, empty_relationships
+
+    for name in empty_relationships(ir, data):
+        rel = name.removeprefix("relationship ")
+        findings.append(_finding("blocker", "relationship_empty",
+                                 f"The relationship {rel} has no links, and the model walks it: load them before solving.",
+                                 relationship=rel))
+    blocking = set(empty_decision_sets(ir, data))
     for name in ir.get("sets", []):
         if not data.get("sets", {}).get(name):
-            findings.append(_finding("warning", "set_empty",
-                                     f"There are no {name} records yet, so every rule and decision over {name} is empty.", set=name))
+            # A set the decisions range over blocks Solve (the run would be refused); one only rules read warns.
+            findings.append(_finding("blocker" if name in blocking else "warning", "set_empty",
+                                     f"There are no {name} records yet, so every rule and decision over {name} is empty"
+                                     + (": load them before solving." if name in blocking else "."), set=name))
 
     findings += data_findings(db, domain_id, ir)
 

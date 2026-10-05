@@ -20,8 +20,8 @@ from typing import Any
 
 import pytest
 
-from app.solve import compile_model, evolve
-from app.solve.backends import REGISTRY, SEARCHES, NoBackend, choose
+from app.solve import compile_model, evolve, network
+from app.solve.backends import REGISTRY, SEARCHES, NoBackend, by_name, choose
 from app.solve.classify import classify
 from app.solve.compile import Unsupported
 from app.solve.convexity import refine
@@ -327,6 +327,24 @@ GOLDEN: list[tuple[str, dict, str, Decimal | None]] = [
         "infeasible",
         None,
     ),
+    # A transport: sources of 3 and 2, sinks wanting 2 and 3, costs 4 6 / 5 3. 2 + 1 from the first,
+    # 2 to the second sink from the second: 8 + 6 + 6 = 20. A network, so `networkx` takes it.
+    (
+        "transport_network",
+        model(
+            {"x11": INT, "x12": INT, "x21": INT, "x22": INT},
+            [
+                rule("s1", add(v("x11"), v("x12")), "<=", c(3)),
+                rule("s2", add(v("x21"), v("x22")), "<=", c(2)),
+                rule("d1", add(v("x11"), v("x21")), ">=", c(2)),
+                rule("d2", add(v("x12"), v("x22")), ">=", c(3)),
+            ],
+            "minimize",
+            [mul(c(4), v("x11")), mul(c(6), v("x12")), mul(c(5), v("x21")), mul(c(3), v("x22"))],
+        ),
+        "optimal",
+        Decimal("20"),
+    ),
     # No objective: any answer that holds is optimal, and there is no value.
     ("feasibility", model({"x": BIN}, [rule("on", v("x"), ">=", c(1))]), "optimal", None),
 ]
@@ -363,6 +381,11 @@ def _takes(backend, found) -> bool:
 def test_golden(ir, backend, status, objective):
     if backend.name in SEARCHES:
         _search_golden(ir, backend, status, objective)
+        return
+    if backend.name == "networkx" and network.applies(compile_model(ir, NO_DATA), ceilings=True) is not None:
+        # Its class fits, its shape does not: refused with the reason, never answered as something else.
+        with pytest.raises(Unsupported, match="networkx solves a network"):
+            solve_compiled(backend, compile_model(ir, NO_DATA), time_limit=20, seed=1)
         return
     result, reason = solve_compiled(backend, compile_model(ir, NO_DATA), time_limit=20, seed=1)
 
@@ -417,6 +440,14 @@ def test_scaling_admits_only_what_it_can_make_whole():
     assert "scaled_knapsack-cp-sat" in takers
     assert "five_decimals-cp-sat" not in takers
     assert "five_decimals-highs" in takers or "five_decimals-milp" in takers
+
+
+def test_networkx_answers_the_network_golden_case():
+    """Refusing every model would pass the golden suite; it must also answer the one network there."""
+    ir = next(ir for name, ir, _, _ in GOLDEN if name == "transport_network")
+    result, _ = solve_compiled(by_name("networkx"), compile_model(ir, NO_DATA), time_limit=20, seed=1)
+    assert result.status == "optimal" and Decimal(str(result.objective)) == 20
+    assert result.solver.startswith("network (min-cost flow, NetworkX")
 
 
 def test_every_backend_is_exercised_by_the_golden_suite():

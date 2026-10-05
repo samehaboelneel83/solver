@@ -134,6 +134,19 @@ def test_an_answer_exports_as_excel_csv_and_geojson(db, placed, empty_queue, cli
     assert {l["id"] for l in mapped["layers"]} >= {"open", "serve", "unmet"}
 
 
+def test_an_answer_exports_as_a_cad_drawing(db, placed, empty_queue, client, auth_headers):  # noqa: F811
+    """format=dxf: the answer map as DXF layers by what happened, readable by ezdxf (AutoCAD's format)."""
+    import ezdxf
+
+    run, _ = _solve(db, _scenario(db, placed))
+    got = client.get(f"/api/v1/runs/{run}/export", params={"format": "dxf"}, headers=auth_headers)
+    assert got.status_code == 200, got.text
+    assert got.headers["content-disposition"].endswith('.dxf"')
+    doc = ezdxf.read(io.StringIO(got.content.decode("utf-8")))
+    layers = {e.dxf.layer for e in doc.modelspace()}
+    assert {"OPEN-CHOSEN", "SERVE-LINKS", "UNMET-SHORT", "ANSWER-NOTE"} <= layers, layers
+
+
 def test_an_answer_prints_as_a_report_with_its_map(db, placed, empty_queue, client, auth_headers):  # noqa: F811
     """Improvement plan 3.2: a printable report (saved as PDF by the browser) with the map drawn."""
     run, _ = _solve(db, _scenario(db, placed))

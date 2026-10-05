@@ -40,7 +40,4 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 COPY . .
 
-# The camp layout engine (camp_layout/README.md) is a package of its own in the image.
-ENV PYTHONPATH=/app/camp_layout
-
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

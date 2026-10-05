@@ -307,7 +307,7 @@ class ParameterDef(Base):
     # price or a proportion, and those are the numbers that make a model
     # continuous.
     default_value: Mapped[Decimal] = mapped_column(
-        Numeric(15, 6), nullable=False, server_default="0"
+        Numeric(24, 6), nullable=False, server_default="0"
     )
     unit: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Migration 0068 (queue R20b): the entity type this parameter's values
@@ -331,7 +331,7 @@ class ParameterValue(Base):
     entity_ids: Mapped[list[int]] = mapped_column(ARRAY(BigInteger), nullable=False)
     # A number, or -- for a parameter with a value type (migration 0068,
     # queue R20b) -- NULL, the cell's value being `value_entity_id`.
-    value: Mapped[Decimal | None] = mapped_column(Numeric(15, 6), nullable=True)
+    value: Mapped[Decimal | None] = mapped_column(Numeric(24, 6), nullable=True)
     value_entity_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("entity.id", ondelete="CASCADE"), nullable=True
     )

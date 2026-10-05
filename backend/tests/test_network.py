@@ -217,3 +217,153 @@ def test_a_model_with_no_rule_joining_decisions_is_not_a_network():
                            "severity": "hard"}],
           "objective": {"sense": "maximize", "terms": [{"id": "o", "weight": 1, "expression": {"var": "x", "index": []}}]}}
     assert "no rule joins two decisions" in network.applies(compile_model(ir, NO_DATA))
+
+
+# -- NetworkX: the lane's default engine, and a solver of its own --------------------------------
+
+
+@pytest.mark.parametrize("family", sorted(families.FAMILIES))
+def test_both_engines_prove_the_same_optimum(family):
+    ir, data = families.FAMILIES[family]("M")
+    compiled = compile_model(ir, data)
+    by_nx = network.solve(compiled, engine="networkx")
+    by_ortools = network.solve(compiled, engine="ortools")
+    assert by_nx.solution.status == by_ortools.solution.status == "optimal"
+    assert float(by_nx.solution.objective) == pytest.approx(float(by_ortools.solution.objective))
+    assert by_nx.record["engine"] == "networkx" and by_ortools.record["engine"] == "ortools"
+    assert "NetworkX" in by_nx.solution.solver and "OR-Tools" in by_ortools.solution.solver
+
+
+def test_both_engines_agree_on_random_networks_and_on_what_has_no_answer():
+    statuses = set()
+    for seed in range(120):
+        compiled = compile_model(_random_network(seed), NO_DATA)
+        if network.applies(compiled) is not None:
+            continue
+        a = network.solve(compiled, engine="networkx").solution
+        b = network.solve(compiled, engine="ortools").solution
+        assert a.status == b.status, seed
+        statuses.add(a.status)
+        if a.status == "optimal":
+            assert float(a.objective) == pytest.approx(float(b.objective)), seed
+    assert {"optimal", "infeasible"} <= statuses
+
+
+def test_the_networkx_solver_by_name_answers_a_network():
+    from app.solve.service import solve_compiled
+
+    ir, data = families.transport("M")
+    compiled = compile_model(ir, data)
+    ours, _ = solve_compiled(by_name("networkx"), compiled, time_limit=20, seed=1)
+    theirs = by_name("highs").solve(compiled, time_limit=20, workers=2, seed=1)
+    assert ours.status == "optimal" and ours.optimal
+    assert float(ours.objective) == pytest.approx(float(theirs.objective))
+
+
+def test_the_networkx_solver_takes_a_continuous_network_too():
+    from app.solve.service import solve_compiled
+
+    ir, data = families.transport("S")
+    for var in ir["variables"].values():
+        var["domain"] = "continuous"
+    compiled = compile_model(ir, data)
+    ours, _ = solve_compiled(by_name("networkx"), compiled, time_limit=20, seed=1)
+    theirs = by_name("glop").solve(compiled, time_limit=20, workers=2, seed=1)
+    assert ours.status == "optimal"
+    assert float(ours.objective) == pytest.approx(float(theirs.objective))
+
+
+def test_the_networkx_solver_refuses_what_is_not_a_network_with_the_reason():
+    from app.solve.compile import Unsupported
+    from app.solve.service import solve_compiled
+
+    ir = {"version": 2, "sets": [], "parameters": {},
+          "variables": {"x": {"index": [], "domain": "integer", "lower": 0, "upper": 9},
+                        "y": {"index": [], "domain": "integer", "lower": 0, "upper": 9}},
+          "constraints": [{"id": "cap", "left": {"add": [{"mul": [{"const": 3}, {"var": "x", "index": []}]},
+                                                          {"var": "y", "index": []}]},
+                           "relation": "<=", "right": {"const": 10}, "severity": "hard"}],
+          "objective": {"sense": "maximize", "terms": [{"id": "o", "weight": 1, "expression": {"var": "x", "index": []}}]}}
+    with pytest.raises(Unsupported, match="networkx solves a network.*weighs a decision by more than one"):
+        solve_compiled(by_name("networkx"), compile_model(ir, NO_DATA), time_limit=5)
+
+
+def test_the_rules_never_choose_networkx_unasked_but_it_can_be_asked_for():
+    from app.solve.backends import choose
+    from app.solve.classify import classify
+    from app.solve.convexity import refine
+
+    ir, data = families.assignment("S")
+    compiled = compile_model(ir, data)
+    found = refine(classify(ir, data), compiled)
+    assert choose(found)[0].name != "networkx"
+    assert choose(found, "networkx")[0].name == "networkx"
+
+
+def test_a_network_unbounded_by_the_networkx_solver_says_why():
+    """No ceiling and a goal that pays for ever: the guard ceiling is lifted and the reason names it,
+    as for every solver (`solve_compiled`)."""
+    from app.solve.service import solve_compiled
+
+    ir = {"version": 2, "sets": [], "parameters": {},
+          "variables": {"a": {"index": [], "domain": "integer", "lower": 0},
+                        "b": {"index": [], "domain": "integer", "lower": 0}},
+          "constraints": [{"id": "balance", "left": {"var": "a", "index": []}, "relation": "=",
+                           "right": {"var": "b", "index": []}, "severity": "hard"}],
+          "objective": {"sense": "maximize", "terms": [{"id": "o", "weight": 1, "expression": {"var": "a", "index": []}}]}}
+    result, why = solve_compiled(by_name("networkx"), compile_model(ir, NO_DATA), time_limit=5)
+    assert result.status == "unbounded" and why and "without limit" in why
+
+
+def test_a_run_asking_for_networkx_is_solved_by_it(db, empty_queue):  # noqa: F811
+    """Asked for by name, on a continuous network the lane would leave to GLOP: NetworkX answers it."""
+    from sqlalchemy import text
+
+    from app.solve.service import enqueue_run
+    from app.worker import work_once
+    from tests.test_v1_problem_run import make_domain, make_model_version, make_problem
+
+    seed = next(s for s in range(200) if network.applies(compile_model(_continuous(_random_network(s)), NO_DATA)) is None
+                and network.solve(compile_model(_continuous(_random_network(s)), NO_DATA)).solution.status == "optimal")
+    ir = _continuous(_random_network(seed))
+    version = make_model_version(db, make_problem(db, make_domain(db, "networkx by name")), ir)
+    problem = db.execute(text("SELECT problem_id FROM model_version WHERE id = :v"), {"v": version}).scalar_one()
+    scenario = db.execute(text("INSERT INTO scenario (problem_id, model_version_id, name) VALUES (:p, :v, 'base')"
+                               " RETURNING id"), {"p": problem, "v": version}).scalar_one()
+    db.commit()
+    run_id = enqueue_run(db, scenario, time_limit=10.0, solver="networkx")
+    for _ in range(5):
+        if db.execute(text("SELECT status FROM run WHERE id = :r"), {"r": run_id}).scalar_one() != "queued":
+            break
+        work_once(db)
+    row = db.execute(text("SELECT status, optimality, objective, solver_version FROM run WHERE id = :r"),
+                     {"r": run_id}).mappings().one()
+    assert row["status"] == "optimal" and row["optimality"] == "global", row
+    assert "NetworkX" in row["solver_version"]
+    expected = network.solve(compile_model(ir, NO_DATA), engine="ortools").solution.objective
+    assert float(row["objective"]) == pytest.approx(float(expected))
+
+
+def test_the_lane_uses_networkx_by_default(db, empty_queue):  # noqa: F811
+    from sqlalchemy import text
+
+    from tests.test_run_events import _run
+
+    seed = next(s for s in range(200) if network.applies(compile_model(_whole(_random_network(s)), NO_DATA)) is None
+                and network.solve(compile_model(_whole(_random_network(s)), NO_DATA)).solution.status == "optimal")
+    run_id = _run(db, _whole(_random_network(seed)), "network engine default")
+    row = db.execute(text("SELECT solver_version, params FROM run WHERE id = :r"), {"r": run_id}).mappings().one()
+    assert "NetworkX" in row["solver_version"]
+    assert row["params"]["network_engine"] == "networkx"
+    assert row["params"]["network_run"]["engine"] == "networkx"
+
+
+def test_the_engine_setting_takes_only_the_two_engines():
+    from fastapi import HTTPException
+
+    from app.api.settings import _refuse_unknown_choice
+
+    _refuse_unknown_choice("solve.network_engine", "networkx")
+    _refuse_unknown_choice("solve.network_engine", "ortools")
+    with pytest.raises(HTTPException, match="one of networkx, ortools"):
+        _refuse_unknown_choice("solve.network_engine", "gurobi")

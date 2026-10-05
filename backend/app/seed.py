@@ -760,15 +760,17 @@ def plant_domain_seed(db: Session, domain_id: int, seed: Any) -> None:
         key = (spec["type"], spec["key"])
         if key in entities:
             continue
-        entities[key] = _entity(
-            db,
-            types[spec["type"]],
-            spec["key"],
-            spec.get("label"),
-            int(spec.get("sort_order") or 0),
-            spec.get("attrs") or {},
-        )
+        # Added now, written in one flush below: a flush per record took 38 s for the 20,000 candidates
+        # of a layout (camp-bed retest); ids are only needed from the relationships on.
+        row = Entity(entity_type_id=types[spec["type"]].id, key=spec["key"], label=spec.get("label"),
+                     sort_order=int(spec.get("sort_order") or 0), attrs=spec.get("attrs") or {})
+        db.add(row)
+        entities[key] = row
+    db.flush()
 
+    # The links already there, read once per type rather than one query per link (a layout's occupancy
+    # links run to hundreds of thousands); new ones written in one flush.
+    linked: dict[int, set[tuple[int, int]]] = {}
     for spec in seed.get("relationships") or []:
         if not isinstance(spec, dict) or spec.get("type") not in rel_types:
             continue
@@ -776,20 +778,20 @@ def plant_domain_seed(db: Session, domain_id: int, seed: Any) -> None:
         if src is None or dst is None or src not in entities or dst not in entities:
             continue
         rel_type = rel_types[spec["type"]]
-        exists = db.execute(
-            select(Relationship.id).where(
-                Relationship.relationship_type_id == rel_type.id,
-                Relationship.from_entity_id == entities[src].id,
-                Relationship.to_entity_id == entities[dst].id,
-            )
-        ).scalar_one_or_none()
-        if exists is not None:
+        if rel_type.id not in linked:
+            linked[rel_type.id] = {
+                (a, b) for a, b in db.execute(
+                    select(Relationship.from_entity_id, Relationship.to_entity_id).where(
+                        Relationship.relationship_type_id == rel_type.id)).all()}
+        pair = (entities[src].id, entities[dst].id)
+        if pair in linked[rel_type.id]:
             continue
+        linked[rel_type.id].add(pair)
         db.add(
             Relationship(
                 relationship_type_id=rel_type.id,
-                from_entity_id=entities[src].id,
-                to_entity_id=entities[dst].id,
+                from_entity_id=pair[0],
+                to_entity_id=pair[1],
             )
         )
     db.flush()

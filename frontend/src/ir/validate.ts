@@ -1474,7 +1474,8 @@ class ShapeChecker {
       return refusal(
         "where_filter_malformed",
         [...here, "attr"],
-        "a filter names an attribute of the set its binding ranges over"
+        "a filter names an attribute of the set its binding ranges over, as a plain name " +
+          `(got ${JSON.stringify(entry.attr)}): {"attr": "grade", "op": "=", "value": "senior"}`
       );
     }
     const operator = entry.op;
@@ -1566,7 +1567,12 @@ class ShapeChecker {
       return refusal(
         "term_kind_unknown",
         loc,
-        `a term names one of ${[...TERM_KINDS].sort().join(", ")}; this names none of them`
+        `a term names one of ${[...TERM_KINDS].sort().join(", ")}; this names none of them ` +
+          `(it has ${Object.keys(term).sort().join(", ") || "no keys"})` +
+          (["if", "then", "else", "cond", "case"].some((k) => k in term)
+            ? "; there is no if/else: a number that depends on a record (night pays 1.3) is a " +
+              "parameter indexed by that record's set, multiplied in"
+            : "")
       );
     }
     if (kinds.length > 1) {
@@ -1719,7 +1725,10 @@ class ShapeChecker {
         return refusal(
           "index_not_bound",
           [...loc, "index", j],
-          `${show(index)} is not bound by any enclosing forall or over, so it has no range`
+          `${show(index)} is not bound by any enclosing forall or over, so it has no range; ` +
+            "to mean one particular record, bind an index to it: " +
+            `{"index": "k", "set": ${JSON.stringify(indexTypes[j])}, "where": [{"attr": "id", "op": "=", ` +
+            `"value": ${JSON.stringify(index)}}]}`
         );
       }
       if (scope.get(index) !== indexTypes[j]) {
@@ -1995,7 +2004,8 @@ class ShapeChecker {
       return refusal(
         "mul_arity",
         [...loc, "mul"],
-        "mul has exactly two factors, so linearity is a check on a pair"
+        "mul has exactly two factors, so linearity is a check on a pair; nest a longer product: " +
+          'a * b * c is {"mul": [{"mul": [a, b]}, c]}'
       );
     }
     for (let i = 0; i < factors.length; i += 1) {

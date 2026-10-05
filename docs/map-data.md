@@ -3,7 +3,7 @@
 Any DXF drawing, or a GeoJSON, KML/KMZ, GPX, Shapefile, GeoPackage or CSV
 file (section 1b), can be brought onto the map, layer by layer, and kept in
 the database as GIS features. Nothing in the pipeline knows what the drawing is
-of. Camps (and anything else) are built *from* map data by pointing at its
+of. Records (and models over them) are built *from* map data by pointing at its
 layers.
 
 ```
@@ -38,7 +38,7 @@ own coordinates and units:
 ## 1b. Other spatial files (`backend/app/gis/formats.py`)
 
 Each reader gives the same layers of point, line and polygon features as a
-DXF, so placing, storing, viewing and making a camp from a layer work the
+DXF, so placing, storing, viewing and making records from a layer work the
 same. Attributes become feature properties. Multi-part shapes become one
 feature per part, with a `part` number. Polygons keep their holes. No library
 beyond shapely and pyproj is needed: shapefiles and GeoPackages are read
@@ -58,10 +58,6 @@ directly.
   `longitude`/`latitude`, `x`/`y`, `easting`/`northing`).
 - **Coordinate system:** a system the file names is offered first and chosen
   for you.
-- **Camps from longitude/latitude data:** a camp made from a file in longitude
-  and latitude is laid out in metres. Its grid is turned to its longest wall
-  (the camp's `bearing`), so walls drawn straight on any grid stay straight
-  and its doors sit on them.
 - **Names:** a shape's own `name` (or `label`, `id`) attribute names it, where
   a DXF needs a text beside it.
 
@@ -149,17 +145,43 @@ without that column, and the platform works the same.
   references show as points. Click a feature for everything the drawing says
   about it. Search text, block names and attributes. Zoom to a layer.
 - **Export**: GeoJSON (WGS 84), or CSV with WKT geometry.
-- **Camps** are a tab of Map data, and kept as records of the domain (see
-  `backend/camp_layout/README.md`).
-- **Camps from map data**: *Map data → Camps → Or from map data*. Choose the
-  boundary layer and the layers holding doors, closed areas, no-bed areas and
-  bed zones; roles are guessed from layer names. The camp is laid out in the
-  drawing's own grid, so straight walls stay straight. Touching door pieces
-  (a leaf and its swing arc) become one door, snapped onto the wall.
 
 Imagery comes from the tile index named by `spatial.tiles_index`, otherwise
 from Esri World Imagery and OpenStreetMap, which the viewer's browser must
 be able to reach.
+
+## Map data to records, for the whole domain
+
+*Map data → Map to records* (or *Map to records* on a drawing's page) maps every layer of the
+domain's map data onto its kinds of record at once (`backend/app/gis/auto_records.py`):
+
+- **Which kind.** Each layer is scored against every kind of the domain:
+  - **Shared keys (the strongest signal):** the share of its features whose value of some property
+    is already a record key of that kind.
+  - **Name:** whether the layer's (or the file's) name matches the kind's. An equal name, or one
+    holding it ("WELLS_EXISTING" names wells), is enough on its own.
+  - **Fields:** how many of its properties are fields of the kind.
+
+  Below the bar, a new kind named after the layer is proposed.
+- **Which records.** The property whose values are the kind's keys is the key. Features that name
+  a record update it: its shape, `area_m2`/`length_m` and the matched fields. The others become new
+  records, unless the kind has a required field nothing in the layer fills; then it only updates.
+- **Which fields.** A property goes to the field of the same (or a close) name, with that field's
+  type. On an existing kind, other properties are left out unless ticked. On a new kind they become
+  fields.
+
+The review shows, per layer:
+- the kind, how sure the match is and why, and the key;
+- how many records it updates and adds, and the field mapping;
+- every value that would not fit its field.
+
+Change a layer's kind (or leave it out) or its key and it is mapped again. *Apply* writes every
+layer in one transaction: on any error nothing is kept. Run it again after a new drawing: records
+are matched by key and refreshed, not doubled.
+
+API: `POST /api/v1/gis/domains/{id}/records/propose` `{"choices": [{"dataset_id", "layer", "type",
+"key"}]}` (writes nothing), then `POST /api/v1/gis/domains/{id}/records` `{"mappings": [...]}`
+(`domain.edit`). The Assistant can use both, and can preview from the *Describe a problem* tab.
 
 ## API
 
@@ -169,6 +191,3 @@ be able to reach.
 
 - 50 MB per drawing, and 250,000 features per import (the rest are noted).
 - The viewer shows up to 100,000 features at once.
-- A camp built from map data keeps the drawing's grid: its bearing is the
-  grid's turn from true north (a UTM zone's convergence, or a local grid's
-  rotation), so it sits on the imagery exactly as drawn.

@@ -13,7 +13,8 @@ import { formatApiError } from "../api/errors";
 import {
   datasetCandidates, deleteDataset, editLayer, placeDataset, useDataset, useFeatures, type GisDataset, type SiteWhere,
 } from "../api/gis";
-import { downloadFrom, type Pt } from "../api/camps";
+import { downloadFrom } from "../api/download";
+import type { Pt } from "../lib/geo";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import LoadFailure from "../components/LoadFailure";
 import Skeleton from "../components/Skeleton";
@@ -149,6 +150,10 @@ function Viewer({ dataset }: { dataset: GisDataset }) {
             className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2 py-1 hover:bg-slate-50">
             <Maximize2 className="h-3.5 w-3.5" aria-hidden /> Fit
           </button>
+          <Link to={`/domains/${dataset.domain_id}/map-data?records=1`}
+            className="inline-flex items-center gap-1 rounded border border-blue-600 bg-white px-2 py-1 font-medium text-blue-700 hover:bg-blue-50">
+            Map to records
+          </Link>
           {(["geojson", "csv"] as const).map((f) => (
             <button key={f} type="button" onClick={() => void downloadFrom(`/api/v1/gis/datasets/${dataset.id}/export?format=${f}`)}
               className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2 py-1 hover:bg-slate-50">

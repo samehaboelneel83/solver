@@ -1,11 +1,11 @@
 /**
- * A site's map: local metres drawn over imagery, with pan and zoom. The camp
- * editor and the map data viewer both draw on it.
+ * A site's map: local metres drawn over imagery, with pan and zoom. The map
+ * data viewer and a record's location editor draw on it.
  *
  * The view is a centre in local metres and metres per screen pixel. Tiles
  * are Web Mercator; each is placed by its corners, converted to local
- * metres (`lib/campGeo`), so the drawing and the imagery agree wherever the
- * camp's origin is. Children draw with `at`, metres to screen.
+ * metres (`lib/geo`), so the drawing and the imagery agree wherever the
+ * site's origin is. Children draw with `at`, metres to screen.
  *
  * Pointer events reach the caller in metres. A drag the caller does not
  * take (it returns false from `onDown`), a middle- or right-button drag,
@@ -16,8 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useBasemaps } from "../../hooks/useBasemaps";
 import { useDomain } from "../../hooks/useDomain";
 import { useSettings } from "../../api/v1";
-import type { Pt, Ring } from "../../api/camps";
-import { toLocal, toLonLat } from "../../lib/campGeo";
+import { toLocal, toLonLat, type Pt, type Ring } from "../../lib/geo";
 import { tileUrl, type Basemap } from "../../lib/tiles";
 
 export type MapView = { cx: number; cy: number; mpp: number };
@@ -99,7 +98,7 @@ export function useSiteBasemap(storageKey = "solver_site_basemap"): { options: B
 
 type Props = {
   origin: Pt;
-  /** How far the drawing's +y axis is turned clockwise from north (a camp's own grid). */
+  /** How far the drawing's +y axis is turned clockwise from north (a site's own grid). */
   bearing?: number;
   view: MapView;
   onView: (view: MapView) => void;
@@ -120,7 +119,7 @@ type Props = {
   label: string;
 };
 
-export default function CampMap({
+export default function SiteMap({
   origin, bearing = 0, view, onView, basemap, height, cursor, onDown, onMove, onUp, onDoubleClick, onSize, children, canvas, onClick,
   overlay, label,
 }: Props) {

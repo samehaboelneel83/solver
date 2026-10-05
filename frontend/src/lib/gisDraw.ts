@@ -1,11 +1,10 @@
 /**
  * GIS features on a canvas: prepared once into local metres around an
- * origin (`lib/campGeo`), then drawn each frame with only what is in view,
+ * origin (`lib/geo`), then drawn each frame with only what is in view,
  * and found again under the pointer.
  */
 import type { GisFeature } from "../api/gis";
-import { inside, toLocal } from "./campGeo";
-import type { Pt } from "../api/camps";
+import { inside, toLocal, type Pt } from "./geo";
 
 export type Prepared = {
   feature: GisFeature;

@@ -6,8 +6,9 @@ import {
   Activity, Archive, Bell, BookOpen, Boxes, BrainCircuit, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Database, FileStack, FlaskConical, FolderTree,
   GitBranch, Home, Cpu,
   KeyRound, Languages, LayoutTemplate, LogOut, Map as MapIcon, Menu, Moon, Network, Play, ScrollText, Search, Settings,
-  ShieldCheck, SlidersHorizontal, Sun, Table2, Tent, UserCog, Users, Waypoints, Workflow, type LucideIcon,
+  ShieldCheck, SlidersHorizontal, Sparkles, Sun, Table2, UserCog, Users, Waypoints, Workflow, type LucideIcon,
 } from "lucide-react";
+import AssistantPanel from "./assistant/AssistantPanel";
 import { setToken } from "../api/client";
 import { applyDirection, applyTheme, isDark, storedDirection, storedTheme, type ThemeChoice } from "../lib/theme";
 import CommandPalette from "./CommandPalette";
@@ -61,7 +62,6 @@ const ICONS: Record<string, LucideIcon> = {
   "/solvers": Cpu,
   "/ops/queue": Activity,
   "/predictors": BrainCircuit,
-  "/camps": Tent,
   "/map-data": MapIcon,
   "/ops/audit": ScrollText,
   "/ops/backups": Archive,
@@ -250,6 +250,25 @@ function AppShellContent() {
   const [theme, setTheme] = useState<ThemeChoice>(storedTheme);
   const [direction, setDirection] = useState(storedDirection);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // The assistant's panel, beside every page; whether it is open is remembered.
+  const [assistantOpen, setAssistantOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("solver_assistant_open") === "1";
+    } catch {
+      return false;
+    }
+  });
+  function toggleAssistant(next?: boolean) {
+    setAssistantOpen((current) => {
+      const value = next ?? !current;
+      try {
+        localStorage.setItem("solver_assistant_open", value ? "1" : "0");
+      } catch {
+        // not remembered; still applies now
+      }
+      return value;
+    });
+  }
   const [openMenu, setOpenMenu] = useState<null | "user" | "runs">(null);
   const { username } = useCapabilities();
   const where = whereAmI(location.pathname);
@@ -278,12 +297,16 @@ function AppShellContent() {
     setDirection(next);
   }
 
-  // Ctrl+K (or Cmd+K) opens the command search from anywhere.
+  // Ctrl+K (or Cmd+K) opens the command search from anywhere; Ctrl+J the assistant.
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         setPaletteOpen(true);
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "j") {
+        event.preventDefault();
+        toggleAssistant();
       }
     }
     document.addEventListener("keydown", onKey);
@@ -613,6 +636,18 @@ function AppShellContent() {
           <span className="hidden w-32 text-start xl:inline">Go to page…</span>
           <kbd className="hidden rounded border border-slate-300 bg-white px-1.5 font-sans text-[11px] text-slate-500 xl:inline">Ctrl K</kbd>
         </button>
+        <button
+          type="button"
+          onClick={() => toggleAssistant()}
+          aria-pressed={assistantOpen}
+          aria-label="Assistant (Ctrl J)"
+          title="Assistant (Ctrl J)"
+          className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium ${
+            assistantOpen ? "bg-blue-600 text-white hover:bg-blue-700" : "border border-blue-200 text-blue-700 hover:bg-blue-50"}`}
+        >
+          <Sparkles className="h-4 w-4" aria-hidden />
+          <span className="hidden sm:inline">Assistant</span>
+        </button>
         <LevelSwitch />
         {/* Language and text direction together (UX audit N-7: direction was its own sidebar item). */}
         <details className="relative hidden md:block">
@@ -707,6 +742,11 @@ function AppShellContent() {
         </Suspense>
       </main>
       </div>
+      <AssistantPanel
+        open={assistantOpen}
+        onClose={() => toggleAssistant(false)}
+        context={{ page: location.pathname, domain_id: domainId, problem_id: problemId }}
+      />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} can={can} />
     </div>
   );

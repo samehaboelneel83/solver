@@ -39,7 +39,7 @@ from app.models.iam import UserAccount
 from app.models.v1_problem import ConstraintResult, Problem, Run, Scenario, Solution
 from app.solve.backends import available_names
 from app.solve.compare import NotComparable, compare
-from app.solve.service import CannotCancel, QuotaExceeded, SettingUnusable, cancel_run, enqueue_run
+from app.solve.service import CannotCancel, EmptySets, QuotaExceeded, SettingUnusable, cancel_run, enqueue_run
 from app.solve import whynot
 
 router = APIRouter(prefix="/api/v1", tags=["runs"])
@@ -361,6 +361,13 @@ def create_run(
         raise HTTPException(
             status_code=422,
             detail=[{"type": "setting", "loc": ["settings", exc.key], "msg": str(exc)}],
+        ) from exc
+    except EmptySets as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=422,
+            detail=[{"type": "empty_relationship" if name.startswith("relationship ") else "empty_set",
+                     "loc": ["data", name.removeprefix("relationship ")], "msg": str(exc)} for name in exc.sets],
         ) from exc
     except QuotaExceeded as exc:
         # 422, not 429: the request is well-formed and the caller is not

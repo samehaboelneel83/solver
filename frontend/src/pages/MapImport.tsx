@@ -17,9 +17,9 @@ import PlacementPicker, { SiteWherePicker, storedWhere, type PickerState } from 
 import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useDomain } from "../hooks/useDomain";
-import { toLonLat } from "../lib/campGeo";
+import { toLonLat } from "../lib/geo";
 import { draw, extentOf, prepare } from "../lib/gisDraw";
-import type { Pt } from "../api/camps";
+import type { Pt } from "../lib/geo";
 
 /** The files Map data reads (backend `app/gis/formats.py`). */
 export const SPATIAL_FILES = ".dxf,.geojson,.json,.kml,.kmz,.gpx,.zip,.gpkg,.csv";

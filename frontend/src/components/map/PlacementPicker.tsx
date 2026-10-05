@@ -11,7 +11,7 @@
  */
 import { useState } from "react";
 import { useCrsSearch, useRegions, type CrsCandidate, type GisPlacement, type LonLat, type SiteWhere } from "../../api/gis";
-import { parseLatLon } from "../../lib/campGeo";
+import { parseLatLon } from "../../lib/geo";
 
 const FIELD = "w-full rounded border border-slate-300 bg-white px-1.5 py-1 text-sm";
 const UNITS: [string, number | null][] = [
