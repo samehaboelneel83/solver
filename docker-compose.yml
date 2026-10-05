@@ -12,7 +12,10 @@ services:
   postgres:
     # PostGIS: Postgres 16 with the spatial extension (map data, migration 0097). The
     # same data directory as postgres:16; without the extension the platform still runs.
-    image: postgis/postgis:16-3.4
+    # Keep the database OS/libc stable: changing its collation library requires
+    # reindexing every database before refreshing stored collation versions.
+    image: postgis/postgis:16-3.4@sha256:44126d872ac91993766c341e369c539e8196614321765d36a6f1bab0419a5fa5
+    pull_policy: never
     restart: unless-stopped
     # R39: nightly dumps + WAL land under SOLVER_BACKUP_DIR on the host
     # (default: sibling solver-backups/). archive_mode needs a restart once.

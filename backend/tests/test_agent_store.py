@@ -8,6 +8,8 @@ import json
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.api import agent as agent_api
+from app.agent import core, store as agent_store
 from tests.test_agent import _chat
 from tests.test_agent_field_test import _install, _parsed
 from tests.test_tenancy import tenants  # noqa: F401
@@ -38,6 +40,33 @@ def test_attached_files_are_kept_and_detached_by_name(tenants, monkeypatch):
     # Detach all: keep_files [].
     _chat(tenants["b"], text="forget them", server_history=True, conversation_id="conv_store_2", keep_files=[])
     assert files[0]["name"] not in json.dumps(model.requests[-1]["messages"][0])
+
+
+def test_incoming_files_are_saved_before_a_turn_can_be_interrupted(tenants, monkeypatch):
+    files = _parsed()
+    saved = []
+    real_save = agent_store.save
+
+    def capture(db, conversation_id, owner_id, organization_id, mode, messages, kept_files, turned=True):
+        saved.append((conversation_id, messages, kept_files, turned))
+        return real_save(db, conversation_id, owner_id, organization_id, mode, messages, kept_files, turned)
+
+    def interrupted(self, messages, allow=None):
+        yield {"type": "error", "text": "simulated interrupted turn"}
+
+    monkeypatch.setattr(agent_store, "save", capture)
+    monkeypatch.setattr(core.Agent, "run", interrupted)
+    response = TestClient(app).post("/api/v1/agent/chat", headers=tenants["b"], json={
+        "text": "continue using the attached file", "mode": "model", "files": files,
+        "server_history": True, "conversation_id": "conv_store_interrupted",
+    })
+
+    assert response.status_code == 200
+    assert saved and len(saved) == 1  # no terminal state was yielded to trigger the old save path
+    conversation_id, messages, kept_files, turned = saved[0]
+    assert conversation_id == "conv_store_interrupted" and not turned
+    assert messages[-1]["content"] == "continue using the attached file"
+    assert kept_files[0]["name"] == files[0]["name"]
 
 
 def test_someone_elses_conversation_is_refused(tenants, monkeypatch):

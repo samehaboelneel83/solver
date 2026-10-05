@@ -49,6 +49,14 @@ def test_a_step_that_does_not_divide_the_sizes_is_refused(tmp_path):
                     items=[{"name": "bed", "length": 1.5, "width": 0.5}], step=0.2)
 
 
+def test_layout_refuses_links_over_the_assistant_file_limit_before_writing(tmp_path):
+    with pytest.raises(layout.LayoutRefused, match="without truncation"):
+        layout.make(_room(tmp_path, w=10, h=10), str(tmp_path), area_layers=["ROOMS"],
+                    items=[{"name": "desk", "length": 1.0, "width": 1.0, "rotations": [0]}],
+                    max_file_rows=9)
+    assert not (tmp_path / "layout_items.csv").exists()
+
+
 def test_the_camp_drawing_in_well_under_a_second(tmp_path):
     f = agent_files.parse_spatial("camp_layout_layers.dxf", DRAWING.read_bytes())
     out = layout.make([f], str(tmp_path), area_layers=["BOUNDARY"], blocked_layers=["OBSTACLES", "DOORS_OBSTACLE"],

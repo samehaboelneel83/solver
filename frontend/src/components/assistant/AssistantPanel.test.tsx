@@ -54,6 +54,22 @@ afterEach(() => {
 });
 
 describe("AssistantPanel, describing a problem", () => {
+  it("shows the server's reason under a rejected assistant action", async () => {
+    mockFetch([ndjson([
+      { type: "tool", name: "call_api", args: { method: "POST", path: "/api/v1/problems/from-spec" } },
+      { type: "result", name: "call_api", ok: false, preview: "HTTP 422: problem_name is required" },
+      { type: "answer", text: "I stopped after repeated validation errors." },
+      { type: "state", messages: [], wrote: false },
+    ])]);
+    renderPanel();
+
+    fireEvent.change(screen.getByLabelText("Message to the assistant"), { target: { value: "Create this" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(await screen.findByText("HTTP 422: problem_name is required")).toBeInTheDocument();
+    expect(screen.getByText("I stopped after repeated validation errors.")).toBeInTheDocument();
+  });
+
   it("shows the plan, builds only on approval and links what was built", async () => {
     const calls = mockFetch([
       ndjson([
@@ -120,6 +136,20 @@ describe("AssistantPanel, describing a problem", () => {
     renderPanel();
     expect(await screen.findByRole("status")).toHaveTextContent("qwen3.5");
     expect(screen.getByRole("status")).toHaveTextContent("timed out");
+  });
+
+  it("explains that an interrupted assistant turn may have saved earlier changes", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.endsWith("/agent/status")) return new Response(JSON.stringify({ enabled: true, model: "qwen3.5", reachable: true }));
+      throw new TypeError("Failed to fetch");
+    }));
+    renderPanel();
+
+    fireEvent.change(screen.getByLabelText("Message to the assistant"), { target: { value: "Continue the layout" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("The connection ended before the assistant finished");
+    expect(screen.getByRole("alert")).toHaveTextContent("may still be saved");
   });
 });
 
@@ -228,6 +258,26 @@ describe("AssistantPanel, the workbench", () => {
     expect(bodies[1].keep_files).toEqual(["pairs.csv"]);
     expect(bodies[1].server_history).toBe(true);
     expect(bodies[1].messages).toEqual([]);
+  });
+
+  it("shows the active long-running step and explains what Stop does", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/agent/status")) return new Response(JSON.stringify({ enabled: true, model: "qwen3.5", reachable: true }));
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(`${JSON.stringify({ type: "tool", name: "make_layout", args: {} })}\n`));
+          init?.signal?.addEventListener("abort", () => controller.error(new DOMException("aborted", "AbortError")), { once: true });
+        },
+      });
+      return new Response(stream, { status: 200, headers: { "Content-Type": "application/x-ndjson" } });
+    }));
+    renderPanel();
+
+    fireEvent.change(screen.getByLabelText("Message to the assistant"), { target: { value: "Lay out the beds" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByText("Working on: Building a layout from the drawing")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(await screen.findByText(/Stopped waiting in this browser.*may still finish/)).toBeInTheDocument();
   });
 });
 

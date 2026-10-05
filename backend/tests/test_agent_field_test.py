@@ -770,6 +770,59 @@ def test_the_same_refusal_three_times_stops_the_turn_and_shows_the_error(tenants
     del model
 
 
+def test_repeated_rejected_api_write_stops_and_reports_the_validation_error(tenants, monkeypatch):
+    replies = [("native", "call_api", json.dumps({
+        "method": "POST", "path": "/api/v1/problems/from-spec", "body": {},
+    }))] * 5 + [("text", "never")]
+    model = _install(monkeypatch, replies)
+
+    events = _chat(tenants["b"], text="Create this problem")
+
+    answer = next(e["text"] for e in events if e["type"] == "answer")
+    assert "stopped after 3 rejected attempts" in answer
+    assert "HTTP 422" in answer
+    assert "problem_name" in answer
+    assert sum(1 for e in events if e["type"] == "tool" and e["name"] == "call_api") == 3
+    assert len(model.requests) == 3
+    assert events[-1]["type"] == "state"
+    del model
+
+
+def test_repeated_missing_file_reads_stop_with_an_actionable_message():
+    agent = core.Agent(core.Settings(), agent_api._index, lambda *a, **k: {}, core.Context("x"))
+    result = None
+    for i, name in enumerate(("Camp_bed_layout.dxf", "camp_bed_layout.dxf", "CAMP_BED_LAYOUT.DXF")):
+        call = {"id": f"c{i}", "function": {"name": "read_file", "arguments": json.dumps({"file": name})}}
+        messages = [{"role": "tool", "tool_call_id": f"c{i}", "content":
+                     f'tool error: FileRefused: no attached file named "{name}"; attached: []'}]
+        result = agent._stuck([call], messages)
+    assert result and "3 failed file reads" in result
+    assert "reattach the file" in result
+    assert "changes completed before an interruption may already be saved" in result
+
+
+def test_many_different_rejected_api_writes_stop_the_turn():
+    agent = core.Agent(core.Settings(), agent_api._index, lambda *a, **k: {}, core.Context("x"))
+    calls, messages = [], []
+    for i in range(core.MAX_TOTAL_API_REJECTIONS):
+        call_id = f"c{i}"
+        calls.append({"id": call_id, "function": {"name": "call_api", "arguments": json.dumps({
+            "method": "POST", "path": f"/api/v1/invalid/{i}"})}})
+        messages.append({"role": "tool", "tool_call_id": call_id, "content": json.dumps({
+            "status": 422, "body": {"detail": f"validation issue {i}"}})})
+
+    stopped = agent._stuck(calls, messages)
+    assert stopped and "8 rejected writes in this turn" in stopped
+    assert "validation issue 7" in stopped
+    assert agent.total_api_rejections == core.MAX_TOTAL_API_REJECTIONS
+
+
+def test_problem_creation_cannot_bypass_the_checked_plan_flow():
+    agent = core.Agent(core.Settings(), agent_api._index, lambda *a, **k: {}, core.Context("x"))
+    result = agent.run_tool("call_api", {"method": "POST", "path": "/api/v1/problems/from-spec", "body": {}})
+    assert "must go through Describe a problem mode" in result
+
+
 def test_the_reply_gets_the_room_the_prompt_leaves_and_the_server_size_is_read(monkeypatch):
     seen = {}
 
@@ -991,3 +1044,21 @@ def test_a_relationship_the_model_walks_needs_links_before_the_plan_and_before_s
     ready = client.get(f"/api/v1/problems/{built.json()['problem_id']}/readiness", headers=tenants["b"]).json()
     assert ready["check"]["ready"] is False
     assert any(f["code"] == "relationship_empty" for f in ready["check"]["findings"])
+
+
+def test_missing_layout_connectivity_is_not_replaced_by_a_parameter():
+    ctx = core.Context(username="planner", mode="model")
+    prompt = core.model_prompt(ctx)
+    assert "PARAMETERS ARE NOT CANDIDATES" in prompt
+    assert "parameter or parameter API call creates neither records nor links" in prompt
+    assert "proximity" in prompt and "walkable path" in prompt
+
+    spec = {"seed": {"relationship_types": [
+                {"name": "connected_to", "from": "zone", "to": "door"}]},
+            "ir": {"relationships": ["connected_to"]}}
+    faults = core._platform_order_faults(spec, None, [], set())
+    assert len(faults) == 1
+    assert '"connected_to" has NO links' in faults[0]
+    assert "zone -> door" in faults[0]
+    assert "a parameter is not a relationship" in faults[0]
+    assert "proximity alone" in faults[0]

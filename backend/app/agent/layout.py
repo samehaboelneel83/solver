@@ -125,6 +125,7 @@ def choose_step(sizes: list[float], aisle: float, area: float, step: float | Non
 def make(files: list[dict[str, Any]], folder: str, *, area_layers: list[str], items: list[dict[str, Any]],
          file: str | None = None, blocked_layers: list[str] | None = None, label_layer: str | None = None,
          aisle: float = 0.0, aisle_side: str = "long", step: float | None = None, blocked_buffer: float = 0.0,
+         max_file_rows: int = 200_000,
          prefix: str = "layout") -> dict[str, Any]:
     """Write `<prefix>_items.csv`, `_cells.csv`, `_occupies.csv` (and `_keeps_free.csv`) into `folder`, and
     return the counts, an upper bound and the plan's seed and model."""
@@ -247,6 +248,30 @@ def make(files: list[dict[str, Any]], folder: str, *, area_layers: list[str], it
             f"well. Ask the user: a coarser step ({', '.join(f'{x:g} m' for x in coarser[-2:]) or 'none divides'}), "
             "fewer turns, or one area at a time.")
 
+    # The generated CSVs are read back into the assistant's file table. Keep each relation
+    # table within that reader's row budget; otherwise parsing truncates links and the model
+    # gets an incomplete optimization problem after spending time building it.
+    occupies_count = sum(len(i_sel) * w * h for _, _, _, i_sel, _, w, h in cand)
+    keeps_free_count = sum(
+        len(i_sel) * (w * n_aisle if side in ("bottom", "top") else n_aisle * h)
+        for _, _, side, i_sel, _, w, h in cand if side is not None
+    )
+    if occupies_count > max_file_rows or keeps_free_count > max_file_rows:
+        raise LayoutRefused(
+            f"this layout needs {occupies_count:,} occupies links and {keeps_free_count:,} aisle links; "
+            f"a generated table can contain at most {max_file_rows:,} rows without truncation. "
+            "Reduce the area, use a coarser grid, or ask to model one area at a time."
+        )
+    if occupies_count + keeps_free_count > max_file_rows:
+        raise LayoutRefused(
+            f"this layout needs {occupies_count + keeps_free_count:,} total links, above the "
+            f"{max_file_rows:,}-row assistant budget. Reduce the area, use a coarser grid, or "
+            "ask to model one area at a time."
+        )
+    if occupies_count + keeps_free_count > MAX_LINKS:
+        raise LayoutRefused(f"{occupies_count + keeps_free_count:,} links between positions and cells: too many for a "
+                            "model; use a coarser step or one area at a time")
+
     os.makedirs(folder, exist_ok=True)
     item_rows, occ_rows, aisle_rows = [], [], []
     used_cells: set[int] = set()
@@ -271,9 +296,9 @@ def make(files: list[dict[str, Any]], folder: str, *, area_layers: list[str], it
                         c = (si + a) * ny + (sj + b)
                         used_cells.add(c)
                         aisle_rows.append((name, c))
-    if len(occ_rows) + len(aisle_rows) > MAX_LINKS:
-        raise LayoutRefused(f"{len(occ_rows) + len(aisle_rows):,} links between positions and cells: too many for a "
-                            "model; use a coarser step or one area at a time")
+    if len(used_cells) > max_file_rows:
+        raise LayoutRefused(f"this layout needs {len(used_cells):,} used cells, more than the {max_file_rows:,} "
+                            "rows the assistant can load without truncation; use a coarser grid or one area at a time")
     cell_rows = [[f"k{c}", round(x0 + (c // ny + 0.5) * s, 4), round(y0 + (c % ny + 0.5) * s, 4), zones[int(zone_of[c])]]
                  for c in sorted(used_cells)]
     names = {"items": f"{prefix}_items.csv", "cells": f"{prefix}_cells.csv", "occupies": f"{prefix}_occupies.csv",

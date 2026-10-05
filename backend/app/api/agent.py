@@ -171,6 +171,12 @@ def chat(
                                  "content": "Not approved. The user replied instead; their message follows."})
         messages.append({"role": "user", "content": body.text.strip()})
 
+    # The next streamed turn may take minutes and can be interrupted by a worker or API restart.
+    # Save the incoming message and its attachments before starting the model so the browser can
+    # resume from the same conversation without retaining the full file rows itself.
+    if body.server_history:
+        agent_store.save(db, body.conversation_id, owner, organization, body.mode, messages, files, turned=False)
+
     ctx_in = body.context or PageContext()
     # run_python runs model-written code: only where it is switched on, and for people who may publish models.
     can_run_python = sandbox.available()[0] and "model.publish" in capabilities_of(db, user)

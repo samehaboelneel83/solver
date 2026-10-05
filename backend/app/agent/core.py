@@ -265,6 +265,9 @@ TOOL_NAMES = {t["function"]["name"] for t in MODEL_TOOLS} | {sandbox.SCHEMA["fun
 PLATFORM = "[Platform] "
 MAX_NUDGES = 3  # per kind of correction, per turn
 MAX_SAME_ERROR = 3  # the same spec refusal this many times ends the turn, shown to the person
+MAX_API_REJECTIONS = 3  # a write endpoint rejecting the request is not a reason to loop all turn
+MAX_TOTAL_API_REJECTIONS = 8  # endpoint-hopping cannot evade the per-endpoint limit
+MAX_TOOL_FAILURES = 3  # an unavailable file or failed tool is surfaced instead of retried all turn
 MAX_TOTAL_NUDGES = 8
 CUT_OFF = (PLATFORM + "Your last reply was cut off at the length limit, so its tool call was NOT run. Send a smaller "
            "call: load rows from files with *_from_file instead of writing them out (generate the files with "
@@ -399,9 +402,15 @@ def _platform_order_faults(spec: dict, workspace: dict | None, files: list[dict]
         links[r.get("name")] = links.get(r.get("name"), 0) + int(r.get("links") or 0)
     for name in ir.get("relationships") or []:
         if not links.get(name):
-            faults.append(f'STEP 3, RELATIONSHIPS: "{name}" has NO links, and the model walks it. Load them '
-                          f'(relationships_from_file from a generated file, e.g. which candidate covers which cell), '
-                          f'or make them with the platform (POST /api/v1/domains/<id>/within or /distances).')
+            declared = next((r for r in seed.get("relationship_types") or []
+                             if isinstance(r, dict) and r.get("name") == name), None)
+            endpoints = (f' Its declared endpoints are {declared.get("from")} -> {declared.get("to")}.'
+                         if declared else " Check the declared relationship type and endpoints.")
+            faults.append(f'STEP 3, RELATIONSHIPS: "{name}" has NO links, and the model walks it.'
+                          f'{endpoints} Load real matching links from relationships_from_file or existing domain data; '
+                          'a parameter is not a relationship. Use /within only for a defined spatial proximity rule '
+                          'supported by geometry, or /distances for measured distances. Never invent a threshold, '
+                          'remove a required relation, or claim path connectivity from proximity alone.')
     typed = [(p.get("name"), p.get("default_value")) for p in seed.get("parameters") or []
              if isinstance(p, dict) and not p.get("index")]
     # Cells typed into the plan come first; the ones loaded from files follow them (files.expand).
@@ -707,9 +716,15 @@ def loopback_caller(settings: Settings, token: str) -> CallFn:
 # ------------------------------------------------------------------- the LLM --
 class LlmError(Exception):
     def __init__(self, status: int, body: str):
-        super().__init__(f"LLM HTTP {status}: {body[:300]}")
+        label = f"LLM HTTP {status}" if status else "LLM request failed"
+        super().__init__(f"{label}: {body[:300]}")
         self.status = status
         self.body = body
+
+
+def _llm_timeout(settings: Settings) -> LlmError:
+    return LlmError(0, f"The model at {settings.base_url} did not respond within {settings.timeout:g} seconds. "
+                    "Check that the model service is reachable and healthy, then try again.")
 
 
 class ToolModeChanged(Exception):
@@ -743,7 +758,11 @@ def llm_chat(settings: Settings, messages: list[dict], native: bool | None,
             _NATIVE_TOOLS[settings.base_url] = False
             raise ToolModeChanged() from e
         raise LlmError(e.code, body) from e
+    except TimeoutError as e:
+        raise _llm_timeout(settings) from e
     except urllib.error.URLError as e:
+        if isinstance(e.reason, TimeoutError):
+            raise _llm_timeout(settings) from e
         raise LlmError(0, f"cannot reach the model at {settings.base_url}: {e.reason}") from e
     if native is None:
         _NATIVE_TOOLS[settings.base_url] = True
@@ -1067,6 +1086,8 @@ occupies; declare the relationship type occupies from cand to cell, and list it 
 one rule over cells, never pairs of candidates: forall k in cell: Σ over c in cand {{"via":{{"rel":"occupies",
 "to":"k"}}}} of pick[c] <= 1. ACCESS: keep corridor cells free the same way (a second link, e.g. blocks, from
 candidates to the corridor cells they would close) or generate only candidates that leave the paths open.
+PARAMETERS ARE NOT CANDIDATES: the parameter API stores fixed numeric inputs (possibly indexed by existing record types); it does not create candidate records or make a parameter value a solver choice. Coordinates stored as parameters still need candidate records and a decision variable such as pick[cand]. A per-zone capacity model is a different, count-only approximation: it does not return placements, and it does not guarantee non-overlap, full-item footprints, or door-connected access unless those properties are explicitly represented and verified. Never present it as equivalent to the agreed layout. If exact candidate generation is too large, report the measured candidate/link counts and ask the user to choose a resolution or explicitly approve a count-only approximation before changing the problem.
+For a count-per-zone approximation, the zone set still needs actual zone records, and any connected_to relation still needs actual zone-to-door links. A parameter or parameter API call creates neither records nor links. Do not reuse an empty bed-to-door relationship for zone-to-door access. Use /within only if the user-approved meaning is proximity and both record types have usable geometry; it does not prove a clear corridor path. If the agreed access rule means a walkable path, say that the current approximation cannot certify it and leave the problem unproposed until a valid path model/data source exists.
 Keep every agreed rule: a rule you cannot model goes under "Not modelled" in the plan, never silently dropped.
 NEVER change an agreed choice on your own (a grid step, a size, a limit, a distance, the data to use): if it makes
 the model too big or slow, stop and tell the user the numbers (e.g. "0.1 m gives 347,451 candidates and about 7
@@ -1244,6 +1265,9 @@ class Agent:
         self.events: list[dict] = []  # raised by a tool, sent after its result (a re-placed file)
         self.joined: list[str] = []
         self.refusals: dict[str, int] = {}
+        self.api_rejections: dict[str, int] = {}
+        self.total_api_rejections = 0
+        self.tool_failures: dict[str, int] = {}
         self._typed_cells = 0  # parameter values the last spec typed itself (not loaded from files)  # each spec refusal seen this turn, by its text
         self.solves: dict[str, int] = {}  # solves queued this turn, per scenario  # keys the model gave twice and the platform joined (toolcall.strict_loads)
 
@@ -1310,6 +1334,10 @@ class Agent:
                 path = "/" + str(args.get("path", "")).lstrip("/")
                 if method not in ("GET", "POST", "PUT", "PATCH", "DELETE"):
                     return f"unsupported method {method}"
+                if method == "POST" and path.split("?")[0] == "/api/v1/problems/from-spec":
+                    return ("Refused: problem creation must go through Describe a problem mode, which validates the "
+                            "model and shows it for approval before building. Switch to that mode and continue "
+                            "with the current conversation; do not create a problem directly through call_api.")
                 if any(b.match(path.split("?")[0]) for b in BLOCKED_PATHS):
                     return "That endpoint is not available to the assistant."
                 if self.modelling and method != "GET" and not (
@@ -1387,7 +1415,8 @@ class Agent:
                               blocked_layers=list(args.get("blocked_layers") or []),
                               label_layer=args.get("label_layer"), items=list(args.get("items") or []),
                               aisle=float(args.get("aisle") or 0), aisle_side=str(args.get("aisle_side") or "any"),
-                              step=float(args["step"]) if args.get("step") else None)
+                              step=float(args["step"]) if args.get("step") else None,
+                              max_file_rows=agent_files.MAX_GENERATED_ROWS)
         except (layout.LayoutRefused, TypeError, ValueError) as e:
             return f"Could not lay it out: {e}"
         for name in out["files"]:
@@ -1725,13 +1754,68 @@ class Agent:
                 m["content"] = m["content"][:400] + " ...(an earlier attempt; the latest one is below)"
 
     def _stuck(self, calls: list[dict], messages: list[dict]) -> str | None:
-        """The same refusal three times: stop, and show the person the error and the part of the plan it is
-        about, instead of looping (the camp-bed test: "The plan needed fixing" 24 times, then a crash)."""
+        """Stop repeated model and platform refusals with the useful error shown to the person."""
         for c in calls:
-            if c["function"]["name"] not in ("check_spec", "propose_plan"):
-                continue
             result = next((m.get("content") or "" for m in reversed(messages)
                            if m["role"] == "tool" and m.get("tool_call_id") == c["id"]), "")
+            if result.startswith("tool error: "):
+                name = c["function"].get("name", "tool")
+                # Different casing or a guessed alternate filename is the same missing-file failure.
+                normalized = result.lower()
+                normalized = re.sub(r'no attached file named "[^"]+"', 'no attached file named <file>', normalized)
+                normalized = re.sub(r"\s+", " ", normalized).strip()
+                key = f"{name}:{normalized[:600]}"
+                self.tool_failures[key] = self.tool_failures.get(key, 0) + 1
+                if self.tool_failures[key] >= MAX_TOOL_FAILURES:
+                    detail = result.removeprefix("tool error: ").strip()[:900]
+                    if "no attached file named" in normalized:
+                        return (f"I stopped after {MAX_TOOL_FAILURES} failed file reads because the attachment is "
+                                "not available in the server copy of this conversation. Please reattach the file "
+                                "using its exact name and continue; changes completed before an interruption may "
+                                f"already be saved.\n\n**Latest file error:** {detail}")
+                    return (f"The {name} tool failed the same way {MAX_TOOL_FAILURES} times, so I stopped rather "
+                            f"than repeating it.\n\n**Latest tool error:** {detail}")
+            if c["function"]["name"] == "call_api":
+                args = _args(c)
+                method = str(args.get("method", "GET")).upper()
+                path = "/" + str(args.get("path", "")).lstrip("/")
+                if method == "GET":
+                    continue
+                try:
+                    response = json.loads(result)
+                except (TypeError, ValueError):
+                    continue
+                status = response.get("status") if isinstance(response, dict) else None
+                if not isinstance(status, int) or not 400 <= status < 500 or status == 429:
+                    continue
+                key = f"{method} {path.split('?')[0]}"
+                self.api_rejections[key] = self.api_rejections.get(key, 0) + 1
+                self.total_api_rejections += 1
+                if (self.api_rejections[key] < MAX_API_REJECTIONS and
+                        self.total_api_rejections < MAX_TOTAL_API_REJECTIONS):
+                    continue
+                body = response.get("body") if isinstance(response, dict) else None
+                detail = body.get("detail") if isinstance(body, dict) else body
+                if isinstance(detail, list):
+                    parts = []
+                    for item in detail[:8]:
+                        if not isinstance(item, dict):
+                            continue
+                        loc = ".".join(str(part) for part in item.get("loc", []) if part != "body")
+                        msg = str(item.get("msg") or "invalid value")
+                        parts.append(f"{loc}: {msg}" if loc else msg)
+                    detail = "; ".join(parts)
+                if not isinstance(detail, str):
+                    detail = json.dumps(detail, ensure_ascii=False, default=str)
+                detail = detail[:1200] or "the endpoint rejected the request"
+                return (f"The platform rejected {key} with HTTP {status}. I stopped after "
+                        f"{MAX_API_REJECTIONS} rejected attempts for this endpoint or "
+                        f"{MAX_TOTAL_API_REJECTIONS} rejected writes in this turn, instead of continuing to retry.\n\n"
+                        f"**The latest error says:** {detail}\n\n"
+                        "I have not confirmed that the requested change was created. Tell me how you want to "
+                        "correct the request, and I can continue.")
+            if c["function"]["name"] not in ("check_spec", "propose_plan"):
+                continue
             if not result.startswith(("Not valid yet", "The spec does not build")):
                 continue
             key = re.sub(r"\d+", "#", result)[:400]

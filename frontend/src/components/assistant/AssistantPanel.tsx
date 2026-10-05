@@ -24,7 +24,7 @@ import Markdown from "./Markdown";
  * what it shows (sessionStorage). A new chat is a new id.
  */
 
-type Step = { name: string; label: string; ok?: boolean };
+type Step = { name: string; label: string; ok?: boolean; preview?: string };
 type Item =
   | { kind: "user"; text: string }
   | { kind: "steps"; steps: Step[]; notes: string[] }
@@ -71,6 +71,11 @@ function shortCount(n: number): string {
   return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
 }
 
+function elapsedLabel(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
+}
+
 function newId(): string {
   try {
     return crypto.randomUUID().replace(/-/g, "");
@@ -79,6 +84,38 @@ function newId(): string {
   }
 }
 const STORAGE = (mode: AgentMode) => `solver_assistant_${mode}`;
+
+function AssistantWorkStatus({ phase, startedAt, lastPingAt }: {
+  phase: string;
+  startedAt: number;
+  lastPingAt: { current: number };
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const elapsed = Math.max(0, Math.floor((now - startedAt) / 1000));
+
+  return (
+    <p role="status" aria-live="polite" data-testid="assistant-working-status"
+      className="flex items-start gap-2 rounded-md bg-slate-50 px-2.5 py-2 text-xs text-slate-600">
+      <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+      <span>
+        <span className="font-medium text-slate-700">{phase || "Waiting for the assistant"}</span>
+        {` · ${elapsedLabel(elapsed)}`}
+        {elapsed >= 45 && (
+          <span className="block pt-0.5">
+            {now - lastPingAt.current <= 25_000
+              ? "The connection is active; this step is taking longer than usual."
+              : "There has been no recent update. The request may have timed out."}
+            {" Use Stop to end your wait."}
+          </span>
+        )}
+      </span>
+    </p>
+  );
+}
 
 function load(mode: AgentMode): Conversation {
   try {
@@ -113,6 +150,14 @@ export function describeStep(name: string, args: Record<string, unknown>): strin
       return `Read ${s(args.path) || "the documentation"}`;
     case "wait":
       return `Waited ${s(args.seconds)} s`;
+    case "make_layout":
+      return "Building a layout from the drawing";
+    case "run_python":
+      return "Running your data analysis";
+    case "query_file":
+      return `Checking ${s(args.file)}`;
+    case "read_file":
+      return `Reading ${s(args.file)}`;
     case "propose_plan":
       return "Checked the plan builds";
     default:
@@ -161,10 +206,13 @@ export default function AssistantPanel({ open, onClose, context }: { open: boole
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [thinking, setThinking] = useState(false);
+  const [workPhase, setWorkPhase] = useState("");
+  const [workStartedAt, setWorkStartedAt] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
   const [dragging, setDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const lastPingAt = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const status = useAgentStatus(open);
@@ -188,7 +236,7 @@ export default function AssistantPanel({ open, onClose, context }: { open: boole
       box.scrollTop = box.scrollHeight;
     });
     return () => cancelAnimationFrame(frame);
-  }, [conversation.items, thinking]);
+  }, [conversation.items, busy]);
 
   useEffect(() => {
     if (open) inputRef.current?.focus();
@@ -210,10 +258,19 @@ export default function AssistantPanel({ open, onClose, context }: { open: boole
   function apply(target: AgentMode, event: AgentEvent) {
     if (event.type === "thinking") {
       setThinking(true);
+      setWorkPhase("Thinking through your request");
       return;
     }
-    if (event.type === "ping") return;
+    if (event.type === "ping") {
+      lastPingAt.current = Date.now();
+      return;
+    }
     setThinking(false);
+    if (event.type === "tool") setWorkPhase(`Working on: ${describeStep(event.name, event.args)}`);
+    else if (event.type === "result") setWorkPhase("Reviewing the result");
+    else if (event.type === "note") setWorkPhase("Working through the next step");
+    else if (event.type === "state") setWorkPhase("Saving the conversation");
+    else if (event.type === "answer" || event.type === "error") setWorkPhase("Finishing your reply");
     update(target, (c) => {
       const items = [...c.items];
       const last = items[items.length - 1];
@@ -234,7 +291,11 @@ export default function AssistantPanel({ open, onClose, context }: { open: boole
         case "result": {
           const s = steps();
           const step = s.steps[s.steps.length - 1];
-          if (step) s.steps[s.steps.length - 1] = { ...step, ok: event.ok };
+          if (step) s.steps[s.steps.length - 1] = {
+            ...step,
+            ok: event.ok,
+            ...(event.ok || !event.preview ? {} : { preview: event.preview }),
+          };
           if (event.name === "propose_plan" && !event.ok) s.notes.push("The plan needed fixing; correcting it.");
           break;
         }
@@ -305,6 +366,9 @@ export default function AssistantPanel({ open, onClose, context }: { open: boole
     abortRef.current = controller;
     setBusy(true);
     setThinking(true);
+    setWorkStartedAt(Date.now());
+    lastPingAt.current = Date.now();
+    setWorkPhase("Connecting to the assistant");
     try {
       // A file attached since the last message goes up in full once; the chips keep only names and counts.
       const full = (f: AttachedFile) => pending.find((p) => p.name === f.name) ?? f;
@@ -322,8 +386,19 @@ export default function AssistantPanel({ open, onClose, context }: { open: boole
     } finally {
       setBusy(false);
       setThinking(false);
+      setWorkStartedAt(null);
+      setWorkPhase("");
       abortRef.current = null;
     }
+  }
+
+  function stop() {
+    if (!abortRef.current) return;
+    abortRef.current.abort();
+    update(mode, (c) => ({
+      ...c,
+      items: [...c.items, { kind: "error", text: "Stopped waiting in this browser. Work already sent to the server may still finish." }],
+    }));
   }
 
   function submit(event?: FormEvent) {
@@ -473,9 +548,8 @@ export default function AssistantPanel({ open, onClose, context }: { open: boole
         {conversation.items.map((item, n) => (
           <ItemView key={n} item={item} live={item === waiting && !busy} onDecide={decide} />
         ))}
-        {thinking && (
-          <p className="flex items-center gap-2 text-xs text-slate-500"><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> Working…</p>
-        )}
+        {busy && workStartedAt !== null && <AssistantWorkStatus phase={workPhase || (thinking ? "Working…" : "Waiting for the assistant")}
+          startedAt={workStartedAt} lastPingAt={lastPingAt} />}
       </div>
 
       <form onSubmit={submit} className="shrink-0 border-t border-slate-200/80 p-3">
@@ -524,7 +598,7 @@ export default function AssistantPanel({ open, onClose, context }: { open: boole
             className="max-h-40 min-h-[2.75rem] flex-1 resize-y rounded-shell border border-slate-300 bg-white px-2.5 py-2 text-sm shadow-sm"
           />
           {busy ? (
-            <button type="button" onClick={() => abortRef.current?.abort()} aria-label="Stop"
+            <button type="button" onClick={stop} aria-label="Stop"
               className="rounded-md border border-slate-300 p-2.5 text-slate-700 hover:bg-slate-100">
               <Square className="h-4 w-4" aria-hidden />
             </button>
@@ -588,9 +662,13 @@ function ItemView({ item, live, onDecide }: { item: Item; live: boolean; onDecid
     case "steps":
       return <Steps steps={item.steps} notes={item.notes} />;
     case "error":
+      const interrupted = /^(network error|failed to fetch|load failed|the platform API could not be reached\.)$/i.test(item.text.trim());
       return (
         <p role="alert" className="flex gap-2 rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-800">
-          <XCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {item.text}
+          <XCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+          {interrupted
+            ? "The connection ended before the assistant finished. Any changes made before the interruption may still be saved; check the workspace before retrying. You can continue by sending a new message."
+            : item.text}
         </p>
       );
     case "confirm":
@@ -661,8 +739,11 @@ function ItemView({ item, live, onDecide }: { item: Item; live: boolean; onDecid
 
 function Steps({ steps, notes }: { steps: Step[]; notes: string[] }) {
   const [open, setOpen] = useState(false);
-  if (steps.length === 0 && notes.length === 0) return null;
   const failed = steps.filter((s) => s.ok === false).length;
+  useEffect(() => {
+    if (failed > 0) setOpen(true);
+  }, [failed]);
+  if (steps.length === 0 && notes.length === 0) return null;
   return (
     <div className="text-xs text-slate-600">
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
@@ -674,10 +755,15 @@ function Steps({ steps, notes }: { steps: Step[]; notes: string[] }) {
         <ul className="ms-5 mt-1 space-y-0.5">
           {notes.map((n, i) => <li key={`n${i}`} className="italic text-slate-500">{n}</li>)}
           {steps.map((s, i) => (
-            <li key={i} className="flex items-start gap-1.5 font-mono text-[11px]">
+            <li key={i} className="flex flex-wrap items-start gap-1.5 font-mono text-[11px]">
               {s.ok === false ? <XCircle className="mt-0.5 h-3 w-3 shrink-0 text-red-600" aria-hidden />
                 : <Check className="mt-0.5 h-3 w-3 shrink-0 text-green-600" aria-hidden />}
               <span className="break-all">{s.label}</span>
+              {s.ok === false && s.preview && (
+                <span className="basis-full whitespace-pre-wrap break-words rounded bg-red-50 px-2 py-1 font-sans text-red-800">
+                  {s.preview}
+                </span>
+              )}
             </li>
           ))}
         </ul>
