@@ -1,3 +1,78 @@
+# OaaS cumulative report — reconciliation after the other agent's work
+
+**Reviewed:** 5 October 2026
+**Current Git HEAD:** `31210c7` (3 October)
+**Earlier baseline:** `472c060` (28 September)
+**Review scope:** Git history, source files and documents only. No tests, build, migrations or deployment were performed during this review.
+
+## 1. Revised current position
+
+There are **234 commits after the previous baseline**, plus substantial uncommitted changes. The other agent has implemented several features previously listed as missing. The September report below is retained as historical evidence; its remaining-work list and deployment state are no longer current.
+
+| Area | Evidence found | Revised status |
+| --- | --- | --- |
+| Server drafts | `backend/app/api/drafts.py`, migration `0086_model_drafts.py`, `frontend/src/model/ServerDraftSync.tsx`, draft API and tests | Implemented source: per-person/problem ownership, organization isolation, revision checks and synchronization |
+| Publication protection | Draft publish endpoint validates the locked revision and records publication transactionally; accepts `Idempotency-Key` | Already implemented; needs current runtime/concurrency verification, not reimplementation |
+| Legacy recovery | `LegacyDraftRecovery.tsx` and tests | Recovery workflow exists; independently review ownership safeguards |
+| Visual graph | `ModelGraphPreview.tsx`, `graphCommands.ts`, tests and `graphLayout.ts` | Editable connections, keyboard controls and browser/server layout persistence now exist; September preview-only limitations are superseded |
+| Workspace | `Workbench.tsx`, workbench API and components; commits `7eae6c0`, `b3d28bd` | Unified tree, collection and selected-record experience |
+| Imports and quality | Column mapping, composite keys, field/label matching, joins, computed values and quality-check commits | Expanded substantially; this does not certify arbitrary database connectors |
+| Guided modeling | `DescribeToDraft.tsx`, `draftFromWords.ts`, recipe/editor commits | Words-to-draft and recipes expanded across coverage, budgets, supply networks, traffic, routing and periods |
+| Forecasts | Commits integrating predictors into rules/goals, linked-record predictions and time-derived data | Implemented in committed history; full coverage not independently retested |
+| GIS and networks | Road-aware travel/cost, unreachable pairs, temporal travel, derived layers and result maps | Major committed additions, with further local edits pending |
+| Results and correctness | Goal directions, trade-offs, breakdowns, scenario map snapshots, run refresh and publication-base fixes | Multiple delivered source changes after September |
+| Frontend performance | Commit `87d65f5` splits pages into lazy-loaded chunks | Reassess with a new build; do not repeat the old bundle warning as a verified current finding |
+
+Source presence is not proof that migrations are applied or the running containers contain these changes.
+
+## 2. Uncommitted work to preserve and review
+
+The working tree contains significant modifications, additions and deletions. This review did not alter them or infer authorship solely from Git status.
+
+- **Assistant:** new backend agent modules, API, frontend assistant components, tests and migration `0109_agent_conversation.py`. Documentation describes Ask and Describe-a-problem flows using a local vLLM model, file input, model approval and result explanation.
+- **Modeling, GIS and exports:** new `model_spec.py`, `run_dxf.py`, `auto_records.py` and tests; modified solver, worker, preflight, GIS and export paths.
+- **Migrations:** untracked `0106_drop_camp_solves.py` through `0110_faster_record_triggers.py`. Review upgrade ordering and data-retention impact before applying them.
+- **Camp-specific removal:** tracked backend/frontend modules, examples and tests are marked deleted. Verify replacement workflows and compatibility; do not treat these deletions as routine cleanup.
+- **Deployment:** Dockerfile, Compose, nginx, requirements and environment-example changes. Check the older rollout instructions against these changes before reuse.
+- **Local artifacts:** agent kits, evaluation documents, logs, temporary Vite files and data-wipe scripts. Classify before staging. Do not blanket-add this working tree or execute wipe scripts.
+
+## 3. Later evidence supplied in the repository
+
+These are **reported results from the other agent's documents**, not tests rerun on 5 October:
+
+- The benchmark gap analysis reports five rounds across five problem classes. Round 5 reports **92.2% coverage** and **79.8% navigation/UX**, under its own rubric. These are internal task-evaluation scores, not proof of superiority over competing platforms.
+- Its round-5 checklist retains explicit exceptions: road conditions per period from a separate table, and units of each type deployed at bases. A post-publication draft warning also retains a qualification about the exact path not being reproduced.
+- The 4 October assistant field test reports a final warehouse solution matching an independent HiGHS reference: **1,338,765 EGP/month**, with the same warehouse choices and assignments. Earlier attempts recorded modeling/runtime failures before fixes.
+- The solver-system evaluation reports two final problems matching reference solutions and **4,779 backend / 3,379 frontend tests** passing on its evaluated build. That evaluation is untracked, and the working tree contains additional changes. These counts are not freshly verified for the current tree.
+- The evaluation identifies words-to-model semantic mistakes and local-model response time as continuing limitations. Review of the proposed model remains necessary in that workflow.
+
+Current Docker image revision, service health, model-server availability, database migration state and live browser workflows were **not verified** in this review. September deployment evidence below remains historical only.
+
+## 4. Revised next-work order
+
+1. **Reconcile the working tree.** Review assistant additions, camp removals, migrations, solver changes and deployment configuration as coherent changesets. Preserve other work and exclude incidental/private artifacts from commits.
+2. **Establish a reproducible baseline.** Run frontend build/lint/tests and backend tests against an isolated database. Check migration progression and source/deployed-image alignment. Do not run destructive test fixtures against production data.
+3. **Verify safety features already implemented.** Exercise draft ownership, concurrent saves, cross-browser recovery, idempotent publishing, legacy recovery, graph command preservation and saved-layout fallback. Fix demonstrated defects rather than duplicating features.
+4. **Review the Assistant before release.** Verify authorization propagation, approval boundaries, attachments, model validation/read-back, cancellation, retries and conversation persistence with the configured local model.
+5. **Retest end-user journeys.** Workspace → data/import → Describe/recipe/forms/graph → validation → scenario/run → map/report. Include large data, constrained roles, keyboard use and failures.
+6. **Close remaining benchmark gaps.** Start with explicit round-5 exceptions and assistant semantic/performance issues. Checked items with documented exclusions are not universal coverage.
+7. **Complete release evidence.** Verify clean-machine offline installation, backup/restore, migration/data retention and rollback; record exact commit, images and tests. Broader database certification and external user studies remain evidence gaps unless separately demonstrated.
+
+## 5. Current reference documents
+
+- [Benchmark gap analysis and round-5 results](docs/plans/2026-10-02-benchmark-gap-analysis.md)
+- [Enterprise gap analysis](docs/plans/2026-09-28-enterprise-plan-gap-analysis.md) — historical; reconcile missing-feature claims with later commits
+- [Assistant documentation](docs/assistant.md) — currently untracked
+- [Assistant field test](docs/assistant-field-test-2026-10.md) — currently untracked
+- [Solver-system evaluation](docs/solver-system-evaluation.md) — currently untracked
+- [Original navigation and dual-builder proposal](OAAS_UX_FORM_GRAPH_PLAN.md)
+
+---
+
+# Historical baseline — 28 September 2026
+
+**Everything below is the preserved September report. Its “current,” “latest,” deployment and “remaining” statements apply to that date. Use the reconciliation above for current priorities.**
+
 # OaaS platform — cumulative implementation and delivery report
 
 **Updated:** 28 September 2026  
@@ -351,3 +426,12 @@ Recommended sequence: with the P0 draft work and the P1 packages delivered (Epic
 - [Operational ingestion evidence](docs/runbooks/ingestion-operational-check.md)
 
 Maintain this report after each milestone by updating current status and remaining acceptance criteria, recording the commit/image revision and exact verification performed. Keep historical evidence labeled as historical. This report itself is a new documentation artifact created after commit `472c060`; that commit identifies the implementation baseline, not the commit containing this file.
+
+
+## Verification update — 5 October 2026
+
+Fresh checks now supersede the earlier statement that no tests/build were performed during reconciliation: the full frontend suite passed **3,382 tests across 220 files**, production build and lint passed, and **59 focused backend tests** passed using a fresh disposable PostgreSQL container and the current source. Five frontend test files were corrected for locale portability and the relationship-tree API fixture. No application code was changed for those corrections.
+
+The full backend suite, live Assistant/model-server behavior, production migration state and browser journeys remain unverified. The current Docker inventory omitted the September ingestion containers, and the installed backend emitted a database collation-version warning. No production deployment or migration was performed.
+
+See [current-tree verification and release checks](docs/current-tree-verification-2026-10-05.md) for scope, evidence and next steps.

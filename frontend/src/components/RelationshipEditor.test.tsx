@@ -81,7 +81,7 @@ const options = (testId: string) =>
 describe("NewRelationshipForm, anchored to an entity of a hierarchy's own type", () => {
   beforeEach(() => {
     mockFetch.mockReset();
-    mockFetch.mockResolvedValue({ id: 1, relationship_type_id: 6, from_entity_id: 22, to_entity_id: 23, attrs: {} });
+    mockFetch.mockImplementation((path: string) => Promise.resolve(path.endsWith("/trees") ? { entity_id: 22, trees: [] } : { id: 1, relationship_type_id: 6, from_entity_id: 22, to_entity_id: 23, attrs: {} }));
   });
 
   it("offers both readings, so a unit can be given a parent AND a child", () => {
