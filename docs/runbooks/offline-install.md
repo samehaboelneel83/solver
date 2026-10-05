@@ -21,7 +21,7 @@ public network are **not** the offline path; they are the development path.
 | Postgres | `postgis/postgis:16-3.4` | Same; pin via generated `docker-compose.digests.yml` (O04) |
 | ClickHouse | `clickhouse/clickhouse-server:24.8` | Same |
 | Digest Compose override | `scripts/render-digest-compose.sh` | Shipped in the bundle as `docker-compose.digests.yml` |
-| Wheelhouse / npm cache | `backend/wheelhouse/`, `frontend/npm-cache/` | Build with `docker build --build-arg OFFLINE=1` after `offline-bundle.sh` fills the caches |
+| Wheelhouse / npm cache | `backend/wheelhouse/`, `frontend/npm-cache/` | Required only if rebuilding app images on the isolated host; the bundle script ships prebuilt images and does not fill these caches |
 | Migrations | Alembic in backend image | `alembic upgrade head` against the customer DB |
 | Local maps / tiles | Host or volume mounts | Must resolve without CDN egress |
 | Docs / runbooks | This tree | Copied into the bundle by `offline-bundle.sh` |
@@ -34,8 +34,10 @@ Build on a networked host:
 bash scripts/offline-bundle.sh          # → dist/offline-bundle/
 # Includes digests.txt, image *.tar, docs, and docker-compose.digests.yml
 # (OAAS O04 — filled pins, not REPLACE_ placeholders).
-# Optional: rebuild images from a local wheelhouse / npm cache
-docker build --build-arg OFFLINE=1 -t solver-backend ./backend
+# Optional offline rebuild: first transfer/cache each Docker base image and
+# populate the Python wheelhouse and npm cache. OFFLINE=1 skips apt; without a
+# Pango-enabled PYTHON_BASE, PDF export uses the printable-report fallback.
+docker build --build-arg OFFLINE=1 --build-arg PYTHON_BASE=python:3.12-slim -t solver-backend ./backend
 docker build --build-arg OFFLINE=1 -t solver-frontend ./frontend
 ```
 
@@ -101,9 +103,10 @@ ClickHouse as required for the reference compose file.
 
 ## What is not yet done
 
-- Default Dockerfiles still install online unless built with `OFFLINE=1` and a
-  populated `backend/wheelhouse/` / `frontend/npm-cache/` (by design for
-  development). Release bundles use the offline path.
+- Offline rebuilds need locally available base images plus populated
+  `backend/wheelhouse/` and `frontend/npm-cache/`. Backend `OFFLINE=1` skips
+  apt; PDF export needs a Pango-enabled `PYTHON_BASE` or uses its printable
+  fallback. Release bundles use prebuilt app images and do not need build caches.
 - Main `docker-compose.yml` stays tag-based for development; customer releases
   use the generated `docker-compose.digests.yml` from the offline bundle (O04).
 - `scripts/check.sh --isolated` (O05) is the hard egress gate when validating an

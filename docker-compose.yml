@@ -98,8 +98,9 @@ services:
       LLM_TOOL_MODE: ${LLM_TOOL_MODE:-auto}
       AGENT_CONFIRM: ${AGENT_CONFIRM:-delete}
       AGENT_MAX_STEPS: ${AGENT_MAX_STEPS:-60}
-      # Model-written Python on this server: off unless set (docs/assistant.md, run_python).
-      AGENT_RUN_PYTHON: ${AGENT_RUN_PYTHON:-1}
+      # Model-written Python can escape Python-level network guards; enable only after
+      # reviewing the sandbox and applying a network policy (docs/assistant.md).
+      AGENT_RUN_PYTHON: ${AGENT_RUN_PYTHON:-0}
     ports:
       - "8010:8000"
     # Prometheus metrics (app/core/metrics.py): on the compose network only,

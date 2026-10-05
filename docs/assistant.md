@@ -123,17 +123,17 @@ overflowed. Changes:
 |---|---|
 | **Data first** | A plan is refused when any set it uses would have no records: each needs a source -- typed records, `entities_from_file` (an attached file, a map layer, or a file `run_python` generated), or records already in the domain. |
 | **Data tools** | In *Describe a problem* the Assistant may now prepare data: a new domain, map data imported (`/gis/datasets`, `/records/propose`, `/records`, map-to-records), and the platform's calculations (`/distances`, `/within`, `/derive-value`, `/entity-types/{id}/derive`). |
-| **run_python on** | `AGENT_RUN_PYTHON` defaults to 1 (still only for people who may publish models). The sandbox no longer fails where Docker refuses network namespaces (the Python socket guard applies). Files it writes are loaded whole from its folder (up to 200,000 rows), and are never overwritten by their 5,000-row attachment copy. |
+| **run_python opt-in** | `AGENT_RUN_PYTHON` defaults to 0. Enable it only after reviewing the sandbox limits and applying a network policy: Python socket blocking is a guard, not a security boundary. Files it writes are loaded whole from its folder (up to 200,000 rows), and are never overwritten by their 5,000-row attachment copy. |
 | **Local metres for CAD** | A drawing with no coordinate system is placed at once in local metres: `x_m`, `y_m`, `width_m`, `height_m`, `area_m2`, `shape_m` (WKT in metres for run_python). No coordinate-system question; `place_file` refuses degrees for a non-degree drawing; a drawing more than 5 km across gets a scale check. |
 | **Solve blocked on empty sets** | A set the model's decisions range over that has no records is a readiness *blocker* (Solve disabled) and a run is refused with 422 naming the set. |
 | **Stop the loop** | The same refusal 3 times ends the turn with the exact error and the part of the plan it is about. Only the latest spec attempt stays in the history. Each reply gets min(planned, context − prompt − 512) tokens. The context size is read from the model server (`max_model_len`), so raising vLLM to 64k needs no platform change. The person's first message (the problem) is never trimmed away. |
 | **Layout pattern** | Candidates, cells and an `occupies` link generated with run_python; no overlap is one rule per cell (`via occupies`), never pairs of candidates. Plans may hold 50,000 records and 200,000 values; records and links are written in one flush (20,000 records: 38 s → 14 s). |
 
-### run_python (on by default since the camp-bed evaluation)
+### run_python (administrator opt-in)
 
 The model's workbench: Python in a working folder per conversation, where every attached sheet is a
 CSV. Files it writes come back as attachments for a plan to load. It runs code a language model
-wrote. It is **on** by default (`AGENT_RUN_PYTHON=1`; set `0` to turn it off), and only for people who may publish models.
+wrote. It is **off** by default (`AGENT_RUN_PYTHON=0`). An administrator may explicitly set it to `1` for people who may publish models, after applying a network policy: the Python socket guard is not a security boundary and code may reach the host network through other means.
 The code runs as `nobody` (it cannot read the backend's secrets), with no environment, CPU, memory
 and time limits, and no network: its own network namespace where the kernel allows it, otherwise
 Python's sockets are disabled. That last one is a guard, not a wall. Code that goes around Python
@@ -160,7 +160,7 @@ Set these in `.env`; `docker-compose.yml` passes them to the backend.
 | `LLM_TOOL_MODE` | `auto` | `native` / `text`; `auto` detects |
 | `AGENT_CONFIRM` | `delete` | `write` asks before every change, `none` never |
 | `AGENT_MAX_STEPS` | `60` | tool calls per turn |
-| `AGENT_RUN_PYTHON` | `1` | `0` turns run_python off (see above); `unsafe` also when the server is not root |
+| `AGENT_RUN_PYTHON` | `0` | `1` opts in; `unsafe` also runs as the server user when the server is not root (see above) |
 | `AGENT_SANDBOX_ROOT` | `/tmp/assistant_sandbox` | run_python's working folders (kept a day) |
 
 **Tool calling.** Best with vLLM started with

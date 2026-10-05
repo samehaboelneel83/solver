@@ -41,3 +41,4 @@ solver-backups/
 agent/.env
 agent/logs/
 .agent_tmp/
+.vitest-cache/

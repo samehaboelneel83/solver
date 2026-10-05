@@ -43,3 +43,17 @@ Before a release:
 5. Reconcile ingestion deployment and PostgreSQL collation maintenance, then build/deploy an identified revision and verify health.
 
 No commit, production migration, deployment, data wipe or production-data cleanup was performed in this verification increment. The live-model field-test scores in other documents remain separately reported historical evidence.
+
+## Follow-up check — after commits `90a60fc` and `bfe0880`
+
+The frontend suite still passes all **3,382 tests in 220 files**, and its production build and lint pass. Vitest writes the results cache under an ignored workspace-local directory so the suite exits cleanly where `node_modules` is read-only. Docker BuildKit's static check passed for the offline backend build path, and in-memory compilation accepted all 610 Python files.
+
+The broad backend suite recorded 4,860 passes and 25 skips, with 8 failures and 4 errors. The affected checks were rerun in a properly isolated setup: the repository's `scripts/` and `deploy/` paths were mounted where the tests expect them, ClickHouse used disposable test credentials, and the exact connected-grid CP-SAT test was restricted to one worker to avoid timeout noise under full-suite load. All 64 rerun checks passed. The first run did not alter application data; its databases and internal-only Docker network were disposable and removed afterward.
+
+The Assistant sandbox now defaults off, and the running backend was recreated with `AGENT_RUN_PYTHON=0`. `/api/health/details` reports PostgreSQL, migration **0110**, the solver worker, and ClickHouse healthy.
+
+PostgreSQL still warns that databases were created at collation version 2.41 while the running image provides 2.31. This is an image/data-version mismatch, not an application health failure. Reindexing affected objects must precede refreshing the recorded collation versions. The live `solver` database is about 191 MB and has 27 valid collation-dependent indexes; no index maintenance was run during this check.
+
+Offline image rebuild documentation and Dockerfile behavior now agree: `OFFLINE=1` skips apt, base images and Python/npm caches must already be local, and PDF export falls back to the printable report if the supplied backend base image lacks Pango. The standard offline bundle path transfers prebuilt images.
+
+The corrected full backend run has now completed: **4,872 passed, 25 skipped** in 1,695.59 seconds. It used disposable PostgreSQL and ClickHouse services and an internal-only Docker network; those resources were removed after the run. The only reported test warnings were deprecations and inability to write pytest cache files in the read-only container. This supersedes the earlier incomplete full-suite result above. The live PostgreSQL collation mismatch remains untouched.

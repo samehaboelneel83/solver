@@ -16,7 +16,7 @@ during image build), **external** (operator-supplied), **optional**.
 ## Backend Python (`backend/requirements.txt`)
 
 Installed into the backend image at build time. Offline rebuilds need a
-wheelhouse or a pre-built image. Solvers (OR-Tools, HiGHS, SCIP, IPOPT, …)
+wheelhouse and a locally cached Python base image. Solvers (OR-Tools, HiGHS, SCIP, IPOPT, …)
 come from that install; commercial engines are **external** (customer licence +
 adapter under `/opt/solver/adapters`).
 
@@ -26,10 +26,10 @@ Epic ML (2026-09-28): it trains predictors (`app.ml.train`) and the run-time est
 
 `weasyprint` (with `pydyf`, `tinycss2`, `cssselect2`, `tinyhtml5`, `Pyphen`, `fonttools`) lays out the run
 report as a PDF (`GET /runs/{id}/export?format=pdf`, 2026-10). It draws text with **Pango**, a system
-library: the Dockerfile installs `libpango-1.0-0`, `libpangoft2-1.0-0`, `libharfbuzz0b` and
-`fonts-dejavu-core` with apt, which an air-gapped build needs from a local Debian mirror or a pre-built
-base image. Without Pango the API still runs; the PDF export answers 503 and points to the printable
-report, which the browser saves as PDF.
+library. Online builds install `libpango-1.0-0`, `libpangoft2-1.0-0`, `libharfbuzz0b` and
+`fonts-dejavu-core` with apt. Offline builds skip apt; use a `PYTHON_BASE` image with those libraries for
+PDF export, or use the printable-report fallback. The API remains available without Pango and returns
+503 with a link to that fallback.
 
 ## Frontend Node (`frontend/package.json`)
 

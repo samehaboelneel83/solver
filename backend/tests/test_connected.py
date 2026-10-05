@@ -107,7 +107,9 @@ def test_the_cases_are_valid_and_the_rule_binds_in_most_of_them():
 @pytest.mark.parametrize("backend", ["cp-sat", "highs", "milp", "scip"])
 def test_the_flow_agrees_with_every_partition(seed, backend):
     keys, edges, groups, empty, ir, data, expected, _ = _case(seed)
-    result, _ = solve_compiled(by_name(backend), compile_model(ir, data), time_limit=30, seed=1)
+    # Keep this exact small-grid cross-check deterministic. CP-SAT's eight-worker
+    # portfolio can spend the whole limit proving the same tiny case under load.
+    result, _ = solve_compiled(by_name(backend), compile_model(ir, data), time_limit=30, seed=1, workers=1)
     assert result.status == "optimal", (seed, result.status)
     assert round(float(result.objective)) == expected, (seed, result.objective, expected)
     chosen = [tuple(i) for i in result.chosen("assign")]

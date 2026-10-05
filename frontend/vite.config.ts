@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { resolve } from "node:path";
 
 /** Large libraries in chunks of their own: cached across deploys of the app's own code, and fetched
  * only by the pages that use them (the model editor's blocks, the graph, the flow and rule views). */
@@ -39,6 +40,9 @@ export default defineConfig({
     },
   },
   test: {
+    // Keep Vitest's result cache in the workspace instead of node_modules. Some
+    // managed Windows environments mount node_modules read-only after install.
+    cache: { dir: resolve(process.env.VITEST_CACHE_DIR || ".vitest-cache") },
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
     globals: true,
