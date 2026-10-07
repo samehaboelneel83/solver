@@ -6,7 +6,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 from sqlalchemy import text
 from app import audit
-from app.integrations.contracts import ExtractionLimits, ExtractionRequest
+from app.integrations.contracts import FAILURE_CODES, ExtractionError, ExtractionLimits, ExtractionRequest
 from app.integrations.policy import source_for
 from app.integrations.postgres import PostgresConnector
 from app.integrations.secrets import decrypt
@@ -22,13 +22,18 @@ def _extract(row, output, cancelled, result):
             memory = 1024 * 1024 * 1024
             resource.setrlimit(resource.RLIMIT_AS, (memory, memory))
         source = source_for(row)
-        password = decrypt(row["credential"], row["organization_id"], row["id"])
+        try:
+            password = decrypt(row["credential"], row["organization_id"], row["id"])
+        except Exception:
+            raise ExtractionError("The stored credential cannot be read with this server's keys", "credential_unreadable") from None
         adapter = PostgresConnector(source, lambda _: password)
         request = ExtractionRequest(row["organization_id"], row["id"], source.table, tuple(source.columns), ExtractionLimits())
         artifact = stage_snapshot(Path(output), adapter, request, cancelled)
         result.send(("extracted", artifact.name))
+    except ExtractionError as error:
+        result.send(("failed", error.code))  # A failure class only: never driver details or credentials.
     except Exception:
-        result.send(("failed", None))  # Never send driver details or credentials.
+        result.send(("failed", "extraction_failed"))
     finally:
         result.close()
 
@@ -79,6 +84,9 @@ def process_one(session_factory, output: str) -> bool:
                 if state == "extracted":
                     artifact = UUID(artifact)
                     error = None
+                else:
+                    state, error = "failed", artifact if artifact in FAILURE_CODES else "extraction_failed"
+                    artifact = None
             except (EOFError, ValueError):
                 state, artifact = "failed", None
     finally:

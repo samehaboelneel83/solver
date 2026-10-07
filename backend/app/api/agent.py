@@ -49,7 +49,7 @@ from app.agent import core
 from app.agent import files as agent_files
 from app.agent import sandbox
 from app.agent import store as agent_store
-from app.api.deps import capabilities_of, get_current_user, oauth2_scheme
+from app.api.deps import capabilities_of, get_current_user, oauth2_scheme, requires
 from app.core.db import get_db
 from app.models.iam import UserAccount
 
@@ -461,7 +461,60 @@ def workspace(domain_id: int, db: Session = Depends(get_db), user: UserAccount =
                       "layers": m["layers"] or []}
                      for m in maps],
         "problems": [dict(p) for p in problems],
+        "data_sources": _data_sources(db, user, domain_id),
     }
+
+
+def _data_sources(db: Session, user: UserAccount, domain_id: int) -> list[dict]:
+    """The domain's database connections, for someone allowed to read them: each one's table and columns, its
+    last extraction (when, how many rows, or why it failed) and what its rows were loaded into. The Assistant
+    pulls one in with `use_source`; credentials and hosts are never shown."""
+    if "integration.run" not in capabilities_of(db, user):
+        return []
+    rows = db.execute(text(
+        "SELECT c.id, c.name, c.enabled, c.config->>'schema' AS schema_name, c.config->>'table' AS table_name,"
+        " c.config->'columns' AS columns,"
+        " (SELECT json_build_object('job_id', j.id, 'state', j.state, 'finished_at', j.finished_at,"
+        "    'error_code', j.error_code) FROM ingestion_job j WHERE j.connection_id = c.id ORDER BY j.id DESC LIMIT 1)"
+        "   AS last_extraction,"
+        " (SELECT json_agg(DISTINCT coalesce(e.name, rt.name, p.name)) FROM import_load l JOIN ingestion_job j"
+        "    ON j.id = l.job_id LEFT JOIN entity_type e ON e.id = l.entity_type_id"
+        "    LEFT JOIN relationship_type rt ON rt.id = l.relationship_type_id"
+        "    LEFT JOIN parameter_def p ON p.id = l.parameter_id WHERE j.connection_id = c.id) AS loaded_into"
+        " FROM integration_connection c WHERE c.domain_id = :d AND c.organization_id = :o ORDER BY c.id"),
+        {"d": domain_id, "o": user.organization_id}).mappings().all()
+    return [{"id": r["id"], "name": r["name"], "enabled": r["enabled"],
+             "table": f"{r['schema_name']}.{r['table_name']}", "columns": r["columns"] or [],
+             "last_extraction": r["last_extraction"], "loaded_into": r["loaded_into"] or []} for r in rows]
+
+
+#: Rows a source brings into the conversation: one extraction's ceiling (app.integrations.contracts).
+SOURCE_ROWS = 100_000
+
+
+@router.get("/sources/{job_id}/file")
+def source_file(job_id: int, db: Session = Depends(get_db), user=Depends(requires("integration.run"))) -> dict:
+    """An extracted source as an attached file (`use_source`): the same tables `read_file`, `query_file` and a
+    plan's *_from_file read, its rows checked against the extraction's SHA-256, and where they came from."""
+    from app.api.imports import _artifact, _job
+    from app.integrations import artifacts
+
+    job = _job(db, job_id, user.organization_id)
+    path, manifest = _artifact(job, user.organization_id)
+    try:
+        records = artifacts.verified_rows(path, manifest.get("sha256", ""), SOURCE_ROWS)
+    except artifacts.ArtifactChanged as exc:
+        raise HTTPException(409, str(exc)) from None
+    except artifacts.ArtifactUnavailable as exc:
+        raise HTTPException(409, str(exc)) from None
+    columns = list(manifest.get("columns") or (list(records[0]) if records else []))
+    rows = [[agent_files._cell(r.get(c)) for c in columns] for r in records]
+    total = int(manifest.get("rows") or len(rows))
+    return {"name": job["connection_name"],
+            "sheets": [{"name": str(manifest.get("source_object") or "rows"), "columns": columns, "rows": rows,
+                        "total_rows": total, "truncated": total > len(rows)}],
+            "source": {"connection_id": job["connection_id"], "job_id": job_id,
+                       "sha256": manifest.get("sha256"), "extracted_at": manifest.get("completed_at")}}
 
 
 @router.get("/result/{run_id}")

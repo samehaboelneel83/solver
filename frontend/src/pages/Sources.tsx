@@ -43,6 +43,15 @@ export const ERROR_TEXT: Record<string, string> = {
   extraction_failed: "The source could not be read. Check that the host is reachable from the import worker, that the credential is current, and that the table and columns exist.",
   deadline_exceeded: "The extraction ran past its time limit (about five minutes). Extract fewer columns, or a smaller table or view.",
   worker_lost: "The import worker stopped during the extraction. Run it again; nothing was changed.",
+  authentication_failed: "The database refused the user name or password. Check the user exists on the source and replace the credential.",
+  tls_failed: "The secure connection could not be verified. The source's certificate must be signed by the CA this server trusts and name the host you entered.",
+  source_unreachable: "The database could not be reached from the import worker. Check the host name and port, and that the database is running and accepts connections.",
+  network_not_allowed: "The database's address is outside the networks this server may connect to. An administrator can add its network to the integration policy.",
+  source_missing: "The database, schema, table or one of the columns was not found on the source. Check the names (they are case-sensitive).",
+  not_permitted: "The database user may not read this table or one of its columns. Grant it SELECT on them.",
+  trust_unavailable: "This server has no trusted certificate for database connections. An administrator needs to install the CA file.",
+  credential_unreadable: "The stored password cannot be decrypted with this server's keys (the keys changed). Replace the credential.",
+  limit_exceeded: "The table is larger than one extraction allows (100,000 rows or 20 MB). Extract fewer columns, or a smaller table or view.",
 };
 
 const STATE_TEXT: Record<Job["state"], string> = {

@@ -15,8 +15,20 @@ from typing import Iterable, Iterator, Mapping, Protocol
 from uuid import UUID
 
 
+# Why an extraction failed, safe to show: a class of cause, never driver text or credentials.
+FAILURE_CODES = frozenset({
+    "extraction_failed", "authentication_failed", "tls_failed", "source_unreachable", "network_not_allowed",
+    "source_missing", "not_permitted", "trust_unavailable", "credential_unreadable", "deadline_exceeded",
+    "limit_exceeded",
+})
+
+
 class ExtractionError(Exception):
     """Safe public error; driver exception text must not be included."""
+
+    def __init__(self, message: str = "", code: str = "extraction_failed"):
+        super().__init__(message)
+        self.code = code if code in FAILURE_CODES else "extraction_failed"
 
 
 class ExtractionCancelled(ExtractionError):
@@ -24,7 +36,8 @@ class ExtractionCancelled(ExtractionError):
 
 
 class ExtractionLimitExceeded(ExtractionError):
-    pass
+    def __init__(self, message: str = "", code: str = "limit_exceeded"):
+        super().__init__(message, code)
 
 
 @dataclass(frozen=True)

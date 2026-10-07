@@ -1337,3 +1337,136 @@ def test_repeated_labels_read_back_as_keys():
     text = readback({"seed": {"entities": [{"type": "op", "key": f"Gear-{i}", "label": "Gear"} for i in (1, 2)]},
                      "ir": {}})
     assert "records op: 2: Gear-1, Gear-2" in text
+
+
+JOB_RESULT = """RUN 102: optimal; goal (minimize) = 231; solver cp-sat.
+RULES:
+- c_cap (hard): held, tight (no room left on 5 of 6: Jan, Feb, Mar, Apr, May); least room left on any one record 0; room left on the others: Jun 50
+
+DECISION begin[operation]: 18 of 20 cells non-zero.
+operation | operation.job | operation.step | operation.machine_name | operation.duration_min | value
+Flange-1 (Flange) | Flange | 1 | Lathe | 45 | 68
+Gear-2 (Gear) | Gear | 2 | Grinder | 41 | 68
+Bracket-3 (Bracket) | Bracket | 3 | Lathe | 22 | 156
+Bracket-1 (Bracket) | Bracket | 1 | Mill | 22 | 0
+
+DECISION finish[operation]: 20 of 20 cells non-zero.
+operation | operation.job | operation.step | operation.machine_name | operation.duration_min | value
+Flange-1 (Flange) | Flange | 1 | Lathe | 45 | 113
+"""
+
+
+def test_a_reply_the_results_contradict_is_caught():
+    """Live tests (October 2026): "capacity is fully used every month" with June 50 spare; a schedule row giving
+    Flange step 1 the Grinder although the results put it on the Lathe."""
+    bad = ("Capacity is fully used every month.\n\nPart\tStep\tMachine\tStart\tFinish\tDuration\n"
+           "Flange\t1\tGrinder\t68\t113\t45\nBracket\t3\tLathe\t156\t178\t22\n")
+    wrong = core.reply_contradictions(bad, [JOB_RESULT])
+    assert any("room left on 1 of 6: Jun 50" in w for w in wrong), wrong
+    assert any("Grinder" in w and "Lathe for that record" in w for w in wrong), wrong
+    assert len(wrong) == 2, wrong
+    good = ("Capacity is used fully from January to May; June has 50 units spare.\n\n"
+            "| Part | Step | Machine | Start | Finish |\n|---|---|---|---|---|\n| Flange | 1 | Lathe | 68 | 113 |\n"
+            "| Gear | 2 | Grinder | 68 | 109 |\n| Bracket | 3 | Lathe | 156 | 178 |")
+    assert core.reply_contradictions(good, [JOB_RESULT]) == []
+
+
+def test_a_contradicted_reply_is_not_shown_and_is_asked_again(tenants, monkeypatch):
+    from tests.test_agent import _chat
+
+    replies = [
+        ({"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "type": "function", "function": {
+            "name": "read_result", "arguments": json.dumps({"run_id": 1})}}]}, True),
+        ({"role": "assistant", "content": "Capacity is fully used every month.", "_finish": "stop"}, True),
+        ({"role": "assistant", "content": "Capacity is full from January to May; June has 50 spare.",
+          "_finish": "stop"}, True),
+    ]
+    monkeypatch.setattr(core, "llm_chat", lambda *a, **k: replies.pop(0))
+    monkeypatch.setattr(core.Agent, "run_tool", lambda self, name, args: JOB_RESULT)
+    events = _chat(tenants["b"], mode="model", text="how full is the factory?")
+    assert any(e["type"] == "note" and "contradict" in e["text"] for e in events), events
+    assert next(e for e in events if e["type"] == "answer")["text"].startswith("Capacity is full from January")
+
+
+RESOURCE_RESULT = """RUN 102: optimal; goal (minimize) = 231; solver cp-sat.
+
+RESOURCES (c_machine; exact, from the answer -- quote these, never judge idle time yourself; the answer ends at 231):
+- Grinder: 5 tasks, busy 133 from 68 to 231; idle before 68; in order: Gear-2 68-109, Shaft-4 116-126, Flange-3 145-169, Housing-3 173-193, Bracket-4 193-231
+- Lathe: 5 tasks, busy 178 from 0 to 178; idle after 178; in order: Shaft-1 0-43, Gear-1 43-68, Flange-1 68-113, Housing-1 113-156, Bracket-3 156-178
+"""
+
+
+def test_a_task_put_on_the_wrong_resource_is_caught():
+    """Live job-shop test: the machine was a link, not a field, and the reply put Flange step 1 on the Grinder."""
+    bad = "| Part | Step | Machine | Start | Finish |\n|---|---|---|---|---|\n| Flange | 1 | Grinder | 68 | 113 |\n" \
+          "| Gear | 2 | Grinder | 68 | 109 |"
+    wrong = core.reply_contradictions(bad, [RESOURCE_RESULT])
+    assert len(wrong) == 1 and "puts Flange-1 (68-113) on Grinder, but the results put it on Lathe" in wrong[0], wrong
+    assert core.reply_contradictions(bad.replace("| Flange | 1 | Grinder", "| Flange | 1 | Lathe"),
+                                     [RESOURCE_RESULT]) == []
+
+
+def test_an_answer_from_memory_is_checked_against_the_last_results(tenants, monkeypatch):
+    """Live job-shop retest: asked again, the model re-typed the schedule without reading the results, with the
+    same wrong machine. With no tool in the turn, the conversation's latest run results are the basis."""
+    from tests.test_agent import _chat
+
+    first = [({"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "type": "function", "function": {
+                 "name": "read_result", "arguments": json.dumps({"run_id": 102})}}]}, True),
+             ({"role": "assistant", "content": "Done: 231 minutes.", "_finish": "stop"}, True)]
+    monkeypatch.setattr(core, "llm_chat", lambda *a, **k: first.pop(0))
+    monkeypatch.setattr(core.Agent, "run_tool", lambda self, name, args: RESOURCE_RESULT)
+    events = _chat(tenants["b"], mode="model", text="solve it", conversation_id="memo1", server_history=True)
+    later = [({"role": "assistant", "content": "| Flange | 1 | Grinder | 68 | 113 |", "_finish": "stop"}, True),
+             ({"role": "assistant", "content": "| Flange | 1 | Lathe | 68 | 113 |", "_finish": "stop"}, True)]
+    monkeypatch.setattr(core, "llm_chat", lambda *a, **k: later.pop(0))
+    real_call = core.Agent.__init__
+
+    def init(self, *a, **k):
+        real_call(self, *a, **k)
+        inner = self.call
+        self.call = lambda method, path, *r, **kw: ({"ok": True, "body": {"text": RESOURCE_RESULT}}
+                                                    if path == "/api/v1/agent/result/102" else inner(method, path, *r, **kw))
+
+    monkeypatch.setattr(core.Agent, "__init__", init)
+    events = _chat(tenants["b"], mode="model", text="the table again?", conversation_id="memo1", server_history=True)
+    assert any(e["type"] == "note" and "contradict" in e["text"] for e in events), events
+    assert next(e for e in events if e["type"] == "answer")["text"] == "| Flange | 1 | Lathe | 68 | 113 |"
+
+
+def test_check_spec_runs_a_trial_solve_and_says_it(tenants, db):
+    """A plan is solved once on its real data during the check (nothing kept): its status, goal and what is used
+    come back with the read-back; a plan with no answer is flagged."""
+    client = TestClient(app)
+    f = client.post("/api/v1/agent/files", files={"file": ("months.csv", MONTHS_CSV, "text/csv")},
+                    headers=tenants["b"]).json()
+    m = {"index": "m", "set": "month"}
+    seed = {"entity_types": [{"name": "month", "attributes": [{"name": "name", "data_type": "text"},
+                                                              {"name": "demand", "data_type": "number"},
+                                                              {"name": "capacity", "data_type": "number"}]}],
+            "entities_from_file": [{"file": "months.csv", "type": "month", "key": "month", "attrs": {
+                "name": "month", "demand": "demand_units", "capacity": "capacity_units"}}]}
+    expanded = agent_files.expand(seed, [f])
+    ir = {"version": 2, "sets": ["month"], "parameters": {},
+          "variables": {"make": {"index": ["month"], "domain": "continuous", "lower": 0}},
+          "constraints": [{"id": "c_cap", "forall": [m], "left": {"var": "make", "index": ["m"]}, "relation": "<=",
+                           "right": {"attr": {"of": "m", "name": "capacity"}}, "severity": "hard"},
+                          {"id": "c_dem", "forall": [m], "left": {"var": "make", "index": ["m"]}, "relation": ">=",
+                           "right": {"attr": {"of": "m", "name": "demand"}}, "severity": "hard"}],
+          "objective": {"sense": "minimize", "terms": [{"id": "o", "weight": 1, "expression": {
+              "sum": {"var": "make", "index": ["m"]}, "over": [m]}}]}}
+    spec = {"domain_name": f"Trial {uuid.uuid4().hex[:6]}", "problem_name": "T", "seed": expanded, "ir": ir,
+            "dry_run": True, "trial": True}
+    got = client.post("/api/v1/problems/from-spec", json=spec, headers=tenants["b"])
+    assert got.status_code == 200, got.text
+    trial = got.json()["trial"]
+    assert trial["status"] == "infeasible", trial  # Feb, Apr, May demand above capacity
+    said = core.trial_said(trial)
+    assert "NO answer on this data" in said
+    ir["constraints"].pop(1)
+    trial = client.post("/api/v1/problems/from-spec", json=spec, headers=tenants["b"]).json()["trial"]
+    assert trial["status"] == "optimal" and core.trial_said(trial).count("every decision is 0") == 1
+    assert "TRIAL on your data (solved once, nothing kept): optimal, goal 0; make used in 0 of 6 -- it chooses or " \
+           "makes nothing" in core.trial_for_person(trial)
+    # Nothing was kept.
+    assert client.post("/api/v1/problems/from-spec", json=spec, headers=tenants["b"]).status_code == 200

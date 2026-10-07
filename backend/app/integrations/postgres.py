@@ -60,10 +60,56 @@ class PostgresSource:
 
 def resolve_address(source: PostgresSource) -> str:
     networks = [ipaddress.ip_network(network) for network in source.allowed_networks]
-    addresses = sorted({item[4][0] for item in socket.getaddrinfo(source.host, source.port, type=socket.SOCK_STREAM)})
+    try:
+        addresses = sorted({item[4][0] for item in socket.getaddrinfo(source.host, source.port, type=socket.SOCK_STREAM)})
+    except OSError:
+        raise ExtractionError("The database host name does not resolve from the import worker", "source_unreachable") from None
     if not addresses or any(not any(ipaddress.ip_address(address) in network for network in networks) for address in addresses):
-        raise ExtractionError("Database address is outside the allowed networks")
+        raise ExtractionError("Database address is outside the allowed networks", "network_not_allowed")
     return addresses[0]
+
+
+# SQLSTATE classes and codes (PostgreSQL appendix A) -> a safe failure class.
+_STATE_CODES = {
+    "28P01": "authentication_failed", "28000": "authentication_failed",
+    "42501": "not_permitted",
+    "3D000": "source_missing", "3F000": "source_missing", "42P01": "source_missing", "42703": "source_missing",
+    "57014": "deadline_exceeded",
+}
+# libpq reports failures before the server answers (connect, TLS, startup) without a SQLSTATE; the class
+# is read from its message here and only the class is kept -- the message itself is never stored or sent.
+_CONNECT_PHRASES = (
+    ("password authentication failed", "authentication_failed"),
+    ("no pg_hba.conf entry", "authentication_failed"),
+    ("role \"", "authentication_failed"),
+    ("certificate", "tls_failed"),
+    ("ssl", "tls_failed"),
+    ("server does not support", "tls_failed"),
+    ("database \"", "source_missing"),
+    ("timeout expired", "source_unreachable"),
+    ("could not connect", "source_unreachable"),
+    ("connection refused", "source_unreachable"),
+    ("could not translate host name", "source_unreachable"),
+    ("no route to host", "source_unreachable"),
+)
+
+
+def failure_code(error: BaseException) -> str:
+    """The safe class of a driver failure: what to fix, without the driver's words."""
+    state = getattr(error, "pgcode", None)
+    if state in _STATE_CODES:
+        return _STATE_CODES[state]
+    if state and state.startswith("28"):
+        return "authentication_failed"
+    if state and state.startswith("08"):
+        return "source_unreachable"
+    if isinstance(error, psycopg2.OperationalError) and not state:
+        said = str(error).lower()
+        for phrase, code in _CONNECT_PHRASES:
+            if phrase in said:
+                return code
+        return "source_unreachable"
+    return "extraction_failed"
 
 
 def encode_value(value):
@@ -106,7 +152,7 @@ class PostgresConnector:
         try:
             address = resolve_address(source)
             if not Path(source.root_certificate).is_file():
-                raise ExtractionError("Local database trust certificate is unavailable")
+                raise ExtractionError("Local database trust certificate is unavailable", "trust_unavailable")
             connection = psycopg2.connect(
                 host=source.host, hostaddr=address, port=source.port,
                 dbname=source.database, user=source.username,
@@ -141,7 +187,7 @@ class PostgresConnector:
                     if cancelled.is_set():
                         raise ExtractionCancelled("Extraction cancelled")
                     if interrupted.is_set() or time.monotonic() >= deadline:
-                        raise ExtractionError("Extraction deadline exceeded")
+                        raise ExtractionError("Extraction deadline exceeded", "deadline_exceeded")
                     rows = cursor.fetchmany(request.limits.batch_rows)
                     if not self.source_schema:
                         self.source_schema = [{"name": column.name, "postgres_oid": column.type_code}
@@ -150,14 +196,15 @@ class PostgresConnector:
                         break
                     for row in rows:
                         if interrupted.is_set() or time.monotonic() >= deadline:
-                            raise ExtractionError("Extraction deadline exceeded")
+                            raise ExtractionError("Extraction deadline exceeded", "deadline_exceeded")
                         yield dict(zip(request.columns, (encode_value(value) for value in row), strict=True))
         except ExtractionError:
             raise
-        except Exception:
+        except Exception as error:
             if cancelled.is_set():
                 raise ExtractionCancelled("Extraction cancelled") from None
-            raise ExtractionError("PostgreSQL extraction failed; check connection and source permissions") from None
+            code = "deadline_exceeded" if interrupted.is_set() else failure_code(error)
+            raise ExtractionError("PostgreSQL extraction failed; check connection and source permissions", code) from None
         finally:
             finished.set()
             if watcher is not None:

@@ -1068,6 +1068,16 @@ def plant_domain_seed(db: Session, domain_id: int, seed: Any, *, fresh_types: bo
         keys = spec.get("entities")
         if not isinstance(keys, list):
             continue
+        param = params[spec["parameter"]]
+        if not keys and not (param.index_type_ids or []):
+            # A single number given as a cell is the parameter's value: its default, which every read of a
+            # parameter without an index uses (the database-source test, October 2026: two capacities written
+            # as cells with no index were read as their default 0, and the plan made nothing).
+            value = spec.get("value")
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and param.value_type_id is None:
+                param.default_value = value
+                db.flush()
+            continue
         entity_ids: list[int] = []
         skip = False
         for item in keys:

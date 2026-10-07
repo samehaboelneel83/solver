@@ -653,7 +653,10 @@ def _resources(rec: dict[str, Any], ir: dict[str, Any], data: dict[str, Any]) ->
             if spans[-1][1] < end_all - 1e-9:
                 idle.append(f"after {_amount(spans[-1][1])}")
             out.append(f"- {group}: {len(spans)} tasks, busy {_amount(busy)} from {_amount(lead)} to "
-                       f"{_amount(spans[-1][1])}; idle " + (", ".join(idle) if idle else "never"))
+                       f"{_amount(spans[-1][1])}; idle " + (", ".join(idle) if idle else "never")
+                       # Which task, when (the live job-shop test: a reply put Flange-1 on the Grinder).
+                       + ("; in order: " + ", ".join(f"{o} {_amount(a)}-{_amount(b)}" for a, b, o in spans)
+                          if len(spans) <= 60 else ""))
     return out
 
 

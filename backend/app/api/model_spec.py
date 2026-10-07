@@ -66,6 +66,10 @@ class ModelSpec(BaseModel):
     ir: dict[str, Any] = Field(description="the Problem IR (docs/contracts/problem-ir.md)")
     note: str | None = Field(default=None, max_length=2000, description="kept on the model version")
     dry_run: bool = False
+    #: With dry_run: also solve the model once on its data, briefly, before anything is kept (`trial` in the
+    #: answer: status, goal, how many cells of each decision are used) -- a plan that cannot be met, or that
+    #: chooses nothing, shows before a person approves it.
+    trial: bool = False
 
 
 def _end(value: Any) -> tuple[str, str] | None:
@@ -299,6 +303,54 @@ def stale_records(db: Session, domain_id: int, seed: dict[str, Any]) -> list[tup
     return out
 
 
+TRIAL_SECONDS = 15
+TRIAL_CELLS = 200_000
+
+
+def _trial(db: Session, domain_id: int, ir: dict[str, Any]) -> dict[str, Any]:
+    """One short solve of the planned model on its own data, inside the dry run's transaction (the field tests,
+    October 2026: plans that passed every check read stock from the month after, or planned for futures with
+    nothing decided later -- a trial shows what such a model does before a person approves it)."""
+    from app.solve import sandbox
+    from app.solve.backends import NoBackend, choose
+    from app.solve.classify import classify
+    from app.solve.compile import Unsupported, compile_model
+    from app.solve.convexity import refine
+    from app.solve.preview import live_data
+
+    try:
+        data = live_data(db, domain_id, ir)
+        compiled = compile_model(ir, data)
+    except Unsupported as exc:
+        return {"status": "not compiled", "why": str(exc)[:500]}
+    except Exception as exc:  # noqa: BLE001 -- a trial informs, it never refuses a plan
+        return {"status": "not compiled", "why": f"{type(exc).__name__}: {str(exc)[:300]}"}
+    if len(compiled.variables) > TRIAL_CELLS:
+        return {"status": "skipped", "why": f"{len(compiled.variables):,} decisions: too big for a trial"}
+    try:
+        found = refine(classify(ir, data), compiled)
+        backend, _ = choose(found)
+        result, reason = sandbox.run("app.solve.sandbox:solve_in_child",
+                             {"backend": backend.name, "compiled": compiled, "time_limit": TRIAL_SECONDS,
+                              "seed": 0, "workers": 1, "gap_rel": 0.0},
+                             time_limit=TRIAL_SECONDS)
+    except NoBackend as exc:
+        return {"status": "no solver", "why": str(exc)[:300]}
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "failed", "why": f"{type(exc).__name__}: {str(exc)[:300]}"}
+    used: dict[str, list[int]] = {}
+    for key in compiled.variables:
+        if not str(key[0]).startswith("__"):
+            used.setdefault(str(key[0]), [0, 0])[1] += 1
+    for key, value in (result.assignments or {}).items():
+        if str(key[0]) in used and abs(float(value)) > 1e-9:
+            used[str(key[0])][0] += 1
+    if result is None:
+        return {"status": "no answer", "why": str(reason or "")[:300]}
+    return {"status": result.status, "objective": result.objective, "solver": backend.name,
+            "seconds": TRIAL_SECONDS, "used": {k: {"non_zero": v[0], "cells": v[1]} for k, v in used.items()}}
+
+
 @router.post("/problems/from-spec")
 def build_from_spec(
     spec: ModelSpec,
@@ -371,8 +423,9 @@ def build_from_spec(
             "objective_terms": len((spec.ir.get("objective") or {}).get("terms") or []),
         }
         if spec.dry_run:
+            trial = _trial(db, domain_id, spec.ir) if spec.trial else None
             db.rollback()
-            return {"ok": True, "dry_run": True, "would_create": counts}
+            return {"ok": True, "dry_run": True, "would_create": counts, **({"trial": trial} if trial else {})}
 
         version_id = db.execute(
             insert(ModelVersion.__table__)

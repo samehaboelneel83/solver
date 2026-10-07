@@ -1,6 +1,8 @@
 """Authenticated integration lifecycle and real PostgreSQL RLS/queue tests."""
 import base64
 import json
+
+import psycopg2
 import pytest
 import multiprocessing as mp
 from uuid import uuid4
@@ -91,7 +93,8 @@ def test_worker_records_safe_failure_and_releases_active_slot(setup, tmp_path):
     assert process_one(SessionLocal, str(tmp_path))
     response = client.get(f"/api/v1/ingestion-jobs/{job['id']}", headers=tenants["a"])
     assert response.json()["state"] == "failed", response.text
-    assert response.json()["error_code"] == "extraction_failed"
+    # The configured CA file does not exist: the job names that class of cause, nothing more.
+    assert response.json()["error_code"] == "trust_unavailable"
     assert "never-return-me" not in response.text
     assert client.post(f"/api/v1/connections/{identity}/jobs", headers=tenants["a"]).status_code == 202
 
@@ -162,3 +165,54 @@ def test_expired_running_job_is_failed_without_automatic_replay(setup, tmp_path)
     result = client.get(f"/api/v1/ingestion-jobs/{job['id']}", headers=tenants["a"]).json()
     assert result["state"] == "failed"
     assert result["error_code"] == "worker_lost"
+
+
+class _DriverError(psycopg2.OperationalError):
+    def __init__(self, message, state=None):
+        super().__init__(message)
+        self._state = state
+
+    @property
+    def pgcode(self):
+        return self._state
+
+
+@pytest.mark.parametrize("message,state,code", [
+    ('connection to server failed: FATAL:  password authentication failed for user "reader"', None, "authentication_failed"),
+    ("", "28P01", "authentication_failed"),
+    ("server certificate for \"db\" does not match host name", None, "tls_failed"),
+    ("connection to server at \"10.0.0.5\", port 5432 failed: timeout expired", None, "source_unreachable"),
+    ("connection refused", None, "source_unreachable"),
+    ('FATAL:  database "nope" does not exist', None, "source_missing"),
+    ("", "42P01", "source_missing"),
+    ("", "42703", "source_missing"),
+    ("", "42501", "not_permitted"),
+    ("", "57014", "deadline_exceeded"),
+    ("something new", None, "source_unreachable"),
+])
+def test_driver_failures_become_safe_classes(message, state, code):
+    from app.integrations.postgres import failure_code
+    assert failure_code(_DriverError(message, state)) == code
+
+
+def test_unknown_failures_and_codes_stay_generic():
+    from app.integrations.contracts import ExtractionError
+    from app.integrations.postgres import failure_code
+    assert failure_code(ValueError("x")) == "extraction_failed"
+    assert ExtractionError("x", "made-up").code == "extraction_failed"
+
+
+def test_address_outside_networks_and_unknown_host_are_named(tmp_path):
+    from uuid import uuid4
+    from app.integrations.contracts import ExtractionError
+    from app.integrations.postgres import PostgresSource, resolve_address
+    def source(host, networks):
+        return PostgresSource(organization_id=uuid4(), connection_id=1, host=host, database="d", username="u",
+                              secret_ref="s", schema="p", table="t", columns=("a",), allowed_networks=networks,
+                              root_certificate=str(tmp_path / "ca.pem"))
+    with pytest.raises(ExtractionError) as outside:
+        resolve_address(source("127.0.0.1", ("10.0.0.0/8",)))
+    assert outside.value.code == "network_not_allowed"
+    with pytest.raises(ExtractionError) as unknown:
+        resolve_address(source("no-such-host.invalid", ("10.0.0.0/8",)))
+    assert unknown.value.code == "source_unreachable"
