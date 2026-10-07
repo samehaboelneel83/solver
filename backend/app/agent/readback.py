@@ -96,7 +96,12 @@ def readback(spec: dict[str, Any]) -> str:
     kinds: dict[str, list[str]] = {}
     for e in seed.get("entities") or []:
         if isinstance(e, dict) and e.get("type"):
-            kinds.setdefault(str(e["type"]), []).append(str(e.get("label") or e.get("key")))
+            kinds.setdefault(str(e["type"]), []).append((str(e.get("key")), str(e.get("label") or e.get("key"))))
+    for kind, pairs in list(kinds.items()):
+        labels = [label for _, label in pairs]
+        # Labels that repeat say nothing of which record is which (the live job-shop test: "Gear, Gear, Gear"):
+        # then the keys are shown.
+        kinds[kind] = labels if len(set(labels)) == len(labels) else [key for key, _ in pairs]
     for kind, names in kinds.items():
         lines.append(f"- records {kind}: {len(names)}: {', '.join(names[:12])}" + (", ..." if len(names) > 12 else ""))
     for p in seed.get("parameters") or []:

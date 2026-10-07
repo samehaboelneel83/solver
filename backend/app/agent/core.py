@@ -1446,8 +1446,9 @@ row order (month and weekday names sort by the calendar, other text naturally: "
 STOCK OVER PERIODS (production or inventory plans, stock carried from one period to the next, late delivery or
 backorders): periods linked in order ("relationships_in_order": [{{"type":"next","of":"month","by":"#row"}}]);
 decisions make[p], stock[p] (left at the end of p) and, when late delivery is allowed, owed[p] (demand still not
-delivered at the end of p), all >= 0. ONE balance rule for every period, the previous one through the link (empty
-for the first period, so no rule needs "the first"): forall p: sum over q via next to p of (stock[q] - owed[q]) +
+delivered at the end of p), all >= 0. ONE balance rule for every period, the PREVIOUS one through the link -- the
+binding {{"index":"q","set":"month","via":{{"rel":"next","to":"p"}}}} (q -> p: the month BEFORE p; "from":"p" would be
+the month after) -- empty for the first period, so no rule needs "the first": forall p: sum over q of (stock[q] - owed[q]) +
 opening[p] + make[p] = p.demand + stock[p] - owed[p] -- opening a parameter per period, default 0, given only for
 the first (the starting stock); owed is extra demand, never supply, so it is SUBTRACTED on both sides. Everything
 delivered by the end: owed[p] = 0 for the last period (forall p where its name field = the last one). Costs:

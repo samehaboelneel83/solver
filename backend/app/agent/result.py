@@ -490,6 +490,47 @@ def _room_per_record(rule: dict[str, Any], rec: dict[str, Any], sets: dict[str, 
     left, right, relation = rule.get("left"), rule.get("right"), rule.get("relation")
     if relation not in ("<=", ">="):
         return None
+    # The model itself first (exact for any linear rule); the field-only reading when it cannot be compiled. The
+    # live production test: a capacity read from a parameter was looked up by the wrong cell shape and every
+    # month showed "-600 room left".
+    compiled = _room_compiled(rule, rec, data, i)
+    return compiled if compiled is not None else _room_simple(rule, rec, sets, data, i, set_name, left, right, relation)
+
+
+def _room_compiled(rule: dict[str, Any], rec: dict[str, Any], data: dict[str, Any], i: str) -> list[tuple[str, float]] | None:
+    """Room left per record for any linear rule over one set, from the model itself: each instance's two sides
+    evaluated at the answer (the live cutting-stock test: "all demand rules tight, no surplus" when three of the
+    four widths had 1, 1 and 201 pieces over)."""
+    from app.solve.compile import compile_model
+
+    try:
+        compiled = compile_model(rec.get("ir") or {}, data)
+    except Exception:  # noqa: BLE001 -- a report line, never a failure
+        return None
+    if len(compiled.constraints) > 50_000:
+        return None
+    values: dict[tuple, float] = {}
+    for var, (_, rows) in decision_rows(rec).items():
+        for row in rows:
+            values[(var, tuple(str(k) for k in row[:-1]))] = float(row[-1])
+    out = []
+    for c in compiled.constraints:
+        if c.id != rule.get("id") or c.quadratic or getattr(c, "when", None) is not None:
+            continue
+        total = 0.0
+        for side, sign in ((c.left, 1.0), (c.right, -1.0)):
+            total += sign * float(side.const)
+            for key, coeff in side.coeffs.items():
+                if str(key[0]).startswith("__"):
+                    return None
+                total += sign * float(coeff) * values.get((key[0], tuple(str(k) for k in key[1])), 0.0)
+        room = -total if c.relation == "<=" else total
+        out.append((str(c.index.get(i, "")), round(room, 9) + 0.0))
+    return out or None
+
+
+def _room_simple(rule: dict[str, Any], rec: dict[str, Any], sets: dict[str, dict[str, dict]], data: dict[str, Any],
+                 i: str, set_name: str, left: Any, right: Any, relation: str) -> list[tuple[str, float]] | None:
 
     def is_var(t: Any) -> bool:
         return isinstance(t, dict) and set(t) == {"var", "index"} and t.get("index") == [i]

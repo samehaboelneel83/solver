@@ -100,6 +100,30 @@ def _walk(node: Any, notes: list[str]) -> None:
             _walk(value, notes)
 
 
+def _scalar_indices(ir: dict[str, Any], notes: list[str]) -> None:
+    """A one-number decision or parameter read with an index (the live job-shop test: makespan[o]) is read with
+    none: it has one value."""
+    scalars = {("var", n) for n, v in (ir.get("variables") or {}).items() if isinstance(v, dict) and v.get("index") == []}
+    scalars |= {("par", n) for n, p in (ir.get("parameters") or {}).items() if isinstance(p, dict) and p.get("index") == []}
+    fixed: set[str] = set()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for kind in ("var", "par"):
+                if isinstance(node.get(kind), str) and (kind, node[kind]) in scalars and node.get("index"):
+                    node["index"] = []
+                    fixed.add(node[kind])
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk([ir.get("constraints"), ir.get("objective")])
+    if fixed:
+        notes.append(f"{', '.join(sorted(fixed))} hold one number and were read with no index ([])")
+
+
 def _bound_rules(ir: dict[str, Any], seed: dict[str, Any], notes: list[str]) -> None:
     """A bound given as a field or parameter name becomes a rule over the decision's records."""
     variables = ir.get("variables") if isinstance(ir.get("variables"), dict) else {}
@@ -203,6 +227,14 @@ def misplaced(spec: dict[str, Any]) -> list[str]:
                 else:
                     seed.setdefault(k, value)
             notes.append(f"{', '.join(moved)} written beside seed were moved into seed")
+    ir = spec.get("ir")
+    inside = [k for k in SEED_ONLY if k not in ("parameter_values", "relationships") and isinstance(ir, dict) and k in ir]
+    if inside and (isinstance(spec.get("seed"), dict) or "seed" not in spec):
+        # Seed data written inside the IR (the live cutting-stock test: patterns_that_fit in ir).
+        seed = spec.setdefault("seed", {})
+        for k in inside:
+            seed.setdefault(k, ir.pop(k))
+        notes.append(f"{', '.join(inside)} written inside ir were moved into seed, where data is made")
     if not isinstance(spec.get("ir"), dict):
         lifted = {k: spec.pop(k) for k in IR_ONLY if k in spec}
         if "variables" in lifted or "constraints" in lifted:
@@ -247,6 +279,14 @@ def repair(spec: dict[str, Any]) -> list[str]:
         if isinstance(var, dict) and var.get("index") is None:
             var["index"] = []
             notes.append(f'decision {name} had no "index" and is one number ("index": [])')
+        if isinstance(var, dict) and var.get("domain") == "interval":
+            # An interval's start, end and size name a decision or parameter; written as a term (the live job-shop
+            # test: "size": {"par": "duration", "index": ["operation"]}) they are reduced to the name.
+            for key in ("start", "end", "size", "presence"):
+                ref = var.get(key)
+                if isinstance(ref, dict) and isinstance(ref.get("var") or ref.get("par"), str):
+                    var[key] = ref.get("var") or ref.get("par")
+                    notes.append(f'interval {name}\'s "{key}" was written as a term; it names {var[key]}')
         for bound in ("lower", "upper"):
             # "upper": null for "no limit" (the paper-cutting test): a bound left out is the platform's own.
             if isinstance(var, dict) and bound in var and var[bound] is None:
@@ -258,6 +298,7 @@ def repair(spec: dict[str, Any]) -> list[str]:
         if isinstance(c, dict) and c.get("severity") is None and "weight" not in c:
             c["severity"] = "hard"
             notes.append(f'rule {c.get("id")} had no severity and was made "hard" (must hold)')
+    _scalar_indices(ir, notes)
     _walk(ir.get("constraints"), notes)
     _walk(ir.get("objective"), notes)
     seed = spec.get("seed") if isinstance(spec.get("seed"), dict) else {}

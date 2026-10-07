@@ -1106,6 +1106,14 @@ def test_cutting_stock_from_patterns_that_fit_solves_to_the_reference(tenants, d
             break
     got = client.get(f"/api/v1/runs/{run['id']}", headers=tenants["b"]).json()
     assert got["status"] == "optimal" and got["objective"] == 453, got
+    # Live test: "all demand rules tight, no surplus" -- the room per width is read from the model itself.
+    text = client.get(f"/api/v1/agent/result/{run['id']}", headers=tenants["b"]).json()["text"]
+    line = next(ln for ln in text.splitlines() if ln.startswith("- c_orders (hard)"))
+    import re as _re
+
+    rooms = dict(_re.findall(r"(\d+) (\d+(?:\.\d+)?)(?=,|$)", line.split("room left on the others: ")[1]))
+    assert "tight (no room left on " in line and "36" in line.split("others")[0] and rooms.get("14"), line
+    assert all(float(v) > 0 for v in rooms.values()) and "-" not in line[2:], line
     # The same through the build API itself, unexpanded, and a wrong size field said in words.
     direct = {"domain_name": "Paper test 2", "problem_name": "Rolls", "dry_run": True, "ir": ir, "seed": {
         **{k: v for k, v in seed.items() if k != "entities_from_file"},
@@ -1257,3 +1265,75 @@ def test_futures_asked_for_a_model_with_no_later_decision_say_they_were_not_plan
     text = client.get(f"/api/v1/agent/result/{run['id']}", headers=tenants["b"]).json()["text"]
     assert "UNCERTAINTY NOT SOLVED: 50 futures were asked for, but no decision waits for the data" in text, text
     assert "NOT an average over futures" in text
+
+
+def test_seed_data_written_inside_the_ir_is_moved_to_the_seed():
+    from app.agent.repair import misplaced
+
+    spec = {"seed": {}, "ir": {"sets": ["pattern"], "patterns_that_fit": [{"type": "pattern", "of": "width",
+                                                                          "size": "cm", "capacity": 100, "count": "cuts"}]}}
+    notes = misplaced(spec)
+    assert "patterns_that_fit" not in spec["ir"] and spec["seed"]["patterns_that_fit"][0]["capacity"] == 100
+    assert any("inside ir" in n for n in notes)
+
+
+def test_room_per_record_reads_a_limit_held_in_a_parameter(tenants, db):
+    """Live production test: capacity[m] as a parameter gave "-600 room left" for every month."""
+    from app.worker import work_once
+
+    client = TestClient(app)
+    m = {"index": "m", "set": "month"}
+    seed = {"entity_types": [{"name": "month"}],
+            "entities": [{"type": "month", "key": k} for k in ("Jan", "Feb", "Mar")],
+            "parameters": [{"name": "cap", "index": ["month"], "default_value": 0}],
+            "parameter_values": [{"parameter": "cap", "entities": [["month", k]], "value": v}
+                                 for k, v in (("Jan", 500), ("Feb", 500), ("Mar", 650))]}
+    ir = {"version": 2, "sets": ["month"], "parameters": {"cap": {"index": ["month"]}},
+          "variables": {"make": {"index": ["month"], "domain": "continuous", "lower": 0, "upper": 600}},
+          "constraints": [{"id": "c_cap", "forall": [m], "left": {"var": "make", "index": ["m"]}, "relation": "<=",
+                           "right": {"par": "cap", "index": ["m"]}, "severity": "hard"}],
+          "objective": {"sense": "maximize", "terms": [{"id": "o", "weight": 1, "expression": {
+              "sum": {"var": "make", "index": ["m"]}, "over": [m]}}]}}
+    built = client.post("/api/v1/problems/from-spec", json={"domain_name": f"Cap {uuid.uuid4().hex[:6]}",
+                                                            "problem_name": "Cap", "seed": seed, "ir": ir},
+                        headers=tenants["b"])
+    assert built.status_code == 200, built.text
+    run = client.post(f"/api/v1/scenarios/{built.json()['scenario_id']}/runs", json={}, headers=tenants["b"]).json()
+    for _ in range(5):
+        if work_once(db) is None:
+            break
+    text = client.get(f"/api/v1/agent/result/{run['id']}", headers=tenants["b"]).json()["text"]
+    line = next(ln for ln in text.splitlines() if ln.startswith("- c_cap (hard)"))
+    assert "no room left on 2 of 3" in line and "Mar 50" in line and "-" not in line[2:], line
+
+
+def test_an_interval_part_written_as_a_term_is_reduced_to_its_name():
+    from app.agent.repair import repair
+
+    spec = {"ir": {"sets": ["op"], "variables": {"task": {"index": ["op"], "domain": "interval",
+                                                          "start": {"var": "begin", "index": ["op"]}, "end": "finish",
+                                                          "size": {"par": "duration", "index": ["op"]}}}}}
+    repair(spec)
+    task = spec["ir"]["variables"]["task"]
+    assert task["start"] == "begin" and task["size"] == "duration" and task["end"] == "finish"
+
+
+def test_a_one_number_decision_read_with_an_index_is_read_with_none():
+    from app.agent.repair import repair
+
+    spec = {"ir": {"sets": ["op"], "variables": {"makespan": {"index": [], "domain": "integer"},
+                                                "finish": {"index": ["op"], "domain": "integer"}},
+                   "constraints": [{"id": "c", "forall": [{"index": "o", "set": "op"}], "relation": "<=",
+                                    "left": {"var": "finish", "index": ["o"]},
+                                    "right": {"var": "makespan", "index": ["o"]}, "severity": "hard"}]}}
+    notes = repair(spec)
+    c = spec["ir"]["constraints"][0]
+    assert c["right"]["index"] == [] and c["left"]["index"] == ["o"] and any("makespan" in n for n in notes)
+
+
+def test_repeated_labels_read_back_as_keys():
+    from app.agent.readback import readback
+
+    text = readback({"seed": {"entities": [{"type": "op", "key": f"Gear-{i}", "label": "Gear"} for i in (1, 2)]},
+                     "ir": {}})
+    assert "records op: 2: Gear-1, Gear-2" in text
