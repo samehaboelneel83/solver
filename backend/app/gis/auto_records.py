@@ -239,11 +239,68 @@ def propose(db: Session, domain_id: int, dataset_ids: list[int] | None = None,
     return {"domain_id": domain_id, "types": sorted(kinds), "mappings": out}
 
 
+MAPPING_SHAPE = ('each mapping is {"dataset_id", "layer", "type", "key"} -- the rest is filled in from the '
+                 'proposal -- optionally with "fields": {"<field>": "<layer column>"} or the proposal\'s own '
+                 '"fields" list [{"property", "name", "data_type"}]; or "action": "skip"')
+
+
+class MappingRefused(ValueError):
+    """A mapping this endpoint cannot read: said back with the shape it takes, never a 500."""
+
+
+def complete(db: Session, domain_id: int, plan: Any) -> dict[str, Any]:
+    """A mapping as a caller wrote it, made whole from the platform's own proposal for that layer.
+
+    The camp test (October 2026): the Assistant sent {"layer", "type", "key", "fields": {"name": "feature"},
+    "geometry": "geometry"} -- the short form a person would write -- and the endpoint failed with a 500 twice
+    (KeyError 'property', then AttributeError), so no record was made from the drawing and 16 were typed in
+    one by one instead."""
+    if not isinstance(plan, dict):
+        raise MappingRefused(f"a mapping is an object, not {type(plan).__name__}: {MAPPING_SHAPE}")
+    if plan.get("action") == "skip":
+        return plan
+    for need in ("dataset_id", "layer"):
+        if plan.get(need) in (None, ""):
+            raise MappingRefused(f'"{need}" is missing: {MAPPING_SHAPE}')
+    try:
+        dataset_id = int(plan["dataset_id"])
+    except (TypeError, ValueError):
+        raise MappingRefused(f'"dataset_id" must be a number, not {plan["dataset_id"]!r}') from None
+    fields = plan.get("fields")
+    whole = isinstance(fields, list) and all(isinstance(f, dict) and {"property", "name", "data_type"} <= set(f)
+                                             for f in fields)
+    if whole and plan.get("type"):
+        return plan
+    choice = {(dataset_id, str(plan["layer"])): {"type": plan.get("type") or None, "key": plan.get("key")}}
+    proposed = next((m for m in propose(db, domain_id, [dataset_id], choice)["mappings"]
+                     if m["layer"] == plan["layer"]), None)
+    if proposed is None:
+        raise MappingRefused(f'dataset {dataset_id} has no layer "{plan["layer"]}" with features in this domain')
+    out = {**proposed, **{k: v for k, v in plan.items() if k not in ("fields", "geometry")}}
+    if isinstance(plan.get("geometry"), str) and plan["geometry"] not in ("geometry", ""):
+        out["geometry_field"] = plan["geometry"]
+    if isinstance(fields, dict):
+        # {"<field>": "<layer column>"}: those columns, under those names; every other column left out.
+        by_property = {f["property"]: f for f in proposed["fields"]}
+        chosen = []
+        for name, prop in fields.items():
+            if not isinstance(prop, str) or prop not in by_property and prop != proposed.get("key"):
+                raise MappingRefused(f'field "{name}": the layer has no column {prop!r}; its columns are '
+                                     + ", ".join(sorted(by_property)))
+            base = by_property.get(prop) or {"property": prop, "data_type": "text", "enum_values": None}
+            chosen.append({**base, "name": to_records.to_name(name) or name, "skip": False})
+        out["fields"] = chosen
+    elif fields is not None and not whole:
+        raise MappingRefused(f'"fields" is neither a {{field: column}} object nor the proposal\'s list: {MAPPING_SHAPE}')
+    return out
+
+
 def apply(db: Session, domain_id: int, mappings: list[dict[str, Any]]) -> dict[str, Any]:
     """Write the chosen mappings, all or nothing. Returns per layer what was made and updated, or the faults."""
     from app.seed import plant_domain_seed
 
     results, faults = [], []
+    mappings = [complete(db, domain_id, plan) for plan in mappings]  # MappingRefused: told as a 422
     for plan in mappings:
         if plan.get("action") == "skip":
             continue

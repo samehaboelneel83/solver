@@ -165,3 +165,41 @@ def test_a_dataset_is_placed_again_without_the_file_and_exports(client, drawing_
     assert table.splitlines()[0].startswith("id,layer,kind") and "POLYGON" in table
     assert http.get("/api/v1/gis/crs", params={"q": "Purple Belt"}, headers=t["a"]).json()["items"]
     assert http.delete(f"/api/v1/gis/datasets/{ds['id']}", headers=t["a"]).status_code == 204
+
+
+def test_map_data_is_copied_into_another_workspace_after_its_upload_is_used_up(client, drawing_bytes, db):  # noqa: F811
+    """An import uses the upload up, so a drawing could reach only one workspace (camp retest, October 2026)."""
+    from tests.test_v1_problem_run import make_domain
+
+    http, t = client
+    other = make_domain(db, "second")
+    db.commit()
+    up = _upload(http, t, drawing_bytes)
+    first = http.post("/api/v1/gis/datasets", json={"upload_id": up["upload_id"], "domain_id": t["domain_a"],
+                                                     "name": "Site plan", "placement": UTM36}, headers=t["a"]).json()
+    again = http.post("/api/v1/gis/datasets", json={"upload_id": up["upload_id"], "domain_id": other,
+                                                     "name": "Site plan", "placement": UTM36}, headers=t["a"])
+    assert again.status_code == 404
+    source = first["source"]
+    by_name = http.post(f"/api/v1/gis/domains/{other}/datasets/same-drawing",
+                        json={"name": "Site plan", "filename": source["filename"], "extent": source["extent"]},
+                        headers=t["a"])
+    assert by_name.status_code == 201, by_name.text
+    copied = by_name.json()
+    assert copied["domain_id"] == other and copied["id"] != first["id"]
+    assert copied["placement"] == first["placement"]
+    assert {l["name"]: l["feature_count"] for l in copied["layers"]} == {l["name"]: l["feature_count"] for l in first["layers"]}
+    count = lambda d: len(http.get(f"/api/v1/gis/datasets/{d}/features", headers=t["a"]).json()["features"])  # noqa: E731
+    assert count(copied["id"]) == count(first["id"]) > 0
+    # Asked again for the same workspace: the copy already there, not a second one.
+    by_sha = http.post(f"/api/v1/gis/domains/{other}/datasets/same-drawing",
+                       json={"name": "Site plan", "sha256": source["sha256"]}, headers=t["a"])
+    assert by_sha.json()["id"] == copied["id"]
+    assert http.post(f"/api/v1/gis/domains/{other}/datasets/same-drawing",
+                     json={"name": "x", "sha256": "0" * 64}, headers=t["a"]).status_code == 404
+    # Another organization finds nothing of A's.
+    assert http.post(f"/api/v1/gis/datasets/{first['id']}/copy", json={"domain_id": other},
+                     headers=t["b"]).status_code == 404
+    plain = http.post(f"/api/v1/gis/datasets/{first['id']}/copy", json={"domain_id": other, "name": "Copy"},
+                      headers=t["a"])
+    assert plain.status_code == 201 and plain.json()["name"] == "Copy"

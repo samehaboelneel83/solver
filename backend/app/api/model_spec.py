@@ -34,9 +34,10 @@ from app.core.db import get_db
 from app.crud.db_errors import translate_db_error
 from app.ir.validate import validate_ir
 from app.models.iam import UserAccount
-from app.models.v1_domain import AttributeDef, Domain, EntityType, ParameterDef
+from app.models.v1_domain import AttributeDef, Domain, Entity, EntityType, ParameterDef, Relationship, RelationshipType
 from app.models.v1_problem import ModelVersion, Problem, Scenario
-from app.seed import plant_domain_seed
+from app.seed import (field_distances, fitting_patterns, order_links, order_links_problems, pattern_problems,
+                      plant_domain_seed)
 
 router = APIRouter(prefix="/api/v1", tags=["problems"])
 
@@ -222,7 +223,80 @@ def check_seed(db: Session, domain_id: int | None, seed: dict[str, Any]) -> list
                     'entities ({"type", "key"}), load it with entities_from_file, or use one already in the domain')
         if not isinstance(v.get("value"), (int, float)):
             err(["parameter_values", i, "value"], "a number is required")
+    if domain_id is not None and not errors:
+        errors.extend({"loc": ["seed", *loc], "msg": msg} for loc, msg in stale_records(db, domain_id, seed))
     return errors
+
+
+def _same(a: Any, b: Any) -> bool:
+    if a == b:
+        return True
+    try:
+        return float(a) == float(b)
+    except (TypeError, ValueError):
+        return str(a) == str(b)
+
+
+def stale_records(db: Session, domain_id: int, seed: dict[str, Any]) -> list[tuple[list, str]]:
+    """Records and links of the seed that the domain already holds differently.
+
+    A key already in the domain is left as it is (a template must not make a second Ahmed), so a model built
+    again from new files into the same workspace would read yesterday's values and keep yesterday's links
+    beside today's: the camp retest (October 2026) rebuilt a layout into its old workspace, its cells kept no
+    `entrance` field and the old candidates' links, and the run said "optimal" with no bed at all. A field
+    the old record lacks is filled in at build time; a value or a link that differs is refused here, once
+    per type with a count, so the build goes to a new workspace or uses new keys."""
+    out: list[tuple[list, str]] = []
+    by_type: dict[str, dict[str, dict]] = {}
+    for e in seed.get("entities") or []:
+        if isinstance(e, dict) and e.get("type") and e.get("key") not in (None, ""):
+            by_type.setdefault(e["type"], {})[str(e["key"])] = e.get("attrs") or {}
+    if not by_type:
+        return out
+    types = {t.name: t.id for t in db.execute(select(EntityType).where(EntityType.domain_id == domain_id)).scalars()}
+    ids: dict[tuple[str, str], int] = {}
+    for name, records in by_type.items():
+        if name not in types:
+            continue
+        differ, example = 0, None
+        for row in db.execute(select(Entity).where(Entity.entity_type_id == types[name])).scalars():
+            ids[(name, row.key)] = row.id
+            new = records.get(row.key)
+            if new is None:
+                continue
+            old = row.attrs or {}
+            bad = next((a for a, v in new.items() if a in old and old[a] is not None and v is not None
+                        and not _same(old[a], v)), None)
+            if bad is not None:
+                differ += 1
+                example = example or (row.key, bad, old[bad], new[bad])
+        if differ:
+            key, field, was, now = example
+            out.append((["entities"], (
+                f"{differ} {name} record(s) are already in this workspace with other values (e.g. {key!r}: "
+                f"{field} is {was!r} there, {now!r} here); the old values would stay. Build in a new workspace "
+                f"(domain_name instead of domain_id), or give the records new keys")))
+    rels = {r.name: r.id for r in db.execute(
+        select(RelationshipType).where(RelationshipType.domain_id == domain_id)).scalars()}
+    wanted: dict[str, set[tuple[int, int]]] = {}
+    sources: dict[str, set[int]] = {}
+    for r in seed.get("relationships") or []:
+        if not isinstance(r, dict) or r.get("type") not in rels:
+            continue
+        a, b = _end(r.get("from")), _end(r.get("to"))
+        if a in ids and b in ids:
+            wanted.setdefault(r["type"], set()).add((ids[a], ids[b]))
+            sources.setdefault(r["type"], set()).add(ids[a])
+    for name, pairs in wanted.items():
+        extra = sum(1 for a, b in db.execute(select(Relationship.from_entity_id, Relationship.to_entity_id)
+                                             .where(Relationship.relationship_type_id == rels[name])).all()
+                    if a in sources[name] and (a, b) not in pairs)
+        if extra:
+            out.append((["relationships"], (
+                f"{extra} {name} link(s) already in this workspace start at records of this spec but are not in "
+                f"it; they would stay beside the new ones. Build in a new workspace (domain_name instead of "
+                f"domain_id), or give the records new keys")))
+    return out
 
 
 @router.post("/problems/from-spec")
@@ -240,6 +314,16 @@ def build_from_spec(
     if spec.domain_id is not None and db.get(Domain, spec.domain_id) is None:
         raise HTTPException(status_code=404, detail="domain not found")
 
+    # Links between records that follow each other, made from their fields (app.seed.order_links).
+    problems = order_links_problems(spec.seed)
+    if problems:
+        raise HTTPException(status_code=422, detail=[{"loc": ["seed", "relationships_in_order"], "msg": m}
+                                                     for m in problems])
+    problems = pattern_problems(order_links(spec.seed))
+    if problems:
+        raise HTTPException(status_code=422, detail=[{"loc": ["seed", "patterns_that_fit"], "msg": m}
+                                                     for m in problems])
+    spec.seed = fitting_patterns(field_distances(order_links(spec.seed)))
     errors = check_seed(db, spec.domain_id, spec.seed)
     if errors:
         raise HTTPException(status_code=422, detail=errors)

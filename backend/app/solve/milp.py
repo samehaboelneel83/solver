@@ -85,8 +85,10 @@ def solve(
     # Loaded before the settings below, so a load cannot reset them.
     variables, _rows = load(solver, compiled)
     solver.SetTimeLimit(int(time_limit * 1000))
-    if workers > 1 and engine != "CBC":
-        # CBC takes a thread count as one of its own commands and complains of the rest.
+    if workers > 1 and engine not in ("CBC", "SCIP"):
+        # CBC takes a thread count as one of its own commands and complains of the rest. SCIP given more than one
+        # thread through OR-Tools runs its concurrent mode, which gives up early: the camp layout (October 2026)
+        # stopped every block after ~7 s, "feasible", with 8,000 s allowed (one thread runs the whole limit).
         solver.SetNumThreads(workers)
     if seed is not None and engine == "SCIP":
         solver.SetSolverSpecificParametersAsString(

@@ -325,9 +325,13 @@ class ConnectedBody(_Model):
 
     assign: VarRef
     units: Binding
-    groups: Binding
+    #: Optional only with `sources`: then one network, `assign` indexed by the units alone.
+    groups: Optional[Binding] = None
     via: Name
     empty: Literal["forbidden", "allowed"] = "forbidden"
+    #: Where the network starts (doors, a supply, a depot): a 0/1 field of the units, or a `where` list
+    #: picking them (e.g. kind = "exchange").
+    sources: Optional[Union[Name, list[WhereEntry]]] = None
 
 
 class RouteBody(_Model):

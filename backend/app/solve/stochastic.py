@@ -59,6 +59,8 @@ from app.solve.compile import Compiled, Constraint, Linear, Variable, VarKey, co
 MAX_SAMPLES = 50
 #: Fresh futures the plan is costed on, at least.
 OUT_OF_SAMPLE_MIN = 20
+OUT_OF_SAMPLE_PER = 4
+OUT_OF_SAMPLE_MAX = 400
 #: The share of the time the extensive form gets; the rest costs the plan out of sample.
 EXTENSIVE_SHARE = 0.6
 _SAMPLE = "#s"
@@ -305,12 +307,14 @@ def solve(ir: dict[str, Any], data: dict[str, Any], compiled: Compiled, run: Cal
         return Stochastic(solved, record)
     plan = {key: value for key, value in solved.assignments.items() if key in shared}
 
-    fresh = futures(ir, data, max(OUT_OF_SAMPLE_MIN, count), f"out-{base}")
+    # Four fresh futures per sampled one, within the run's time (the bakery test, October 2026: 50 fresh futures
+    # gave 922.80 +/- 84 for a true 857.1 -- too wide to quote).
+    fresh = futures(ir, data, min(OUT_OF_SAMPLE_MAX, max(OUT_OF_SAMPLE_MIN, OUT_OF_SAMPLE_PER * count)), f"out-{base}")
     each = max(0.2, (1 - EXTENSIVE_SHARE) * time_limit / len(fresh))
     costs, unmet = [], 0
     held: dict[str, int] = {rule_id: 0 for rule_id in chance_rules(ir)}
     for future in fresh:
-        if should_stop and should_stop():
+        if (should_stop and should_stop()) or (costs and time.monotonic() - started > time_limit):
             break
         # A chance rule is what the plan is judged by here, not what it must meet.
         loose = replace(future, constraints=[c for c in future.constraints if c.chance is None])

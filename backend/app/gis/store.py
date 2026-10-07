@@ -152,6 +152,32 @@ def import_drawing(db: Session, *, organization_id, user_id, domain_id: int, nam
     return dataset_id
 
 
+def copy_dataset(db: Session, dataset_id: int, *, domain_id: int, name: str, user_id) -> int:
+    """A stored dataset copied into another domain as it is (its layers, features and placement); returns the
+    new id. Importing a drawing uses its upload up, so a second workspace could never get the same drawing's
+    map: the camp retest (October 2026) rebuilt in a new workspace and its answer map came back empty."""
+    new_id = db.execute(text(
+        "INSERT INTO gis_dataset (organization_id, domain_id, name, source, placement, bbox, stats, notes, created_by)"
+        " SELECT organization_id, :d, :n, source, placement, bbox, stats, notes, :u FROM gis_dataset WHERE id = :i"
+        " RETURNING id"), {"d": domain_id, "n": name, "u": str(user_id) if user_id else None, "i": dataset_id}).scalar_one()
+    layers = db.execute(text(
+        "SELECT id, organization_id, name, color, visible, kinds, feature_count, sort_order FROM gis_layer"
+        " WHERE dataset_id = :i ORDER BY sort_order, id"), {"i": dataset_id}).mappings().all()
+    for layer in layers:
+        layer_id = db.execute(text(
+            "INSERT INTO gis_layer (organization_id, dataset_id, name, color, visible, kinds, feature_count, sort_order)"
+            " VALUES (:o, :ds, :n, :c, :v, CAST(:k AS jsonb), :fc, :so) RETURNING id"),
+            {"o": str(layer["organization_id"]), "ds": new_id, "n": layer["name"], "c": layer["color"],
+             "v": layer["visible"], "k": json.dumps(layer["kinds"] or {}), "fc": layer["feature_count"],
+             "so": layer["sort_order"]}).scalar_one()
+        db.execute(text(
+            "INSERT INTO gis_feature (organization_id, dataset_id, layer_id, kind, geometry, source, properties,"
+            " minx, miny, maxx, maxy)"
+            " SELECT organization_id, :ds, :l, kind, geometry, source, properties, minx, miny, maxx, maxy"
+            " FROM gis_feature WHERE layer_id = :old ORDER BY id"), {"ds": new_id, "l": layer_id, "old": layer["id"]})
+    return new_id
+
+
 def replace(db: Session, dataset_id: int, placement: Placement) -> dict[str, Any]:
     """Place a stored dataset again from its drawing coordinates; returns its new bounds and stats."""
     from psycopg2.extras import execute_values

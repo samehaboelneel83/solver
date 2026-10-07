@@ -55,6 +55,8 @@ def applies(ir: dict[str, Any]) -> str | None:
         return "the model has no connected rule"
     if len(connected) > 1:
         return "more than one connected rule (a nested partition) is left to the solver"
+    if connected[0]["connected"].get("sources"):
+        return "a rule rooted at its sources is started by app.solve.reach, not by a partition"
     return None
 
 

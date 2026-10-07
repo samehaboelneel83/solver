@@ -782,8 +782,11 @@ def test_the_same_refusal_three_times_stops_the_turn_and_shows_the_error(tenants
     model = _install(monkeypatch, [("native", "check_spec", json.dumps({"spec": bad}))] * 5 + [("text", "never")])
     events = _chat(tenants["b"], mode="model", text="check; night pays 1.3", files=_roster_files())
     answer = next(e for e in events if e["type"] == "answer")["text"]
-    assert answer.startswith("I could not get the model past the platform's check")
-    assert "**The check says:**" in answer and "**The part of the plan it is about:**" in answer
+    # In plain words first (the blend test: the person was shown raw JSON and said "I don't understand"),
+    # the check's own message and the part of the plan under "Technical detail".
+    assert answer.startswith("I could not write one part of the model the way the platform needs it: in a rule")
+    assert "came back 3 times" in answer and "**continue**" in answer
+    assert "Technical detail" in answer and "The part of the plan it is about:" in answer
     assert sum(1 for e in events if e["type"] == "tool" and e["name"] == "check_spec") == core.MAX_SAME_ERROR
     # Only the latest attempt stays whole in the history.
     history = events[-1]["messages"]
@@ -794,7 +797,7 @@ def test_the_same_refusal_three_times_stops_the_turn_and_shows_the_error(tenants
 
 def test_repeated_rejected_api_write_stops_and_reports_the_validation_error(tenants, monkeypatch):
     replies = [("native", "call_api", json.dumps({
-        "method": "POST", "path": "/api/v1/problems/from-spec", "body": {},
+        "method": "POST", "path": "/api/v1/entity-types", "body": {},
     }))] * 5 + [("text", "never")]
     model = _install(monkeypatch, replies)
 
@@ -803,7 +806,7 @@ def test_repeated_rejected_api_write_stops_and_reports_the_validation_error(tena
     answer = next(e["text"] for e in events if e["type"] == "answer")
     assert "stopped after 3 rejected attempts" in answer
     assert "HTTP 422" in answer
-    assert "problem_name" in answer
+    assert "domain_id" in answer
     assert sum(1 for e in events if e["type"] == "tool" and e["name"] == "call_api") == 3
     assert len(model.requests) == 3
     assert events[-1]["type"] == "state"
@@ -1099,3 +1102,37 @@ def test_missing_layout_connectivity_is_not_replaced_by_a_parameter():
     assert "zone -> door" in faults[0]
     assert "a parameter is not a relationship" in faults[0]
     assert "proximity alone" in faults[0]
+
+
+def test_one_value_meant_for_every_cell_is_not_refused():
+    """Bakery test: prob[scenario] with default 1/21 for each of 21 equally likely demand levels."""
+    spec = {"seed": {"parameters": [{"name": "prob", "index": ["scenario"], "default_value": 0.047619}]},
+            "ir": {"parameters": {"prob": {"index": ["scenario"]}},
+                   "objective": {"terms": [{"expression": {"par": "prob", "index": ["s"]}}]}}}
+    assert core._empty_parameters(spec) == []
+    spec["seed"]["parameters"][0]["default_value"] = 0
+    assert core._empty_parameters(spec)
+
+
+def test_a_set_of_futures_with_no_records_points_to_the_uncertainty_declaration():
+    faults = core._sets_without_data({"seed": {}, "ir": {"sets": ["demand_scenario", "showcase"]}}, {})
+    assert "possible futures of an uncertain number" in faults[0] and "uncertainty" in faults[0]
+    assert faults[1].startswith('Set "showcase" would have NO records')
+
+
+def test_an_uncertain_number_the_plan_cannot_plan_for_is_refused_and_a_seed_uncertainty_is_moved():
+    """Bakery retest: uncertainty written on the seed's parameter, deviation 100 for +/- 100 loaves, no stage."""
+    from app.agent.repair import repair
+
+    spec = {"seed": {"parameters": [{"name": "demand", "index": [], "default_value": 200,
+                                     "uncertainty": {"kind": "interval", "deviation": 100}}]},
+            "ir": {"sets": [], "parameters": {"demand": {"index": []}},
+                   "variables": {"bake": {"index": [], "domain": "continuous"}}}}
+    notes = repair(spec)
+    assert spec["ir"]["parameters"]["demand"]["uncertainty"] == {"kind": "interval", "deviation": 100}
+    assert "uncertainty" not in spec["seed"]["parameters"][0] and any("moved from the seed" in n for n in notes)
+    faults = core._uncertainty_faults(spec)
+    assert any("SHARE" in f for f in faults) and any('"stage": 2' in f for f in faults)
+    spec["ir"]["parameters"]["demand"]["uncertainty"]["deviation"] = 0.5
+    spec["ir"]["variables"]["sell"] = {"index": [], "domain": "continuous", "stage": 2}
+    assert core._uncertainty_faults(spec) == []

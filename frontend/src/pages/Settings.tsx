@@ -139,6 +139,7 @@ export default function Settings() {
 
 /** What each family of keys is about, for its heading. */
 const FAMILIES: Record<string, string> = {
+  gpu: "GPU acceleration",
   solve: "Solving and solver choice",
   retention: "How long things are kept",
   spatial: "Maps",
@@ -159,7 +160,7 @@ function Grouped({ items, scope, scopeId }: { items: SettingValue[]; scope: Sett
   const [q, setQ] = useState("");
   const [changedOnly, setChangedOnly] = useState(false);
   const words = q.trim().toLowerCase();
-  const shown = items.filter((item) => (!changedOnly || item.source === scope)
+  const shown = items.filter((item) => (scope === "platform" || !item.key.startsWith("gpu.")) && (!changedOnly || item.source === scope)
     && (!words || item.key.toLowerCase().includes(words) || (item.description ?? "").toLowerCase().includes(words)));
   const families = [...new Set(shown.map((item) => family(item.key)))];
   return (
@@ -178,6 +179,11 @@ function Grouped({ items, scope, scopeId }: { items: SettingValue[]; scope: Sett
       {families.map((name) => (
         <section key={name} aria-label={name} className="mb-6">
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-600">{name}</h2>
+          {name === "GPU acceleration" && <p className="mb-3 text-sm text-slate-500">
+            Configure a compatible private GPU service, enable it, then set solve.solver to cuopt-remote
+            for the problem to benchmark. Existing queued runs keep their original settings.
+            CPU thread preferences are capped by the worker deployment; GPU jobs use a separate service slot.
+          </p>}
           <ul className="space-y-3">
             {shown.filter((item) => family(item.key) === name).map((item) => (
               <SettingRow key={item.key} setting={item} scope={scope} scopeId={scopeId} />

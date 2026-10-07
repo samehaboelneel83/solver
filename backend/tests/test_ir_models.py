@@ -98,7 +98,7 @@ SEMANTIC = frozenset({
     # A connected rule's variable, its order, the relationship and its ends
     # are facts about the declarations and the domain.
     "connected_needs_version_2", "connected_not_binary", "connected_index_mismatch",
-    "connected_via_invalid", "connected_on_soft", "connected_via_not_self",
+    "connected_via_invalid", "connected_on_soft", "connected_via_not_self", "connected_sources_invalid",
     # Likewise a route rule's variable, its order and its severity.
     "route_needs_version_2", "route_not_binary", "route_index_mismatch", "route_on_soft",
     # Which predictors a document declares, how many inputs each takes, and what

@@ -26,7 +26,7 @@ from typing import Any, Iterator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.solve.backends import NoBackend, by_name, choose, is_automatic, optimality_of
+from app.solve.backends import NoBackend, by_name, choose, is_automatic, optimality_of, prefer_for_shape
 from app.solve.classify import classify
 from app.solve.convexity import refine
 from app.solve.lp import NotContinuous
@@ -49,6 +49,7 @@ from app.solve import mccormick, pareto
 from app.solve import allocation as allocation_rows
 from app.solve import network as network_rows
 from app.solve import partition as partition_rows
+from app.solve import reach as reach_rows
 from app.solve import routing as routing_rows
 from app.solve import horizon as horizon_rows
 from app.solve import selector as selector_rows
@@ -128,6 +129,7 @@ def enqueue_run(
     reuse: bool = True,
     pareto_steps: int | None = None,
     robust: bool = False,
+    futures: int | None = None,
     idempotency_key: str | None = None,
     alternatives: int | None = None,
     alternatives_within: float | None = None,
@@ -213,6 +215,9 @@ def enqueue_run(
     from_settings["local_fallback"] = settings["solve.local_fallback"].source
     stochastic_samples = int(settings["solve.stochastic_samples"].value or 0)
     from_settings["stochastic_samples"] = settings["solve.stochastic_samples"].source
+    if futures is not None:  # asked for on the run itself (a what-if "with 50 futures")
+        stochastic_samples = futures
+        from_settings.pop("stochastic_samples", None)
     rolling_horizon = bool(settings["solve.rolling_horizon"].value)
     from_settings["rolling_horizon"] = settings["solve.rolling_horizon"].source
     decompose = bool(settings["solve.decompose"].value)
@@ -253,6 +258,10 @@ def enqueue_run(
     if solver is None and settings["solve.solver"].value is not None:
         solver = str(settings["solve.solver"].value)
         from_settings["requested_solver"] = settings["solve.solver"].source
+    if solver == "cuopt-remote":
+        gpu = {k.removeprefix("gpu."): v.value for k, v in settings.items() if k.startswith("gpu.")}
+        if not gpu.get("enabled") or not gpu.get("endpoint"):
+            raise SettingUnusable("gpu.enabled", "Configure and enable GPU acceleration in Platform Settings before selecting cuopt-remote")
 
     quota = quota_of(db, scenario["organization_id"])
     _check_quota_before_snapshot(db, scenario["organization_id"], quota, time_limit)
@@ -297,6 +306,7 @@ def enqueue_run(
         compiler_version=COMPILER_VERSION,
     )
     request_params = {
+        "gpu": {k.removeprefix("gpu."): v.value for k, v in settings.items() if k.startswith("gpu.")},
         "time_limit_s": time_limit,
         "workers": workers,
         "gap_rel": gap_rel,
@@ -342,7 +352,10 @@ def enqueue_run(
         # is a run nobody can make faster.
         **({"from_settings": from_settings} if from_settings else {}),
     }
-    if pareto_steps or robust or alternatives:
+    # A sampled two-stage answer is to a different question as well: the evaluation battery (October 2026) got the
+    # average-demand answer of an earlier run of the same model back for a run with 50 futures asked for.
+    sampled = bool(stochastic_samples) and stochastic_rows.wanted(scenario["ir"] or {})
+    if pareto_steps or robust or alternatives or sampled:
         # A front is a different question from the goal's optimum, and its
         # own answer is one end of it; a robust answer is to a different
         # question too. Neither reused nor reusable -- nor a run asked for
@@ -430,7 +443,7 @@ def claim_next(db: Session) -> int | None:
             {"deferred": deferred},
         ).scalar_one_or_none()
         if run_id is None:
-            db.rollback()
+            db.commit()  # Preserve admission reasons collected for deferred runs.
             return None
         row = db.execute(
             text("SELECT purpose, params, organization_id FROM run WHERE id = :r"),
@@ -439,15 +452,19 @@ def claim_next(db: Session) -> int | None:
         purpose = row["purpose"] or "plan"
         params = row["params"] or {}
         org_memory = quota_of(db, row["organization_id"]).get("max_memory_mb")
+        capacity = reserve_rows.host_capacity()
+        requested_workers = int(params.get("requested_workers") or params.get("workers") or 8)
         need = reserve_rows.need_for(
             purpose=purpose,
-            workers=int(params.get("workers") or 8),
+            workers=reserve_rows.allocated_workers(requested_workers, purpose, capacity),
             memory_mb=org_memory,
         )
         why = reserve_rows.can_admit(
-            reserve_rows.held_running(db), need, reserve_rows.host_capacity()
+            reserve_rows.held_running(db), need, capacity
         )
         if why is not None:
+            db.execute(text("UPDATE run SET params = coalesce(params, '{}'::jsonb) || CAST(:p AS jsonb) WHERE id = :r"),
+                       {"r": run_id, "p": _json({"queue_reason": why})})
             deferred.append(int(run_id))
             continue
         db.execute(
@@ -457,11 +474,12 @@ def claim_next(db: Session) -> int | None:
                 "               params = coalesce(params, '{}'::jsonb) || CAST(:n AS jsonb)"
                 " WHERE id = :r"
             ),
-            {"n": _json({"reservation": reserve_rows.as_params(need)}), "r": run_id},
+            {"n": _json({"reservation": reserve_rows.as_params(need), "workers": need.workers,
+                         "requested_workers": requested_workers, "queue_reason": None}), "r": run_id},
         )
         db.commit()
         return run_id
-    db.rollback()
+    db.commit()
     return None
 
 
@@ -928,6 +946,7 @@ def _execute(
         shadow = None
         # A tuning's options for this problem or domain (setting `solve.solver_params`, queue R10).
         tuned = solver_param_table.parse_setting(params.get("solver_params_setting"))
+        tuned["cuopt-remote"] = params.get("gpu") or {}
         # How the model splits (app.solve.blocks.structure, queue R4): recorded, not acted on.
         structure_record = block_rows.structure(compiled)
         portfolio_candidates, portfolio_record, portfolio_skipped = None, None, None
@@ -957,6 +976,8 @@ def _execute(
             t_choose = time.monotonic()
             with tracing.span("choose", model_class=found.model_class) as choosing:
                 backend, why = choose(found, params.get("requested_solver"), **_policy(params))
+                if not params.get("requested_solver"):
+                    backend, why = prefer_for_shape(found, numbers, backend, why, **_policy(params))
                 # The learned selector's pick, recorded beside the rules' and acting on
                 # nothing (shadow mode, app.solve.selector, queue R11).
                 shadow = selector_rows.predict(numbers, sorted(_admissible(found, params)))
@@ -1081,7 +1102,11 @@ def _execute(
         kinds = {key for c in ir.get("constraints") or [] if isinstance(c, dict) for key in ("connected", "route")
                  if key in c}
         starter = None
-        if params.get("connected_start") and "connected" in kinds:
+        if params.get("connected_start") and "connected" in kinds and reach_rows.rule_of(ir) is not None:
+            # Rooted at its sources (app.solve.reach): the model solved without the reach, then repaired.
+            starter, start_key = reach_rows, "reach_start_run"
+            why_not = reach_rows.applies(ir, compiled)
+        elif params.get("connected_start") and "connected" in kinds:
             # A connected, balanced partition to start from (setting
             # `solve.connected_start`, app.solve.partition, queue R13).
             starter, start_key = partition_rows, "connected_start_run"
@@ -1092,7 +1117,7 @@ def _execute(
             starter, start_key = routing_rows, "routing_start_run"
             why_not = routing_rows.applies(ir, compiled)
         if starter is not None:
-            if backend.name not in warm.HINTED:
+            if backend.name not in warm.HINTED and starter is not reach_rows:
                 start_record = {"used": False, "why": f"{backend.name} takes no start"}
             elif why_not is not None:
                 start_record = {"used": False, "why": why_not}
@@ -1181,8 +1206,11 @@ def _execute(
                     try:
                         return sandbox.run(
                             "app.solve.sandbox:solve_in_child",
+                            # The start the solve would get, so the race is fair: without it CP-SAT "found
+                            # no answer" in 5 s on the camp layout and HiGHS, which takes no start, was
+                            # chosen and never beat the start (camp retest, October 2026).
                             {"backend": name, "compiled": solving_model, "time_limit": seconds, "seed": seed,
-                             "workers": share, "gap_rel": gap_rel},
+                             "workers": share, "gap_rel": gap_rel, "hint": hint if name in warm.HINTED else None},
                             time_limit=seconds,
                             workers=share,
                             should_stop=lambda: stop.is_set() or stop_probe(),
@@ -1202,6 +1230,8 @@ def _execute(
                     raise _Answered
                 time_limit = max(1.0, time_limit - raced.probe_s)
             events.stage("solving", solver=backend.name, time_limit_s=time_limit)
+            compiled.gpu_options = params.get("gpu") or {}
+            solving_model.gpu_options = compiled.gpu_options
             if robust_record:
                 # The nominal answer, for the price of robustness: the same
                 # backend, the same clock, the model as written.
@@ -1360,12 +1390,23 @@ def _execute(
                         exact_failed = exc
                         if start_record is not None:
                             start_record["solver_failed"] = str(exc)
-                    if (start_record or {}).get("feasible") and not result.assignments:
-                        # The solver ended with nothing: the start is the answer (queue R13).
-                        result = partition_rows.as_answer(solving_model, hint, backend.name,
-                                                          time.monotonic() - began_solve)
+                    if (start_record or {}).get("feasible") and hint and (not result.assignments or _worse(
+                            solving_model, result, partition_rows.as_answer(solving_model, hint, backend.name, 0.0))):
+                        # The solver ended with nothing (queue R13), or with less than the start it was given
+                        # (the camp test, October 2026: 340 from a start of 534): the start is the answer.
+                        result = replace(partition_rows.as_answer(solving_model, hint, backend.name,
+                                                                  time.monotonic() - began_solve),
+                                         best_bound=result.best_bound)
                         start_record["answer"] = True
                 solving.set_attribute("status", result.status)
+            if ((start_record or {}).get("feasible") and hint and not start_record.get("answer")
+                    and result.status not in ("infeasible",) and (not result.assignments or _worse(
+                        solving_model, result, partition_rows.as_answer(solving_model, hint, backend.name, 0.0)))):
+                # Whatever path solved it (blocks, LNS, one model): never less than the start it was given.
+                result = replace(partition_rows.as_answer(solving_model, hint, backend.name, result.wall_seconds),
+                                 best_bound=result.best_bound)
+                start_record["answer"] = True
+                reason = None
             if reason is not None:
                 db.execute(text("UPDATE run SET error = :e WHERE id = :r"), {"e": reason, "r": run_id})
             if (params.get("local_fallback") and backend.name == "scip" and result.status in ("unknown", "feasible")
@@ -1469,6 +1510,18 @@ def _execute(
         extra["global_bound_run"] = bound_record
     if stochastic_record is not None:
         extra["stochastic"] = stochastic_record
+    elif params.get("stochastic_samples") and not stochastic_rows.wanted(ir):
+        # Futures asked for, and nothing waits for them (the bakery test, October 2026: no decision marked
+        # stage 2, so the "50 futures" run was the plain one again and was reported as the average).
+        extra["stochastic"] = {"skipped": f"{params['stochastic_samples']} futures were asked for, but "
+                               + stochastic_rows.refusal(ir, compiled) + ", so it was solved on the given values "
+                               "only; the plan is the same as the plain one"}
+    elif stochastic_rows.wanted(ir):
+        # Declared uncertain, solved on the given values: said, never silent (the evaluation battery's newsvendor
+        # answered "optimal, 200" -- the average-demand plan -- with no word that the futures were not looked at).
+        extra["stochastic"] = {"skipped": "the model waits for uncertain data (a stage-2 decision or a chance rule), "
+                               "but solve.stochastic_samples is 0, so it was solved on the given values only; set "
+                               "solve.stochastic_samples (e.g. 50), or ask a run for `futures` (e.g. 50), to plan for the futures"}
     if horizon_record is not None:
         extra["rolling_horizon_run"] = horizon_record
     if decomposition_record is not None:
@@ -1779,6 +1832,7 @@ def _record(
         "wall": result.wall_seconds,
         "bound": result.best_bound if solved else None,
         "gap": gap_of(result.objective, result.best_bound) if solved else None,
+        "execution": _json(result.execution or {}),
         "r": run_id,
     }
     if attempt is not None:
@@ -1788,7 +1842,8 @@ def _record(
         text(
             "UPDATE run SET status = :st, solver_version = :sv, objective = :obj,"
             "               wall_time_s = :wall, finished_at = now(),"
-            "               best_bound = :bound, gap = :gap"
+            "               best_bound = :bound, gap = :gap,"
+            "               params = coalesce(params, '{}'::jsonb) || jsonb_build_object('execution', CAST(:execution AS jsonb))"
             f" {where}"
         ),
         binds,
@@ -2220,8 +2275,9 @@ def solve_compiled(
         # that ignores the rule.
         raise Unsupported(f"{backend.name} holds no scheduling rule or interval")
     knobs = {"seed": seed, "workers": workers, "gap_rel": gap_rel}
-    if hint:
-        # Only when there is one: a backend that takes none need not know.
+    if hint and backend.name in warm.HINTED:
+        # Only when there is one, and only to a backend that takes one (a start computed for its floor --
+        # app.solve.reach -- may be there for a backend that takes none).
         knobs["hint"] = hint
     if solver_params:
         knobs["solver_params"] = solver_params
@@ -2350,8 +2406,12 @@ def gap_of(objective, bound) -> float | None:
     objective, bound = float(objective), float(bound)
     if objective == 0 and bound == 0:
         return 0.0
+    # Below the six places an objective is stored to, a gap is rounding: an absolute half-step, not a share --
+    # a variance of 0.0014627 stored as 0.001463 is 0.02 % from its bound, and a proven QP was called
+    # "feasible" (evaluation battery, October 2026).
+    if abs(objective - bound) <= 5e-7 + 1e-12:
+        return 0.0
     gap = abs(objective - bound) / max(abs(objective), 1e-9)
-    # Below the six places an objective is stored to, a gap is rounding.
     return 0.0 if gap < 1e-9 else gap
 
 
@@ -2708,3 +2768,11 @@ def _json(value: Any) -> str:
     import json
 
     return json.dumps(value)
+
+
+def _worse(compiled: Compiled, result, start) -> bool:
+    """The solver's answer is worse than the start it was given."""
+    if result.objective is None or start.objective is None:
+        return False
+    a, b = float(result.objective), float(start.objective)
+    return a < b - 1e-9 if compiled.sense == "maximize" else a > b + 1e-9

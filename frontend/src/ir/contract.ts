@@ -605,7 +605,7 @@ export const IR_RULES: readonly IrRule[] = [
   {
     code: "connected_malformed",
     where: "shape",
-    text: "a `connected` names `assign`, `units`, `groups` and `via`, and optionally `empty` (`forbidden` or `allowed`), and is not also an expression or inside a `forall`",
+    text: "a `connected` names `assign`, `units`, `groups` and `via`, and optionally `empty` (`forbidden` or `allowed`) and `sources` (a field name, or a `where` list of fixed filters on the units; then `groups` is optional), and is not also an expression or inside a `forall`",
   },
   {
     code: "connected_not_binary",
@@ -615,7 +615,7 @@ export const IR_RULES: readonly IrRule[] = [
   {
     code: "connected_index_mismatch",
     where: "shape",
-    text: "a `connected` rule's variable is indexed by its units' index, then its groups' index",
+    text: "a `connected` rule's variable is indexed by its units' index, then its groups' index (by its units' index alone when it has no groups)",
   },
   {
     code: "connected_via_invalid",
@@ -631,6 +631,11 @@ export const IR_RULES: readonly IrRule[] = [
     code: "connected_via_not_self",
     where: "domain",
     text: "a `connected` rule's `via` joins the units' entity type to itself",
+  },
+  {
+    code: "connected_sources_invalid",
+    where: "domain",
+    text: "a `connected` rule's `sources` is a boolean or numeric (0/1) field of the units' entity type, or a `where` list of fixed filters on its fields",
   },  {
     code: "route_needs_version_2",
     where: "shape",
@@ -753,7 +758,7 @@ export const SCHEDULING_KEYS: Readonly<Record<"no_overlap" | "cumulative", reado
 };
 
 /** What a `connected` rule names; `empty` is optional (`CONNECTED_KEYS`). */
-export const CONNECTED_KEYS: readonly string[] = ["assign", "units", "groups", "via", "empty"];
+export const CONNECTED_KEYS: readonly string[] = ["assign", "units", "groups", "via", "empty", "sources"];
 
 /** What a `route` rule names; `demand` and `capacity` are optional, both or neither (`ROUTE_KEYS`). */
 export const ROUTE_KEYS: readonly string[] = [

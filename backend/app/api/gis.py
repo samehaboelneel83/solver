@@ -330,6 +330,63 @@ def _import_dataset(body: ImportBody, db: Session, user: UserAccount) -> dict[st
     return get_dataset(dataset_id, db, user)
 
 
+class CopyBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    domain_id: int = Field(gt=0)
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class SameDrawingBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=200)
+    sha256: str | None = None
+    filename: str | None = None
+    extent: list[float] | None = None
+
+
+def _copy(db: Session, user: UserAccount, dataset_id: int, domain_id: int, name: str) -> dict[str, Any]:
+    new_id = store.copy_dataset(db, dataset_id, domain_id=domain_id, name=name, user_id=user.id)
+    _audit(db, user, "gis.copy", new_id)
+    db.commit()
+    return get_dataset(new_id, db, user)
+
+
+@router.post("/datasets/{dataset_id}/copy", status_code=201)
+def copy_dataset(dataset_id: int, body: CopyBody, db: Session = Depends(get_db),
+                 user: UserAccount = Depends(requires("domain.edit"))) -> dict[str, Any]:
+    """Map data copied into another domain, as it is: a drawing's upload is used up by its first import."""
+    row = _dataset(db, dataset_id, user)
+    _domain(db, body.domain_id, user)
+    return _copy(db, user, dataset_id, body.domain_id, body.name or row["name"])
+
+
+@router.post("/domains/{domain_id}/datasets/same-drawing", status_code=201)
+def copy_same_drawing(domain_id: int, body: SameDrawingBody, db: Session = Depends(get_db),
+                      user: UserAccount = Depends(requires("domain.edit"))) -> dict[str, Any]:
+    """The newest map data of this organization read from the same drawing (its sha256, or else its file name and
+    extent), copied into this domain: how a drawing whose upload was used up reaches a second workspace."""
+    _domain(db, domain_id, user)
+    if not body.sha256 and not (body.filename and body.extent):
+        raise HTTPException(422, "give the drawing's sha256, or its filename and extent")
+    rows = db.execute(text(
+        "SELECT id, domain_id, source FROM gis_dataset WHERE organization_id = :o ORDER BY updated_at DESC"),
+        {"o": user.organization_id}).mappings().all()
+
+    def same(source: dict[str, Any]) -> bool:
+        if body.sha256 and source.get("sha256"):
+            return source["sha256"] == body.sha256
+        extent = source.get("extent") or []
+        return (bool(body.filename) and source.get("filename") == body.filename and len(extent) == len(body.extent or [])
+                and all(abs(float(a) - float(b)) < 1e-6 for a, b in zip(extent, body.extent or [])))
+
+    found = next((r for r in rows if same(r["source"] or {})), None)
+    if found is None:
+        raise HTTPException(404, "no map data of this drawing in any workspace; upload the file again")
+    if found["domain_id"] == domain_id:
+        return get_dataset(found["id"], db, user)
+    return _copy(db, user, found["id"], domain_id, body.name)
+
+
 @router.get("/datasets")
 def list_datasets(
     domain_id: int = Query(gt=0),
@@ -671,6 +728,9 @@ def apply_domain_records(domain_id: int, body: AutoApply, db: Session = Depends(
                      api_key_id=getattr(user, "api_key_id", None), action="gis.domain.records",
                      object_type="domain", object_id=domain_id)
         db.commit()
+    except auto_records.MappingRefused as exc:
+        db.rollback()
+        raise HTTPException(422, {"message": "Nothing was made: fix these first.", "faults": [str(exc)], "more": 0}) from exc
     except DBAPIError as exc:
         db.rollback()
         says = str(getattr(exc, "orig", exc)).splitlines()[0]

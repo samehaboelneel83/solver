@@ -146,6 +146,9 @@ services:
       CLICKHOUSE_HOST: clickhouse
       # Address space each solve may use (app.solve.sandbox).
       SOLVE_MEMORY_MB: ${SOLVE_MEMORY_MB:-4096}
+      SOLVE_WORKER_CPUS: ${SOLVE_WORKER_CPUS:-8}
+      SOLVE_HOST_WORKERS: ${SOLVE_HOST_WORKERS:-8}
+      SOLVE_HOST_MEMORY_MB: ${SOLVE_HOST_MEMORY_MB:-10240}
       # As the api's: the same added solvers (queue R41).
       SOLVER_ADAPTERS_DIR: ${SOLVER_ADAPTERS_DIR:-/app/adapters/reference:/opt/solver/adapters}
     command: ["python", "-m", "app.worker"]
@@ -157,7 +160,7 @@ services:
     # of its time limit x workers + 30 s (app.solve.sandbox). The worker
     # itself stays small, so a solve that hits either fails alone.
     mem_limit: 12g
-    cpus: "8"
+    cpus: "${SOLVE_WORKER_CPUS:-8}"
     depends_on:
       postgres:
         condition: service_healthy

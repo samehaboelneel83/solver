@@ -277,7 +277,7 @@ describe("AssistantPanel, the workbench", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     expect(await screen.findByText("Working on: Building a layout from the drawing")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
-    expect(await screen.findByText(/Stopped waiting in this browser.*may still finish/)).toBeInTheDocument();
+    expect(await screen.findByText(/Stop requested.*may still finish/)).toBeInTheDocument();
   });
 });
 
@@ -370,5 +370,104 @@ describe("Markdown", () => {
     expect(screen.queryByRole("link", { name: "bad" })).toBeNull();
     expect(container.querySelector("script")).toBeNull();
     expect(screen.getByText(/<script>alert\(1\)<\/script>/)).toBeInTheDocument();
+  });
+});
+
+describe("AssistantPanel, a turn the server ran on with", () => {
+  function stubTurn(turns: unknown[]) {
+    const calls: string[] = [];
+    const queue = [...turns];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method ?? "GET"} ${url}`);
+      if (url.endsWith("/agent/status")) return new Response(JSON.stringify({ enabled: true, model: "qwen3.5", confirm: "delete", reachable: true }), { headers: { "Content-Type": "application/json" } });
+      if (url.includes("/turn")) return new Response(JSON.stringify(queue.shift() ?? { running: false, known: true, events: [], count: 0 }), { headers: { "Content-Type": "application/json" } });
+      return new Response(null, { status: 204 });
+    }));
+    return calls;
+  }
+
+  it("picks a turn up again after the pane or tab was closed (kept in localStorage)", async () => {
+    localStorage.setItem("solver_assistant_model", JSON.stringify({
+      id: "conv2", messages: [], files: [],
+      items: [{ kind: "user", text: "build it" }, { kind: "steps", steps: [], notes: [] }],
+    }));
+    const calls = stubTurn([{ running: false, known: true, count: 1, events: [
+      { type: "answer", text: "Built and solved while you were away." },
+    ] }]);
+    renderPanel();
+    expect(await screen.findByText("Built and solved while you were away.")).toBeInTheDocument();
+    expect(calls.some((c) => c.includes("/agent/conversations/conv2/turn?after=0"))).toBe(true);
+    expect(JSON.parse(localStorage.getItem("solver_assistant_model") ?? "{}").id).toBe("conv2");
+  });
+
+  it("shows the answer that arrived while the page was away, once, in place of the half-shown steps", async () => {
+    sessionStorage.setItem("solver_assistant_model", JSON.stringify({
+      id: "conv1", messages: [], files: [],
+      items: [{ kind: "user", text: "go ahead" }, { kind: "steps", steps: [{ name: "check_spec", label: "check_spec" }], notes: [] }],
+    }));
+    const calls = stubTurn([{ running: false, known: true, count: 3, events: [
+      { type: "tool", name: "check_spec", args: {} },
+      { type: "result", name: "check_spec", ok: true },
+      { type: "answer", text: "The plan is ready for you." },
+    ] }]);
+    renderPanel();
+    expect(await screen.findByText("The plan is ready for you.")).toBeInTheDocument();
+    expect(calls.some((c) => c.includes("/agent/conversations/conv1/turn?after=0"))).toBe(true);
+    expect(screen.getByText("1 step")).toBeInTheDocument();
+    expect(screen.queryByText("2 steps")).toBeNull();
+  });
+
+  it("leaves a finished conversation alone", async () => {
+    sessionStorage.setItem("solver_assistant_model", JSON.stringify({
+      id: "conv2", messages: [], files: [], items: [{ kind: "user", text: "hi" }, { kind: "answer", text: "Hello." }],
+    }));
+    const calls = stubTurn([]);
+    renderPanel();
+    expect(await screen.findByText("Hello.")).toBeInTheDocument();
+    expect(calls.some((c) => c.includes("/turn"))).toBe(false);
+  });
+});
+
+describe("AssistantPanel, a turn that ended with nothing to show", () => {
+  it("says so instead of leaving the message unanswered", async () => {
+    sessionStorage.setItem("solver_assistant_model", JSON.stringify({
+      id: "conv3", messages: [], files: [], items: [{ kind: "user", text: "go ahead" }],
+    }));
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.endsWith("/agent/status")) return new Response(JSON.stringify({ enabled: true, model: "qwen3.5", confirm: "delete", reachable: true }), { headers: { "Content-Type": "application/json" } });
+      if (url.includes("/turn")) return new Response(JSON.stringify({ running: false, known: true, count: 1, events: [{ type: "state", messages: [], wrote: false }] }), { headers: { "Content-Type": "application/json" } });
+      return new Response(null, { status: 204 });
+    }));
+    renderPanel();
+    expect(await screen.findByText(/ended without an answer/)).toBeInTheDocument();
+  });
+});
+
+describe("AssistantPanel, a problem asked in the Ask tab", () => {
+  it("offers Describe a problem and carries the message and files there", async () => {
+    localStorage.setItem("solver_assistant_mode", "assistant");
+    const calls: { url: string; body: unknown }[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null });
+      const json = (v: unknown) => new Response(JSON.stringify(v), { headers: { "Content-Type": "application/json" } });
+      if (url.endsWith("/agent/status")) return json({ enabled: true, model: "qwen3.5", confirm: "delete", reachable: true });
+      if (url.endsWith("/handover")) return json({ conversation_id: "m1", text: "Place beds in my camp", files: [{ name: "camp.dxf", sheets: [] }] });
+      if (url.endsWith("/agent/chat") && calls.filter((c) => c.url.endsWith("/agent/chat")).length === 1) {
+        return ndjson([{ type: "tool", name: "hand_to_describe", args: {} }, { type: "result", name: "hand_to_describe", ok: true, preview: "" },
+          { type: "handover", mode: "model", text: "A layout problem." }, { type: "answer", text: "A layout problem." },
+          { type: "state", messages: [], wrote: false }]);
+      }
+      if (url.endsWith("/agent/chat")) return ndjson([{ type: "answer", text: "What size is each bed?" }, { type: "state", messages: [], wrote: false }]);
+      return new Response(null, { status: 204 });
+    }));
+    renderPanel();
+    fireEvent.change(screen.getByLabelText("Message to the assistant"), { target: { value: "Place beds in my camp" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Continue in Describe a problem/ }));
+    await waitFor(() => expect(calls.filter((c) => c.url.endsWith("/agent/chat"))).toHaveLength(2));
+    expect(await screen.findByText("What size is each bed?")).toBeInTheDocument();
+    const second = calls.filter((c) => c.url.endsWith("/agent/chat"))[1].body as Record<string, unknown>;
+    expect(second).toMatchObject({ mode: "model", conversation_id: "m1", text: "Place beds in my camp", server_history: true,
+                                   keep_files: ["camp.dxf"] });
   });
 });

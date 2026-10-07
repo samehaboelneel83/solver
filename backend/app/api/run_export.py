@@ -42,8 +42,9 @@ SHEET_ROWS = 200_000
 
 def _record(db: Session, run_id: int) -> dict[str, Any]:
     row = db.execute(
-        text("SELECT r.id, r.status, r.objective, r.solver, r.params, r.error, r.finished_at, mv.ir, d.data,"
-             "       sol.assignments, sol.amounts, s.name AS scenario, p.name AS problem, p.domain_id"
+        text("SELECT r.id, r.status, r.objective, r.best_bound, r.solver, r.params, r.error, r.finished_at, mv.ir, d.data,"
+             "       sol.assignments, sol.amounts, sol.ranges, sol.reduced_costs,"
+             "       s.name AS scenario, s.patch, p.name AS problem, p.domain_id"
              "  FROM run r JOIN scenario s ON s.id = r.scenario_id JOIN model_version mv ON mv.id = r.model_version_id"
              "  JOIN problem p ON p.id = s.problem_id JOIN dataset d ON d.id = r.dataset_id"
              "  LEFT JOIN solution sol ON sol.run_id = r.id WHERE r.id = :r"),
@@ -52,7 +53,7 @@ def _record(db: Session, run_id: int) -> dict[str, Any]:
     if row is None:
         raise HTTPException(404, "run not found")
     results = [dict(r) for r in db.execute(
-        text("SELECT constraint_id, label, hard, satisfied, total_violation, penalty_paid, slack, violations"
+        text("SELECT constraint_id, label, hard, satisfied, total_violation, penalty_paid, slack, dual, violations"
              "  FROM constraint_result WHERE run_id = :r ORDER BY constraint_id"), {"r": run_id}).mappings()]
     return {**dict(row), "results": results}
 

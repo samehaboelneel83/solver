@@ -1,0 +1,269 @@
+"""Shapes a model writes for a sum, a rule's scope or a bound, put back in the IR's own form before the check.
+
+The feed-blend field test (October 2026): Qwen wrote the same `sum` four times without `over` beside it
+(the check refused it each time, and the turn gave up), an empty `"forall": []` for a rule over nothing,
+and `"upper": "available_kg"` for a bound that differs by ingredient. Each has exactly one meaning, so it
+is rewritten here and the model is told what changed -- never silently.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+BODY_KEYS = ("body", "term", "of", "expr", "expression", "value", "sum")
+SCOPE_KEYS = ("for", "forall", "bindings", "over_set", "for_each", "foreach")
+
+
+def _binding_from(node: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """`{"index": "i", "set": "ingredient"}` or `{"i": "ingredient"}` written beside or inside a sum."""
+    if isinstance(node.get("index"), str) and isinstance(node.get("set"), str):
+        return [{"index": node["index"], "set": node["set"]}]
+    return None
+
+
+def _lift_sum(term: dict[str, Any], notes: list[str]) -> None:
+    if "sum" not in term or "over" in term:
+        return
+    inner = term["sum"]
+    over = None
+    if isinstance(inner, dict) and "over" in inner:
+        inner = dict(inner)
+        over = inner.pop("over")
+        body_key = next((k for k in BODY_KEYS if k in inner), None)
+        if body_key is not None and len(inner) == 1:
+            inner = inner[body_key]
+        term["sum"] = inner
+        notes.append('a sum\'s "over" written inside its body was moved beside "sum"')
+    else:
+        for key in SCOPE_KEYS:
+            if key in term:
+                over = term.pop(key)
+                notes.append(f'a sum\'s "{key}" was taken as its "over"')
+                break
+        else:
+            binding = _binding_from(term)
+            if binding is not None:
+                term.pop("index"), term.pop("set")
+                over = binding
+                notes.append('a sum\'s "index"/"set" beside it were made its "over"')
+    if over is None:
+        return
+    if isinstance(over, dict):
+        over = [over]
+    term["over"] = over
+
+
+def _walk(node: Any, notes: list[str]) -> None:
+    if isinstance(node, dict):
+        if "sum" in node:
+            _lift_sum(node, notes)
+        for key in ("sub", "subtract", "minus", "neg", "negate"):
+            # a - b, written as the arithmetic reads (the production-plan test: stock[q] - owed[q] as "sub"); the
+            # language has add and mul only, so it is a + (-1 * b).
+            if key in node and len(node) == 1:
+                parts = node.pop(key)
+                parts = parts if isinstance(parts, list) else [parts]
+                negated = [{"mul": [{"const": -1}, t]} for t in parts[1 if key in ("sub", "subtract", "minus") else 0:]]
+                if key in ("sub", "subtract", "minus") and parts:
+                    node["add"] = [parts[0], *negated]
+                elif len(negated) == 1:
+                    node.update(negated[0])
+                else:
+                    node["add"] = negated
+                notes.append(f'"{key}" was written as "add" with -1 times the part taken away (the language adds and '
+                             'multiplies: a - b is {"add":[a,{"mul":[{"const":-1},b]}]})')
+                break
+        number = (int, float)
+        for key in ("left", "right", "expression"):
+            if isinstance(node.get(key), number) and not isinstance(node[key], bool):
+                node[key] = {"const": node[key]}
+                notes.append(f'a bare number in "{key}" was written as {{"const": ...}}')
+        for key in ("add", "mul"):
+            if isinstance(node.get(key), list) and any(isinstance(t, number) and not isinstance(t, bool)
+                                                       for t in node[key]):
+                node[key] = [{"const": t} if isinstance(t, number) and not isinstance(t, bool) else t
+                             for t in node[key]]
+                notes.append(f'a bare number in "{key}" was written as {{"const": ...}}')
+        factors = node.get("mul")
+        if isinstance(factors, list) and len(factors) > 2:
+            # a * b * c nested as a * (b * c): the language multiplies pairs (fibre test: 500 * households * pick).
+            nested = factors[-1]
+            for f in reversed(factors[1:-1]):
+                nested = {"mul": [f, nested]}
+            node["mul"] = [factors[0], nested]
+            notes.append(f"a product of {len(factors)} factors was nested into pairs")
+        for value in node.values():
+            _walk(value, notes)
+    elif isinstance(node, list):
+        for value in node:
+            _walk(value, notes)
+
+
+def _bound_rules(ir: dict[str, Any], seed: dict[str, Any], notes: list[str]) -> None:
+    """A bound given as a field or parameter name becomes a rule over the decision's records."""
+    variables = ir.get("variables") if isinstance(ir.get("variables"), dict) else {}
+    params = {p.get("name"): p for p in (seed.get("parameters") or []) if isinstance(p, dict)}
+    fields: dict[str, set[str]] = {}
+    for et in seed.get("entity_types") or []:
+        if isinstance(et, dict):
+            fields[str(et.get("name"))] = {str(a.get("name")) for a in et.get("attributes") or [] if isinstance(a, dict)}
+    constraints = ir.setdefault("constraints", [])
+    if not isinstance(constraints, list):
+        return
+    for name, spec in variables.items():
+        if not isinstance(spec, dict):
+            continue
+        index = [str(s) for s in spec.get("index") or []]
+        for key, relation in (("upper", "<="), ("lower", ">=")):
+            value = spec.get(key)
+            if value is None or isinstance(value, (int, float)) and not isinstance(value, bool):
+                continue
+            ref = value.get("par") or (value.get("attr") or {}).get("name") if isinstance(value, dict) else value
+            if not isinstance(ref, str) or not index:
+                continue
+            names = [f"i{n}" if n else "i" for n in range(len(index))]
+            right: dict[str, Any] | None = None
+            param = params.get(ref)
+            if param is not None and [str(s) for s in param.get("index") or []] == index:
+                right = {"par": ref, "index": names}
+            elif param is not None and not param.get("index"):
+                right = {"par": ref}
+            elif len(index) == 1 and ref in fields.get(index[0], set()):
+                right = {"attr": {"of": "i", "name": ref}}
+            if right is None:
+                continue
+            spec.pop(key)
+            constraints.append({
+                "id": f"{name}_{key}_{ref}"[:60],
+                "note": f"{name} {relation} {ref} for every {', '.join(index)}",
+                "forall": [{"index": n, "set": s} for n, s in zip(names, index)],
+                "left": {"var": name, "index": names},
+                "relation": relation,
+                "right": right,
+                "severity": "hard",
+            })
+            notes.append(f'{name}\'s {key} bound "{ref}" differs by record, so it became the rule '
+                         f'{name}_{key}_{ref}: {name}[{", ".join(names)}] {relation} {ref}')
+
+
+SEED_ONLY = ("entity_types", "relationship_types", "entities", "entities_from_file", "relationships",
+             "relationships_from_file", "relationships_in_order", "distances_from_fields", "patterns_that_fit",
+             "parameter_values",
+             "parameter_values_from_file")
+IR_ONLY = ("version", "sets", "variables", "constraints", "objective")
+
+
+def _joined_key(key: Any) -> Any:
+    if isinstance(key, list) and key and all(isinstance(k, (str, int, float)) and not isinstance(k, bool) for k in key):
+        return "-".join(str(int(k)) if isinstance(k, float) and k.is_integer() else str(k) for k in key)
+    return key
+
+
+def joined_keys(spec: dict[str, Any]) -> list[str]:
+    """A record named by a list of key parts (["Gear", 1]) is the record with the joined key ("Gear-1"), as
+    `"key": ["job","step"]` makes it (the job-shop retest typed its step links that way)."""
+    seed = spec.get("seed") if isinstance(spec.get("seed"), dict) else {}
+    changed = 0
+    for e in seed.get("entities") or []:
+        if isinstance(e, dict) and isinstance(e.get("key"), list):
+            e["key"] = _joined_key(e["key"]); changed += 1
+    for r in seed.get("relationships") or []:
+        for end in ("from", "to"):
+            pair = r.get(end) if isinstance(r, dict) else None
+            if isinstance(pair, list) and len(pair) == 2 and isinstance(pair[1], list):
+                pair[1] = _joined_key(pair[1]); changed += 1
+    for v in seed.get("parameter_values") or []:
+        for pair in (v.get("entities") or []) if isinstance(v, dict) else []:
+            if isinstance(pair, list) and len(pair) == 2 and isinstance(pair[1], list):
+                pair[1] = _joined_key(pair[1]); changed += 1
+    return [f'{changed} record key(s) given as lists were joined with "-" (["Gear", 1] is "Gear-1")'] if changed else []
+
+
+def misplaced(spec: dict[str, Any]) -> list[str]:
+    """Keys written beside `seed` and `ir` that belong inside them, moved there (the fibre test, October 2026:
+    entities_from_file, relationships_from_file and parameters at the top, and no `ir`; the platform answered
+    with a bare "Field required")."""
+    notes: list[str] = []
+    moved = [k for k in SEED_ONLY if k in spec]
+    if moved or ("parameters" in spec and not isinstance(spec.get("ir"), dict)) or (
+            "parameters" in spec and isinstance(spec.get("parameters"), list)):
+        seed = spec.setdefault("seed", {}) if isinstance(spec.get("seed"), dict) or "seed" not in spec else None
+        if seed is not None:
+            if isinstance(spec.get("parameters"), list):
+                moved.append("parameters")  # a list of declarations is the seed's; the IR's is an object
+            for k in moved:
+                value = spec.pop(k)
+                if k in seed and isinstance(seed[k], list) and isinstance(value, list):
+                    # Written in both places: one copy of each (by name when it has one).
+                    have = {json.dumps(x, sort_keys=True) for x in seed[k]}
+                    names = {x.get("name") for x in seed[k] if isinstance(x, dict) and x.get("name")}
+                    seed[k] = [*seed[k], *(x for x in value if json.dumps(x, sort_keys=True) not in have
+                                           and not (isinstance(x, dict) and x.get("name") in names))]
+                else:
+                    seed.setdefault(k, value)
+            notes.append(f"{', '.join(moved)} written beside seed were moved into seed")
+    if not isinstance(spec.get("ir"), dict):
+        lifted = {k: spec.pop(k) for k in IR_ONLY if k in spec}
+        if "variables" in lifted or "constraints" in lifted:
+            if isinstance(spec.get("parameters"), dict):
+                lifted["parameters"] = spec.pop("parameters")
+            spec["ir"] = {"version": 2, **lifted}
+            notes.append(f"{', '.join(lifted)} written beside seed were moved into ir")
+    return notes
+
+
+def repair(spec: dict[str, Any]) -> list[str]:
+    """Rewrite the spec's IR in place; returns what changed, for the model."""
+    ir = spec.get("ir")
+    if not isinstance(ir, dict):
+        return []
+    notes: list[str] = []
+    seed = spec.get("seed") if isinstance(spec.get("seed"), dict) else {}
+    for p in seed.get("parameters") or []:
+        # An uncertainty written on the seed's parameter (the bakery retest): the IR declares it, the seed only
+        # holds the value, so it is moved where the model reads it.
+        if isinstance(p, dict) and isinstance(p.get("uncertainty"), dict) and p.get("name"):
+            params = ir.setdefault("parameters", {})
+            target = params.setdefault(p["name"], {"index": list(p.get("index") or [])})
+            if isinstance(target, dict) and "uncertainty" not in target:
+                target["uncertainty"] = p.pop("uncertainty")
+                notes.append(f'the "uncertainty" of {p["name"]} was moved from the seed into ir.parameters, '
+                             'where the model declares it')
+            else:
+                p.pop("uncertainty")
+    if "sets" not in ir:
+        # A model over no records (the bakery test: one quantity, one uncertain number) still states its sets.
+        ir["sets"] = []
+        notes.append('"sets" was missing and was written as [] (a model over no records)')
+    for c in ir.get("constraints") or []:
+        if isinstance(c, dict) and c.get("forall") in ([], {}, None) and "forall" in c:
+            c.pop("forall")
+            notes.append(f'rule {c.get("id")}\'s empty "forall" was left out (a rule over nothing has none)')
+        elif isinstance(c, dict) and isinstance(c.get("forall"), dict):
+            c["forall"] = [c["forall"]]
+    for name, var in (ir.get("variables") or {}).items():
+        # A decision with no index is one number (the job-shop retest: "makespan" without "index").
+        if isinstance(var, dict) and var.get("index") is None:
+            var["index"] = []
+            notes.append(f'decision {name} had no "index" and is one number ("index": [])')
+        for bound in ("lower", "upper"):
+            # "upper": null for "no limit" (the paper-cutting test): a bound left out is the platform's own.
+            if isinstance(var, dict) and bound in var and var[bound] is None:
+                var.pop(bound)
+                notes.append(f'decision {name}\'s "{bound}": null was left out (no {bound} bound of your own)')
+    for c in ir.get("constraints") or []:
+        # A rule with no severity (or null) and no weight is a must-hold rule; a connected or route rule can only
+        # be hard (the fibre test, October 2026: "null is not a severity; a connected rule is hard" three times).
+        if isinstance(c, dict) and c.get("severity") is None and "weight" not in c:
+            c["severity"] = "hard"
+            notes.append(f'rule {c.get("id")} had no severity and was made "hard" (must hold)')
+    _walk(ir.get("constraints"), notes)
+    _walk(ir.get("objective"), notes)
+    seed = spec.get("seed") if isinstance(spec.get("seed"), dict) else {}
+    _bound_rules(ir, seed, notes)
+    seen: list[str] = []
+    for n in notes:
+        if n not in seen:
+            seen.append(n)
+    return seen

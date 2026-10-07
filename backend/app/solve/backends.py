@@ -19,7 +19,7 @@ questioned:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Callable, Protocol
+from typing import Any, Literal, Callable, Protocol
 
 from app.solve.classify import Classification
 from app.solve.compile import Compiled
@@ -675,6 +675,9 @@ def available_names() -> list[str]:
 def is_automatic(backend: "Backend") -> bool:
     """Whether the rules may choose it unasked: a built-in, or an added solver whose current
     version passed the conformance kit (queue R43, `app.solve.adapters.VERIFIED`)."""
+    # Remote GPU trials remain explicit until model-family benchmarks exist.
+    if backend.name == "cuopt-remote":
+        return False
     if backend.automatic:
         return True
     from app.solve.adapters import VERIFIED
@@ -738,6 +741,39 @@ def choose(found: Classification, requested: str | None = None, *, allowed: set[
         reason += f"; {', '.join(others)} could also take it"
     return chosen, reason
 
+
+#: A whole-number model with at least this many yes/no decisions and a weighted capacity row is "knapsack-shaped".
+KNAPSACK_DECISIONS = 500
+
+
+def knapsack_shaped(numbers: dict[str, Any] | None) -> bool:
+    """Many yes/no decisions under weighted capacity rows (`a·x <= b`, whole weights), and nothing only a
+    constraint-programming solver takes (schedules, intervals, networks, switched or quadratic rows): a
+    branch-and-bound MIP solver's LP bound settles these at once, where CP-SAT searched (the evaluation, October
+    2026: a 2,000-item knapsack took CP-SAT 15.7 s; HiGHS solves the family in 0.08-1.7 s)."""
+    if not numbers:
+        return False
+    return (numbers.get("rows_knapsack", 0) >= 1 and numbers.get("binary", 0) >= KNAPSACK_DECISIONS
+            and numbers.get("coef_max", 0) >= 10
+            and not any(numbers.get(k, 0) for k in ("rows_scheduling", "rows_connectivity", "rows_conditional",
+                                                     "rows_quadratic", "intervals", "curves", "functions"))
+            and numbers.get("objective_degree", 1) <= 1)
+
+
+def prefer_for_shape(found: Classification, numbers: dict[str, Any] | None, chosen: "Backend", why: str, *,
+                     allowed: set[str] | None = None, denied: set[str] | None = None) -> tuple["Backend", str]:
+    """The rules' choice, or a MIP solver for a knapsack-shaped model the rank would give CP-SAT."""
+    if chosen.name != "cp-sat" or not knapsack_shaped(numbers):
+        return chosen, why
+    for name in ("highs", "scip"):
+        try:
+            backend, _ = choose(found, name, allowed=allowed, denied=denied)
+        except NoBackend:
+            continue
+        return backend, (f"{name}: the model is knapsack-shaped ({numbers.get('binary')} yes/no decisions under "
+                         f"weighted capacity rows), which a MIP solver's bound settles faster than CP-SAT's search; "
+                         + why)
+    return chosen, why
 
 def fit(found: Classification, *, allowed: set[str] | None = None, denied: set[str] | None = None) -> list[dict]:
     """Every solver in the registry against this model (Epic UX, U-5): whether it can take it,

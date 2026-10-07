@@ -20154,6 +20154,54 @@
           "placed_at"
         ]
       }
+    },
+    {
+      "code": "connected_sources_invalid",
+      "loc": [
+        "constraints",
+        0,
+        "connected",
+        "sources"
+      ],
+      "why": "`sources` names where the network starts: a yes/no or 0/1 field of the units. The cells have no `door` field, and only the domain knows its fields.",
+      "ir": {
+        "version": 2,
+        "sets": [
+          "cell"
+        ],
+        "relationships": [
+          "adjacent"
+        ],
+        "parameters": {},
+        "variables": {
+          "open": {
+            "index": [
+              "cell"
+            ],
+            "domain": "binary"
+          }
+        },
+        "constraints": [
+          {
+            "id": "c_reach",
+            "severity": "hard",
+            "connected": {
+              "assign": {
+                "var": "open",
+                "index": [
+                  "u"
+                ]
+              },
+              "units": {
+                "index": "u",
+                "set": "cell"
+              },
+              "via": "adjacent",
+              "sources": "door"
+            }
+          }
+        ]
+      }
     }
   ]
 }

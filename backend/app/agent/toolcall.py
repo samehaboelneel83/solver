@@ -109,8 +109,35 @@ def fix_spec(s):
         json.loads(fixed)
         return fixed if fixed != s else None
     except json.JSONDecodeError:
-        closed = fix_closers(fixed)
-        return closed if closed is not None else (None if fixed == s else None)
+        pass
+    quoted = escape_inner_quotes(fixed)
+    if quoted is not None:
+        return quoted
+    closed = fix_closers(fixed)
+    return closed if closed is not None else (None if fixed == s else None)
+
+
+_AFTER_STRING = re.compile(r'\s*[,:}\]]')
+
+
+def escape_inner_quotes(s, limit=60):
+    """Quotes inside a text value left unescaped: 'The "keeps_free" cells...'. The camp retest (October 2026): a
+    plan's summary was refused twice for it ("Expecting ',' delimiter") and Qwen rewrote the whole plan each time,
+    7 minutes. A quote that ends a string where no , : } ] follows cannot be the string's end, so it is escaped,
+    and the next one with it; None when that does not make valid JSON."""
+    text = s or ""
+    for _ in range(limit):
+        try:
+            json.loads(text)
+            return text if text != s else None
+        except json.JSONDecodeError as e:
+            if not e.msg.startswith(("Expecting ',' delimiter", "Expecting ':' delimiter")):
+                return None
+            quote = text.rfind('"', 0, e.pos)
+            if quote <= 0 or text[quote - 1] == "\\" or _AFTER_STRING.match(text, quote + 1):
+                return None
+            text = text[:quote] + '\\"' + text[quote + 1:]
+    return None
 
 
 def fix_closers(s):

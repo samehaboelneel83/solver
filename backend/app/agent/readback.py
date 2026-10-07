@@ -92,6 +92,13 @@ def readback(spec: dict[str, Any]) -> str:
     for r in seed.get("relationships") or []:
         if isinstance(r, dict):
             links[r.get("type")] = links.get(r.get("type"), 0) + 1
+    # Which records each kind gets (the paper-cutting test: 15 cutting patterns typed by hand, none of them shown).
+    kinds: dict[str, list[str]] = {}
+    for e in seed.get("entities") or []:
+        if isinstance(e, dict) and e.get("type"):
+            kinds.setdefault(str(e["type"]), []).append(str(e.get("label") or e.get("key")))
+    for kind, names in kinds.items():
+        lines.append(f"- records {kind}: {len(names)}: {', '.join(names[:12])}" + (", ..." if len(names) > 12 else ""))
     for p in seed.get("parameters") or []:
         if not isinstance(p, dict):
             continue
@@ -110,12 +117,83 @@ def readback(spec: dict[str, Any]) -> str:
             lines.append(f"- link {rt.get('name')} ({rt.get('from')} → {rt.get('to')}): {links.get(rt.get('name'), 0)} "
                          f"links: {', '.join(sample)}")
     for name, v in (ir.get("variables") or {}).items():
-        lines.append(f"- decision {name}[{', '.join((v or {}).get('index') or [])}]: {(v or {}).get('domain')}")
+        v = v or {}
+        bounds = ""
+        if v.get("domain") != "binary" and ("lower" in v or "upper" in v):
+            bounds = f", {_num(v.get('lower', 0))} ≤ {name} ≤ {_num(v['upper']) if 'upper' in v else 'the platform ceiling'}"
+        elif v.get("domain") in ("continuous", "integer"):
+            bounds = f", 0 ≤ {name} (no upper bound given; the platform's safety ceiling applies)"
+        if v.get("domain") == "interval":
+            # The job-shop retest: "task[operation]: interval" said nothing of what the interval spans.
+            parts = [f"{k} {v[k] if isinstance(v[k], str) else _num(v[k])}" for k in ("start", "end", "size", "presence")
+                     if v.get(k) is not None]
+            bounds = (" with " + ", ".join(parts)) if parts else " (no start, end or size named)"
+        if v.get("stage") == 1:
+            bounds += "; decided NOW, before the uncertain data is known"
+        elif v.get("stage") == 2:
+            bounds += "; decided LATER, once the uncertain data is known (per future)"
+        lines.append(f"- decision {name}[{', '.join(v.get('index') or [])}]: {v.get('domain')}{bounds}")
+    # Uncertain numbers (the bakery test: the read-back said nothing of the range the plan rests on).
+    for name, p in (ir.get("parameters") or {}).items():
+        u = (p or {}).get("uncertainty") if isinstance(p, dict) else None
+        if not isinstance(u, dict):
+            continue
+        if u.get("kind") == "interval":
+            lines.append(f"- {name} is UNCERTAIN: any value within +/- {_num(float(u.get('deviation') or 0) * 100)}% "
+                         f"of its given value, evenly likely")
+        elif u.get("kind") == "scenarios":
+            futures = ", ".join(f"{f.get('label') or '?'} x{_num(f.get('factor'))}" for f in u.get("futures") or []
+                                if isinstance(f, dict))
+            lines.append(f"- {name} is UNCERTAIN: one of these futures (its value times the factor): {futures}")
+        else:
+            lines.append(f"- {name} is UNCERTAIN: {json.dumps(u, ensure_ascii=False)[:120]}")
     for c in ir.get("constraints") or []:
         if not isinstance(c, dict):
             continue
         scope = ", ".join(binding(b) for b in c.get("forall") or [])
         severity = "hard" if c.get("severity", "hard") == "hard" else f"soft, weight {c.get('weight')}"
+        if isinstance(c.get("route"), dict):
+            # Read back in words, as the network rule is (the evaluation's routing test: "c_route: null None null").
+            body = c["route"]
+            vehicles, stops = (body.get("vehicles") or {}).get("set"), (body.get("stops") or {}).get("set")
+            extra = []
+            if body.get("demand") and body.get("capacity"):
+                extra.append(f"each {vehicles}'s load of {stops}.{body['demand']} <= its {body['capacity']}")
+            if body.get("earliest") or body.get("latest"):
+                extra.append(f"arrivals within {stops}.{body.get('earliest')}..{body.get('latest')}, travel "
+                             f"{body.get('travel')}, service {body.get('service')}")
+            lines.append(f"- rule {c.get('id')}: routes of {vehicles} from and back to {body.get('depot')!r}; every "
+                         f"other {stops} visited exactly once (no loops away from the depot)"
+                         + ("; " + "; ".join(extra) if extra else "") + " (hard)")
+            continue
+        for kind in ("no_overlap", "cumulative"):
+            if isinstance(c.get(kind), dict):
+                body = c[kind]
+                scope = ", ".join(binding(b) for b in c.get("forall") or [])
+                over = ", ".join(binding(b) for b in body.get("over") or [])
+                cap = (f"; demand {term(body.get('demand'))}, capacity {term(body.get('capacity'))}"
+                       if kind == "cumulative" else "")
+                lines.append(f"- rule {c.get('id')}: " + (f"for every {scope}: " if scope else "")
+                             + f"{term(body.get('interval'))} for {over} "
+                             + ("never overlap" if kind == "no_overlap" else "share the capacity") + cap + " (hard)")
+                break
+        else:
+            kind = None
+        if kind:
+            continue
+        if isinstance(c.get("connected"), dict):
+            # Read back in words (the fibre test showed "rule c_connectivity: null None null").
+            body = c["connected"]
+            var, units = (body.get("assign") or {}).get("var"), (body.get("units") or {}).get("set")
+            sources = body.get("sources")
+            start = (f"a {units} with {sources} set" if isinstance(sources, str) else
+                     f"a {units} where {_filters(sources)}" if isinstance(sources, list) else None)
+            groups = (body.get("groups") or {}).get("set") if isinstance(body.get("groups"), dict) else None
+            lines.append(f"- rule {c.get('id')}: every {units} with {var} = 1 "
+                         + (f"is joined along {body.get('via')} to {start}, through others with {var} = 1"
+                            if start else f"forms one connected piece along {body.get('via')}")
+                         + (f", per {groups}" if groups else "") + " (hard)")
+            continue
         lines.append(f"- rule {c.get('id')}: " + (f"for every {scope}: " if scope else "")
                      + f"{term(c.get('left'))} {c.get('relation')} {term(c.get('right'))} ({severity})")
     objective = ir.get("objective") or {}

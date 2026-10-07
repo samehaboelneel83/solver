@@ -1,0 +1,10 @@
+name = "cuopt-remote"
+kind = "python"
+version = "1"
+proves = "global"
+classes = ["LP", "IP", "MILP", "trivial"]
+provides = ["linear", "integral", "continuous", "fractional-data", "scaled-fractional-data", "soft-constraints"]
+note = "Opt-in private GPU bridge; configure gpu.* in Platform Settings. CPU fallback is recorded."
+[python]
+module = "adapter.py"
+function = "solve"

@@ -85,6 +85,13 @@ def write_setting(
     ).scalar_one_or_none()
     if known is None:
         raise HTTPException(status_code=422, detail=f"no setting called {payload.key!r}")
+    if payload.key.startswith("gpu.") and payload.scope != "platform":
+        raise HTTPException(status_code=422, detail="GPU connection settings are platform-only")
+    if payload.key == "gpu.endpoint" and payload.value:
+        from urllib.parse import urlsplit
+        url = urlsplit(str(payload.value))
+        if url.scheme not in ("http", "https") or not url.hostname or url.username or url.password or url.query or url.fragment or url.path not in ("", "/"):
+            raise HTTPException(status_code=422, detail="Use an http(s) service origin without credentials, path, query or fragment")
 
     if (payload.scope == "platform") != (payload.scope_id is None):
         raise HTTPException(
@@ -187,6 +194,7 @@ def _refuse_wrong_type(value_type: str, value: Any, key: str) -> None:
 # zero time limit would be stored happily and fail at solve time, far from the
 # screen that set them. Inclusive bounds; None means no limit that side.
 _RANGES: dict[str, tuple[float | None, float | None]] = {
+    "gpu.memory_mb": (64, 1048576),
     "solve.time_limit_s": (0.1, None),
     "solve.workers": (1, 64),
     "solve.gap_rel": (0, 0.5),

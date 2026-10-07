@@ -64,6 +64,11 @@ class RunRequest(BaseModel):
     rather than at every call (migration 0014).
     """
 
+    # A field this request does not know is refused, never dropped: the feed-blend field test (October
+    # 2026) sent a parameter change with the run, it was ignored, and the run was answered from the
+    # earlier one -- reported as the what-if's result. A what-if is a scenario with a patch.
+    model_config = ConfigDict(extra="forbid")
+
     time_limit_s: TimeLimit | None = None
     seed: Seed | None = None
     #: Leave it out and the platform chooses, recording why. Naming one that
@@ -91,6 +96,10 @@ class RunRequest(BaseModel):
     alternatives_within: Annotated[float, Field(ge=0, le=1)] | None = None
     #: How many decisions each plan changes from every other (1 by default). Only with `alternatives`.
     alternatives_min_changes: Annotated[int, Field(ge=1, le=50)] | None = None
+    #: Plan for this many sampled futures of the parameters declared uncertain (a two-stage stochastic solve,
+    #: `app.solve.stochastic`), in place of the `solve.stochastic_samples` setting for this run; 0 solves on the
+    #: given values only.
+    futures: Annotated[int, Field(ge=0, le=500)] | None = None
 
 
 class ConstraintOutcome(BaseModel):
@@ -338,6 +347,7 @@ def create_run(
             reuse=request.reuse,
             pareto_steps=request.pareto_steps,
             robust=request.robust,
+            futures=request.futures,
             alternatives=request.alternatives,
             alternatives_within=request.alternatives_within,
             alternatives_min_changes=request.alternatives_min_changes,

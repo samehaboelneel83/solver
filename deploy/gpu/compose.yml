@@ -1,0 +1,22 @@
+name: solver-gpu
+services:
+  gpu:
+    # Preload a pinned image containing a tested cuopt Python release.
+    image: ${CUOPT_IMAGE:?Set CUOPT_IMAGE to your preloaded cuopt Python image}
+    pull_policy: never
+    entrypoint: ["python", "/service/service.py"]
+    volumes:
+      - ./service.py:/service/service.py:ro
+    environment:
+      GPU_SERVICE_TOKEN: ${GPU_SERVICE_TOKEN:?Set a shared service token}
+      GPU_MAX_SECONDS: ${GPU_MAX_SECONDS:-1800}
+    ports:
+      - "${GPU_BIND_IP:-127.0.0.1}:8090:8090"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${GPU_DEVICE_ID:-0}"]
+              capabilities: [gpu]
+    restart: unless-stopped

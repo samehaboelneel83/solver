@@ -105,8 +105,10 @@ SCHEDULING_KEYS: dict[str, frozenset[str]] = {
     "no_overlap": frozenset({"interval", "over"}),
     "cumulative": frozenset({"interval", "over", "demand", "capacity"}),
 }
-#: What a `connected` rule names; `empty` is optional.
-CONNECTED_KEYS: frozenset[str] = frozenset({"assign", "units", "groups", "via", "empty"})
+#: What a `connected` rule names; `empty` is optional. `sources` (a 0/1 field of the units) roots the pieces at
+#: those units instead of at one the solver picks, and makes `groups` optional: every chosen unit is reached
+#: along `via` from a chosen source unit (corridors to doors, pipes to a supply, roads to a depot).
+CONNECTED_KEYS: frozenset[str] = frozenset({"assign", "units", "groups", "via", "empty", "sources"})
 #: What a `route` rule names; `demand` and `capacity` are optional, both or neither.
 ROUTE_KEYS: frozenset[str] = frozenset({"visit", "vehicles", "stops", "depot", "depot_of", "depot_by", "demand", "capacity",
                                         # Time windows (queue R15c): a travel-time parameter and stop attributes.

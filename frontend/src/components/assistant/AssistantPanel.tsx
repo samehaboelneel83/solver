@@ -6,7 +6,7 @@ import {
   PencilLine, RotateCcw, Send, Sparkles, Square, Workflow, X, XCircle,
 } from "lucide-react";
 import {
-  ATTACHABLE, streamChat, uploadAgentFile, useAgentStatus,
+  ATTACHABLE, getTurn, handOver, stopTurn, streamChat, uploadAgentFile, useAgentStatus,
   type AgentContext, type AgentEvent, type AgentMessage, type AgentMode, type AttachedFile, type PlanCounts,
 } from "../../api/agent";
 import { apiFetch } from "../../api/client";
@@ -32,7 +32,8 @@ type Item =
   | { kind: "plan"; summary: string; counts: PlanCounts; spec: Record<string, unknown>; status: "waiting" | "approved" | "changes" }
   | { kind: "confirm"; calls: { method?: string; path?: string; body?: unknown }[]; status: "waiting" | "allowed" | "denied" }
   | { kind: "built"; domainId: number; problemId: number; scenarioId: number; versionId: number; domainCreated: boolean }
-  | { kind: "error"; text: string };
+  | { kind: "error"; text: string }
+  | { kind: "handover"; used?: boolean };
 
 type Conversation = {
   items: Item[];
@@ -117,9 +118,12 @@ function AssistantWorkStatus({ phase, startedAt, lastPingAt }: {
   );
 }
 
+// What the panel shows is kept in localStorage, so closing the tab or the browser pane mid-turn does not lose
+// it: on return the panel finds its conversation id and picks the running turn up again (the field tests,
+// October 2026: a closed pane came back empty while the server finished the turn). Signing out clears it.
 function load(mode: AgentMode): Conversation {
   try {
-    const raw = sessionStorage.getItem(STORAGE(mode));
+    const raw = localStorage.getItem(STORAGE(mode)) ?? sessionStorage.getItem(STORAGE(mode));
     return raw ? (JSON.parse(raw) as Conversation) : EMPTY;
   } catch {
     return EMPTY;
@@ -128,7 +132,8 @@ function load(mode: AgentMode): Conversation {
 
 function save(mode: AgentMode, conversation: Conversation) {
   try {
-    sessionStorage.setItem(STORAGE(mode), JSON.stringify(conversation));
+    localStorage.setItem(STORAGE(mode), JSON.stringify(conversation));
+    sessionStorage.removeItem(STORAGE(mode));
   } catch {
     // too large or unavailable: the conversation lasts as long as the page
   }
@@ -212,6 +217,9 @@ export default function AssistantPanel({ open, onClose, context }: { open: boole
   const [dragging, setDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // A turn the server carried on with while this page was away (or reloaded): followed by polling.
+  const resumingRef = useRef(false);
+  const stoppedRef = useRef(false);
   const lastPingAt = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -242,6 +250,65 @@ export default function AssistantPanel({ open, onClose, context }: { open: boole
     if (open) inputRef.current?.focus();
   }, [open, mode]);
 
+  // Back on the page during a turn (the blend test: a page change lost a turn minutes into writing the model):
+  // the server ran on with it; its events are shown again from the turn's start, and followed until it ends.
+  useEffect(() => {
+    const target = mode;
+    const c = conversations[target];
+    const tail = c.items[c.items.length - 1];
+    if (!open || busy || abortRef.current || resumingRef.current || !c.id || !tail || (tail.kind !== "user" && tail.kind !== "steps")) return;
+    const id = c.id;
+    let cancelled = false;
+    resumingRef.current = true;
+    stoppedRef.current = false;
+    (async () => {
+      let first = await getTurn(id, 0).catch(() => null);
+      if (cancelled || !first?.known) return;
+      update(target, (conv) => {
+        const at = conv.items.map((i) => i.kind).lastIndexOf("user");
+        return { ...conv, items: at >= 0 ? conv.items.slice(0, at + 1) : conv.items };
+      });
+      let seen = 0;
+      setBusy(first.running);
+      if (first.running) {
+        setWorkStartedAt(Date.now());
+        setWorkPhase("Still working on your last message");
+      }
+      let ended = false;
+      for (;;) {
+        for (const event of first.events) {
+          apply(target, event);
+          if (["answer", "plan", "confirm", "built", "error"].includes(event.type)) ended = true;
+        }
+        seen = first.count;
+        if (!first.running || cancelled || stoppedRef.current) break;
+        await new Promise((r) => setTimeout(r, 3000));
+        const next = await getTurn(id, seen).catch(() => null);
+        if (!next || cancelled) break;
+        lastPingAt.current = Date.now(); // the server answered: the turn is alive, not timed out
+        first = next;
+      }
+      if (!ended && !first.running && !cancelled) {
+        // Nothing to show for it (stopped, or the server restarted): say so rather than leave a silent gap.
+        update(target, (conv) => ({ ...conv, items: [...conv.items, { kind: "error",
+          text: "That message's turn ended without an answer (it was stopped, or the server restarted). Say \"continue\" to pick it up." }] }));
+      }
+    })().finally(() => {
+      resumingRef.current = false;
+      if (!cancelled) {
+        setBusy(false);
+        setThinking(false);
+        setWorkStartedAt(null);
+        setWorkPhase("");
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+    // Once per opening and conversation; apply/update are stable enough for this follow-up.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, mode, conversations[mode].id]);
+
   function chooseMode(next: AgentMode) {
     setMode(next);
     try {
@@ -256,6 +323,7 @@ export default function AssistantPanel({ open, onClose, context }: { open: boole
   }
 
   function apply(target: AgentMode, event: AgentEvent) {
+    lastPingAt.current = Date.now(); // Every received event proves the connection is alive.
     if (event.type === "thinking") {
       setThinking(true);
       setWorkPhase("Thinking through your request");
@@ -317,6 +385,9 @@ export default function AssistantPanel({ open, onClose, context }: { open: boole
           break;
         case "error":
           items.push({ kind: "error", text: event.text });
+          break;
+        case "handover":
+          items.push({ kind: "handover" });
           break;
         case "file": {
           // A map file placed in the coordinate system named, or a file the workbench (run_python) wrote:
@@ -392,12 +463,41 @@ export default function AssistantPanel({ open, onClose, context }: { open: boole
     }
   }
 
+  // "Continue in Describe a problem": the Ask conversation's message and files, carried over and sent there.
+  const handoverText = useRef<string | null>(null);
+  async function continueInDescribe() {
+    const from = conversations.assistant.id;
+    if (!from) return;
+    try {
+      const moved = await handOver(from);
+      update("assistant", (c) => ({ ...c, items: c.items.map((i) => (i.kind === "handover" ? { ...i, used: true } : i)) }));
+      update("model", () => ({ ...EMPTY, id: moved.conversation_id, files: moved.files, stored: { messages: 0, tokens: 0 } }));
+      handoverText.current = moved.text || "Please help me model and solve this problem.";
+      chooseMode("model");
+    } catch (error) {
+      update("assistant", (c) => ({ ...c, items: [...c.items, { kind: "error", text: (error as Error).message || "Could not carry it over." }] }));
+    }
+  }
+  useEffect(() => {
+    if (mode === "model" && handoverText.current && !busy) {
+      const text = handoverText.current;
+      handoverText.current = null;
+      void send({ text });
+    }
+    // Sent once, when the Describe conversation it was carried into is in place.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, conversations.model.id, busy]);
+
   function stop() {
-    if (!abortRef.current) return;
-    abortRef.current.abort();
+    const id = conversations[mode].id;
+    // Leaving the page no longer stops a turn (it runs on, and is shown again on return): Stop says so.
+    if (id) void stopTurn(id).catch(() => undefined);
+    stoppedRef.current = true;
+    if (!abortRef.current && !resumingRef.current) return;
+    abortRef.current?.abort();
     update(mode, (c) => ({
       ...c,
-      items: [...c.items, { kind: "error", text: "Stopped waiting in this browser. Work already sent to the server may still finish." }],
+      items: [...c.items, { kind: "error", text: "Stop requested. The assistant will start no further actions after the server receives it. An API call or solver run already submitted may still finish." }],
     }));
   }
 
@@ -546,7 +646,7 @@ export default function AssistantPanel({ open, onClose, context }: { open: boole
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3" aria-live="polite">
         {conversation.items.length === 0 && <Welcome mode={mode} onPick={(text) => { setDraft(text); inputRef.current?.focus(); }} />}
         {conversation.items.map((item, n) => (
-          <ItemView key={n} item={item} live={item === waiting && !busy} onDecide={decide} />
+          <ItemView key={n} item={item} live={item === waiting && !busy} onDecide={decide} onHandover={continueInDescribe} />
         ))}
         {busy && workStartedAt !== null && <AssistantWorkStatus phase={workPhase || (thinking ? "Working…" : "Waiting for the assistant")}
           startedAt={workStartedAt} lastPingAt={lastPingAt} />}
@@ -653,8 +753,19 @@ function Welcome({ mode, onPick }: { mode: AgentMode; onPick: (text: string) => 
   );
 }
 
-function ItemView({ item, live, onDecide }: { item: Item; live: boolean; onDecide: (allow: boolean) => void }) {
+function ItemView({ item, live, onDecide, onHandover }: {
+  item: Item; live: boolean; onDecide: (allow: boolean) => void; onHandover?: () => void;
+}) {
   switch (item.kind) {
+    case "handover":
+      return item.used ? (
+        <p className="text-xs text-slate-500">Carried over to Describe a problem.</p>
+      ) : (
+        <button type="button" onClick={onHandover}
+          className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
+          <PencilLine className="h-4 w-4" aria-hidden /> Continue in Describe a problem
+        </button>
+      );
     case "user":
       return <p className="ms-8 whitespace-pre-wrap rounded-lg bg-blue-600 px-3 py-2 text-sm text-white">{item.text}</p>;
     case "answer":

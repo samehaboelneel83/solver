@@ -689,6 +689,8 @@ export type RunRequest = {
   alternatives_within?: number;
   /** Each plan differs from every other in at least this many decisions (1-50). */
   alternatives_min_changes?: number;
+  /** Plan for this many sampled futures of the numbers declared uncertain (0-500), for this run only. */
+  futures?: number;
 };
 
 /** One next-best plan: its goal, how many yes-or-no decisions differ from the best, and its run. */

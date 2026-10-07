@@ -656,10 +656,20 @@ class _ShapeChecker:
                     f"{name!r} is binary, so its bounds are 0 and 1 and it carries none",
                 )
             if not _is_number(declaration[key]):
+                index = declaration.get("index") or []
+                first = "i"
+                cell = f"{name}[{', '.join(['i', *[f'k{n}' for n in range(1, len(index))]])}]" if index else name
+                over = f"for every {first} ∈ {index[0]}: " if index else ""
                 return Refusal(
                     "variable_bounds_invalid",
                     [*at, key],
-                    f"{name!r}'s {key} bound must be a number",
+                    f"{name!r}'s {key} bound must be one number for every cell (here "
+                    f"{json.dumps(declaration[key])}); a limit that differs by record is a rule instead: "
+                    f"{over}{cell} {'<=' if key == 'upper' else '>='} <that record's field or parameter>, "
+                    f"e.g. {{\"forall\": [{{\"index\": \"i\", \"set\": \"{index[0] if index else 'set'}\"}}], "
+                    f"\"left\": {{\"var\": \"{name}\", \"index\": [\"i\"]}}, \"relation\": "
+                    f"\"{'<=' if key == 'upper' else '>='}\", \"right\": {{\"attr\": {{\"of\": \"i\", "
+                    f"\"name\": \"<field>\"}}}}}}",
                 )
             if declaration["domain"] == "integer" and not _is_int(declaration[key]):
                 return Refusal(
@@ -891,18 +901,30 @@ class _ShapeChecker:
                 loc,
                 "a connected rule names assign, units, groups and via, and optionally empty",
             )
-        odd = next((key for key in ("assign", "units", "groups", "via") if key not in body), None) or next(
+        required = ("assign", "units", "via") if "sources" in body else ("assign", "units", "groups", "via")
+        odd = next((key for key in required if key not in body), None) or next(
             (key for key in body if key not in CONNECTED_KEYS), None
         )
         if odd is None and body.get("empty", "forbidden") not in ("forbidden", "allowed"):
             odd = "empty"
+        if odd is None and "sources" in body and not (_is_name(body["sources"]) or (
+                isinstance(body["sources"], list) and body["sources"])):
+            odd = "sources"
+        if odd is None and isinstance(body.get("sources"), list):
+            units_set = body["units"].get("set") if isinstance(body.get("units"), dict) else None
+            problem = self._check_filters(body["sources"], [*loc, "sources"], units_set, {})
+            if problem:
+                return problem
         if odd is not None:
-            what = "missing" if odd not in body else "forbidden or allowed" if odd == "empty" else "not one of them"
+            what = ("missing" if odd not in body else "forbidden or allowed" if odd == "empty"
+                    else "a field name or a where list" if odd == "sources" else "not one of them")
             return Refusal(
                 "connected_malformed",
                 [*loc, odd],
                 "a connected rule names assign, units, groups and via, and optionally empty "
-                f"(forbidden or allowed); {odd!r} is {what}",
+                "(forbidden or allowed) and sources (a 0/1 field of the units, or a where list picking them such as "
+                '[{"attr": "kind", "op": "=", "value": "exchange"}]; then groups is optional); '
+                f"{odd!r} is {what}",
             )
         for key in ("severity", "weight", "when"):
             if key in constraint and (key != "severity" or constraint[key] != "hard"):
@@ -916,10 +938,10 @@ class _ShapeChecker:
             return Refusal(
                 "constraint_severity_unsupported",
                 [*at, "severity"],
-                f"{json.dumps(constraint.get('severity'))} is not a severity; a connected rule is hard",
+                f"{json.dumps(constraint.get('severity'))} is not a severity; a connected rule is hard: write \"severity\": \"hard\"",
             )
         scope: dict[str, str] = {}
-        for part in ("units", "groups"):
+        for part in ("units", "groups") if "groups" in body else ("units",):
             inner = self.check_bindings([body[part]], [*loc, part], scope)
             if isinstance(inner, Refusal):
                 # One binding, addressed as the body's own key, not as a list.
@@ -932,13 +954,21 @@ class _ShapeChecker:
                 [*loc, "assign"],
                 'a connected rule names its variable as {"var": "assign", "index": [unit, group]}',
             )
-        expected = [body["units"]["index"], body["groups"]["index"]]
-        if assign["index"] != expected:
+        if "groups" in body:
+            expected = [body["units"]["index"], body["groups"]["index"]]
+            if assign["index"] != expected:
+                return Refusal(
+                    "connected_index_mismatch",
+                    [*loc, "assign", "index"],
+                    f"{assign['var']!r} is read as [{', '.join(expected)}]: the units' index, then the "
+                    "groups' index",
+                )
+        elif assign["index"] != [body["units"]["index"]]:
             return Refusal(
                 "connected_index_mismatch",
                 [*loc, "assign", "index"],
-                f"{assign['var']!r} is read as [{', '.join(expected)}]: the units' index, then the "
-                "groups' index",
+                f"{assign['var']!r} is read as [{body['units']['index']}]: one network with no groups is indexed "
+                "by its units alone",
             )
         problem = self._reference(assign, [*loc, "assign"], scope, "var", self.variables)
         if problem:
@@ -1037,7 +1067,7 @@ class _ShapeChecker:
             return Refusal(
                 "constraint_severity_unsupported",
                 [*at, "severity"],
-                f"{json.dumps(constraint.get('severity'))} is not a severity; a route rule is hard",
+                f"{json.dumps(constraint.get('severity'))} is not a severity; a route rule is hard: write \"severity\": \"hard\"",
             )
         scope: dict[str, str] = {}
         for part in ("vehicles", "stops"):
@@ -1696,11 +1726,15 @@ class _ShapeChecker:
 
     def _term_sum(self, term, loc, scope, depth):
         if "over" not in term:
+            inner = term.get("sum")
+            where = ("; your over is INSIDE the sum's body -- move it beside \"sum\""
+                     if isinstance(inner, dict) and "over" in inner else "")
             return Refusal(
                 "sum_malformed",
                 [*loc, "over"],
-                "a sum ranges over something; without an over it is its own body under a "
-                "misleading name",
+                "a sum needs \"over\" BESIDE \"sum\" (not inside it), naming what it ranges over"
+                + where + ': {"sum": {"mul": [{"attr": {"of": "i", "name": "protein_pct"}}, '
+                '{"var": "amount", "index": ["i"]}]}, "over": [{"index": "i", "set": "ingredient"}]}',
             )
         result = self.check_bindings(term["over"], [*loc, "over"], scope)
         if isinstance(result, Refusal):
@@ -2296,11 +2330,35 @@ class _DomainChecker:
         """The units and groups as bindings, and `via` joining the units'
         type to itself: one piece is a walk from unit to unit."""
         scope: dict[str, str] = {}
-        for part in ("units", "groups"):
+        for part in ("units", "groups") if "groups" in body else ("units",):
             problem = self._bindings([body[part]], [*loc, part], scope)
             if problem:
                 return Refusal(problem.code, [*loc, part, *problem.loc[len(loc) + 2 :]], problem.message)
         units = body["units"]["set"]
+        if isinstance(body.get("sources"), list):
+            # Picked by fixed filters on the units' own fields (the fibre test, October 2026: the exchange
+            # was marked by kind = "exchange", not by a 0/1 field).
+            fixed = all(isinstance(f, dict) and "index" not in f and not isinstance(f.get("value"), dict)
+                        and all(isinstance(g, dict) and "index" not in g and not isinstance(g.get("value"), dict)
+                                for g in f.get("any") or [])
+                        for f in body["sources"])
+            problem = self._domain_filters(
+                body["sources"], [*loc, "sources"], units, lambda attr: self.world.attributes.get((units, attr))
+            ) if fixed else Refusal(
+                "connected_sources_invalid", [*loc, "sources"],
+                "sources picks the units by their own fields only (no index, no parameter)")
+            if problem:
+                return Refusal("connected_sources_invalid", problem.loc, problem.message)
+        elif "sources" in body:
+            declared = self.world.attributes.get((units, body["sources"]))
+            if declared is None or declared.get("data_type") not in ("boolean", "integer", "number"):
+                return Refusal(
+                    "connected_sources_invalid",
+                    [*loc, "sources"],
+                    f"{body['sources']!r} must be a yes/no or 0/1 field of {units} (where the network starts: a "
+                    f"door, a supply, a depot); {units} "
+                    + ("has no such field" if declared is None else f"has it as {declared.get('data_type')}"),
+                )
         ends = self.world.relationship_ends[body["via"]]
         if not (self.world.is_a(units, ends[0]) and self.world.is_a(units, ends[1])):
             return Refusal(

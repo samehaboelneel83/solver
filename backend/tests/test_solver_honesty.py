@@ -401,3 +401,9 @@ def test_a_run_stopped_with_nothing_in_hand_is_cancelled(db, monkeypatch):
 
     assert row["status"] == "cancelled"
     assert row["solutions"] == 0
+
+
+def test_a_gap_below_the_stored_six_places_is_rounding_even_for_a_small_goal():
+    """Evaluation battery: a variance of 0.00146265 is stored as 0.001463; the proven QP was called feasible."""
+    assert gap_of(0.001463, 0.0014626534700637153) == 0.0
+    assert gap_of(0.0015, 0.0014626534700637153) > 0.02

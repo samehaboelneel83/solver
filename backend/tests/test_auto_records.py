@@ -164,3 +164,32 @@ def test_the_assistant_may_preview_the_mapping_in_problem_description_mode(domai
     # Applying is data preparation, allowed since the camp-bed evaluation (DATA FIRST); an empty list is refused
     # by the endpoint itself, not by the mode.
     assert not results[1]["preview"].startswith("Refused") and '"status": 422' in results[1]["preview"]
+
+
+def test_a_short_mapping_is_completed_from_the_proposal_and_a_bad_one_is_a_422_not_a_500(domain, db):
+    """The camp test (October 2026): the Assistant sent {"layer", "type", "key", "fields": {"name": "feature"},
+    "geometry": "geometry"}; the endpoint failed with a 500 twice and nothing was made from the drawing."""
+    client, headers, domain_id, dataset_id = domain
+    short = {"dataset_id": dataset_id, "layer": "Parcels", "type": "parcel", "key": "parcel_no",
+             "fields": {"zone_use": "zoning"}, "geometry": "geometry"}
+    done = client.post(f"/api/v1/gis/domains/{domain_id}/records", json={"mappings": [short]}, headers=headers)
+    assert done.status_code == 201, done.text
+    assert done.json()["results"][0]["made"] == 2
+    rows = db.execute(text("SELECT e.key, e.attrs FROM entity e JOIN entity_type t ON t.id = e.entity_type_id"
+                           " WHERE t.domain_id = :d AND t.name = 'parcel' ORDER BY e.key"), {"d": domain_id}).all()
+    assert [r[0] for r in rows] == ["P-1", "P-2"] and rows[0][1]["zone_use"] == "farm"
+    # Just the layer and the kind: everything else from the proposal.
+    bare = client.post(f"/api/v1/gis/domains/{domain_id}/records", headers=headers, json={"mappings": [
+        {"dataset_id": dataset_id, "layer": "Hospitals", "type": "hospital"}]})
+    assert bare.status_code == 201, bare.text
+    for wrong, says in (({"layer": "Parcels", "type": "parcel"}, '"dataset_id" is missing'),
+                        ({"dataset_id": dataset_id, "layer": "Parcels", "type": "parcel", "fields": ["zoning"]},
+                         '"fields" is neither'),
+                        ({"dataset_id": dataset_id, "layer": "Parcels", "type": "parcel", "fields": {"x": "nope"}},
+                         "has no column 'nope'"),
+                        ({"dataset_id": dataset_id, "layer": "Nowhere", "type": "parcel"}, 'no layer "Nowhere"')):
+        refused = client.post(f"/api/v1/gis/domains/{domain_id}/records", json={"mappings": [wrong]}, headers=headers)
+        assert refused.status_code == 422, (wrong, refused.text)
+        assert says in refused.json()["detail"]["faults"][0], refused.text
+    assert client.post(f"/api/v1/gis/domains/{domain_id}/records", json={"mappings": ["Parcels"]},
+                       headers=headers).status_code == 422

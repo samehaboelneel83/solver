@@ -30,6 +30,7 @@ export type AgentEvent =
   | { type: "built"; domain_id: number; problem_id: number; model_version_id: number; scenario_id: number; domain_created: boolean; created: PlanCounts }
   | { type: "answer"; text: string }
   | { type: "error"; text: string }
+  | { type: "handover"; mode: AgentMode; text: string }
   | { type: "file"; file: AttachedFile }
   | { type: "state"; messages: AgentMessage[]; wrote: boolean; stored?: { messages: number; tokens: number } };
 
@@ -148,4 +149,21 @@ export async function streamChat(body: ChatBody, onEvent: (event: AgentEvent) =>
       // ignored, as above
     }
   }
+}
+
+/** A turn the server ran on while this page was away (or is still running): its events from `after` on. */
+export type TurnState = { running: boolean; known: boolean; events: AgentEvent[]; count: number };
+
+export function getTurn(conversationId: string, after = 0): Promise<TurnState> {
+  return apiFetch<TurnState>(`/api/v1/agent/conversations/${conversationId}/turn?after=${after}`);
+}
+
+/** Stop: the server starts no further action in this conversation's running turn. */
+export function stopTurn(conversationId: string): Promise<unknown> {
+  return apiFetch(`/api/v1/agent/conversations/${conversationId}/stop`, { method: "POST" });
+}
+
+/** An Ask conversation's problem carried to Describe a problem: a new conversation with the same files. */
+export function handOver(conversationId: string): Promise<{ conversation_id: string; text: string; files: AttachedFile[] }> {
+  return apiFetch(`/api/v1/agent/conversations/${conversationId}/handover`, { method: "POST" });
 }

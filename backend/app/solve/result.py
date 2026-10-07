@@ -33,6 +33,7 @@ class Solution:
     # binding rule instance's limit with its range, and `costs`, each goal coefficient's range.
     # None anywhere else: ranging is not defined for a MIP, and no relaxation stands in for it.
     ranges: dict | None = None
+    execution: dict | None = None
 
     def chosen(self, variable: str) -> list[tuple[str, ...]]:
         """The index tuples a binary variable took as 1 -- the roster, in the

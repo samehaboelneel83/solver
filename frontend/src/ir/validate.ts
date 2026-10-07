@@ -609,7 +609,8 @@ class ShapeChecker {
         return refusal(
           "variable_bounds_invalid",
           [...at, key],
-          `'${name}''s ${key} bound must be a number`
+          `'${name}''s ${key} bound must be one number for every cell; a limit that differs by record is a rule ` +
+            `instead: for every i: ${name}[i] ${key === "upper" ? "<=" : ">="} that record's field or parameter`
         );
       }
       if (declaration.domain === "integer" && !isInt(declaration[key])) {
@@ -807,16 +808,22 @@ class ShapeChecker {
         "a connected rule names assign, units, groups and via, and optionally empty"
       );
     }
+    const required = "sources" in body ? ["assign", "units", "via"] : ["assign", "units", "groups", "via"];
     let odd: string | undefined =
-      ["assign", "units", "groups", "via"].find((key) => !(key in body)) ??
+      required.find((key) => !(key in body)) ??
       Object.keys(body).find((key) => !CONNECTED_KEYS.includes(key));
     if (odd === undefined && "empty" in body && body.empty !== "forbidden" && body.empty !== "allowed") odd = "empty";
+    if (odd === undefined && "sources" in body && !isName(body.sources)
+      && !(Array.isArray(body.sources) && body.sources.length > 0)) odd = "sources";
     if (odd !== undefined) {
-      const what = !(odd in body) ? "missing" : odd === "empty" ? "forbidden or allowed" : "not one of them";
+      const what = !(odd in body) ? "missing" : odd === "empty" ? "forbidden or allowed"
+        : odd === "sources" ? "a field name or a where list" : "not one of them";
       return refusal(
         "connected_malformed",
         [...loc, odd],
-        `a connected rule names assign, units, groups and via, and optionally empty (forbidden or allowed); '${odd}' is ${what}`
+        "a connected rule names assign, units, groups and via, and optionally empty (forbidden or allowed) and " +
+          "sources (a 0/1 field of the units, or a where list picking them such as " +
+          `[{"attr": "kind", "op": "=", "value": "exchange"}]; then groups is optional); '${odd}' is ${what}`
       );
     }
     for (const key of ["severity", "weight", "when"]) {
@@ -832,11 +839,11 @@ class ShapeChecker {
       return refusal(
         "constraint_severity_unsupported",
         [...at, "severity"],
-        `${show(constraint.severity)} is not a severity; a connected rule is hard`
+        `${show(constraint.severity)} is not a severity; a connected rule is hard: write "severity": "hard"`
       );
     }
     let scope = new Map<string, string>();
-    for (const part of ["units", "groups"] as const) {
+    for (const part of ("groups" in body ? ["units", "groups"] : ["units"]) as ("units" | "groups")[]) {
       const inner = this.checkBindings([body[part]], [...loc, part], scope);
       if ("code" in inner) {
         // One binding, addressed as the body's own key, not as a list.
@@ -853,13 +860,21 @@ class ShapeChecker {
         'a connected rule names its variable as {"var": "assign", "index": [unit, group]}'
       );
     }
-    const expected = [(body.units as Json).index, (body.groups as Json).index];
     const index = assign.index;
-    if (!Array.isArray(index) || index.length !== 2 || index[0] !== expected[0] || index[1] !== expected[1]) {
+    if ("groups" in body) {
+      const expected = [(body.units as Json).index, (body.groups as Json).index];
+      if (!Array.isArray(index) || index.length !== 2 || index[0] !== expected[0] || index[1] !== expected[1]) {
+        return refusal(
+          "connected_index_mismatch",
+          [...loc, "assign", "index"],
+          `'${String(assign.var)}' is read as [${expected.join(", ")}]: the units' index, then the groups' index`
+        );
+      }
+    } else if (!Array.isArray(index) || index.length !== 1 || index[0] !== (body.units as Json).index) {
       return refusal(
         "connected_index_mismatch",
         [...loc, "assign", "index"],
-        `'${String(assign.var)}' is read as [${expected.join(", ")}]: the units' index, then the groups' index`
+        `'${String(assign.var)}' is read as [${String((body.units as Json).index)}]: one network with no groups is indexed by its units alone`
       );
     }
     const reference = this.reference(assign, [...loc, "assign"], scope, "var", this.variables);
@@ -968,7 +983,7 @@ class ShapeChecker {
       return refusal(
         "constraint_severity_unsupported",
         [...at, "severity"],
-        `${show(constraint.severity)} is not a severity; a route rule is hard`
+        `${show(constraint.severity)} is not a severity; a route rule is hard: write "severity": "hard"`
       );
     }
     let scope = new Map<string, string>();
@@ -1802,10 +1817,15 @@ class ShapeChecker {
     depth: number
   ): IrRefusal | null {
     if (!("over" in term)) {
+      const inner = term.sum;
+      const inside = inner !== null && typeof inner === "object" && !Array.isArray(inner) && "over" in (inner as object);
       return refusal(
         "sum_malformed",
         [...loc, "over"],
-        "a sum ranges over something; without an over it is its own body under a misleading name"
+        'a sum needs "over" BESIDE "sum" (not inside it), naming what it ranges over' +
+          (inside ? '; your over is INSIDE the sum\'s body -- move it beside "sum"' : "") +
+          ': {"sum": {"mul": [{"attr": {"of": "i", "name": "protein_pct"}}, {"var": "amount", "index": ["i"]}]}, ' +
+          '"over": [{"index": "i", "set": "ingredient"}]}'
       );
     }
     const bound = this.checkBindings(term.over, [...loc, "over"], scope);

@@ -126,7 +126,7 @@ def make(files: list[dict[str, Any]], folder: str, *, area_layers: list[str], it
          file: str | None = None, blocked_layers: list[str] | None = None, label_layer: str | None = None,
          aisle: float = 0.0, aisle_side: str = "long", step: float | None = None, blocked_buffer: float = 0.0,
          max_file_rows: int = 200_000, area_indices: list[int] | None = None,
-         prefix: str = "layout") -> dict[str, Any]:
+         prefix: str = "layout", access_layers: list[str] | None = None) -> dict[str, Any]:
     """Write `<prefix>_items.csv`, `_cells.csv`, `_occupies.csv` (and `_keeps_free.csv`) into `folder`, and
     return the counts, an upper bound and the plan's seed and model."""
     import shapely
@@ -304,21 +304,54 @@ def make(files: list[dict[str, Any]], folder: str, *, area_layers: list[str], it
                         c = (si + a) * ny + (sj + b)
                         used_cells.add(c)
                         aisle_rows.append((name, c))
+    access: dict[str, Any] | None = None
+    entrance: set[int] = set()
+    next_rows: list[tuple[int, int]] = []
+    if access_layers:
+        # Access (the camp field test, October 2026): every chosen item's aisle must join a way to one of these
+        # features (doors, exits, gates) through free cells. Every free cell can be part of a way, not only the
+        # ones items use; a cell at an access feature (within a cell and a quarter of it) is where ways start.
+        features = [shape for shape, _ in _shapes(files, file, access_layers)]
+        if not features:
+            raise LayoutRefused(f"no features on {access_layers} to give access from")
+        free_cells = [int(c) for c in np.flatnonzero(zone_of >= 0)]
+        used_cells.update(free_cells)
+        centres = shapely.points(x0 + (np.array(free_cells) // ny + 0.5) * s, y0 + (np.array(free_cells) % ny + 0.5) * s)
+        near = np.zeros(len(free_cells), dtype=bool)
+        for feature in features:
+            near |= shapely.dwithin(feature, centres, 1.25 * s)
+        entrance = {c for c, hit in zip(free_cells, near.tolist()) if hit}
+        free_set = set(free_cells)
+        for c in free_cells:
+            for d in (ny, 1):  # the next cell east and north, in the same area
+                e = c + d
+                if e in free_set and (d == ny or e % ny) and zone_of[e] == zone_of[c]:
+                    next_rows.append((c, e))
+        reached_zones = {zones[int(zone_of[c])] for c in entrance}
+        without = sorted({zones[int(zone_of[c])] for c in free_cells} - reached_zones)
+        access = {"layers": list(access_layers), "entrance_cells": len(entrance), "links": len(next_rows),
+                  "areas_without_access": without}
     if len(used_cells) > max_file_rows:
         raise LayoutRefused(f"this layout needs {len(used_cells):,} used cells, more than the {max_file_rows:,} "
                             "rows the assistant can load without truncation; use a coarser grid or one area at a time")
     cell_rows = [[f"k{c}", round(x0 + (c // ny + 0.5) * s, 4), round(y0 + (c % ny + 0.5) * s, 4), zones[int(zone_of[c])]]
+                 + ([1 if c in entrance else 0] if access is not None else [])
                  for c in sorted(used_cells)]
     names = {"items": f"{prefix}_items.csv", "cells": f"{prefix}_cells.csv", "occupies": f"{prefix}_occupies.csv",
              "keeps_free": f"{prefix}_keeps_free.csv"}
     _write(folder, names["items"], ["item", "kind", "rot", "aisle_side", "x_m", "y_m", "min_x_m", "min_y_m",
                                     "width_m", "height_m", "zone", "value"], item_rows)
-    _write(folder, names["cells"], ["cell", "x_m", "y_m", "zone"], cell_rows)
+    _write(folder, names["cells"], ["cell", "x_m", "y_m", "zone"] + (["entrance"] if access is not None else []), cell_rows)
+    if access is not None:
+        names["next_to"] = f"{prefix}_next_to.csv"
+        _write(folder, names["next_to"], ["cell", "cell2"], [(f"k{a}", f"k{b}") for a, b in next_rows])
     _write(folder, names["occupies"], ["item", "cell"], [(a, f"k{c}") for a, c in occ_rows])
     written = [names["items"], names["cells"], names["occupies"]]
     if aisle_rows:
         _write(folder, names["keeps_free"], ["item", "cell"], [(a, f"k{c}") for a, c in aisle_rows])
         written.append(names["keeps_free"])
+    if access is not None:
+        written.append(names["next_to"])
 
     free_area = float(free_all.area)
     biggest = max(kinds, key=lambda kd: kd["length"] * kd["width"])
@@ -328,7 +361,7 @@ def make(files: list[dict[str, Any]], folder: str, *, area_layers: list[str], it
     # Each item needs its own area and half an aisle along one side (two rows can share one aisle).
     per_item = smallest["length"] * smallest["width"] + side_len * aisle / 2
     bound = int(free_area // per_item)
-    spec = _spec(kinds, names, bool(aisle_rows), prefix)
+    spec = _spec(kinds, names, bool(aisle_rows), prefix, access is not None)
     return {
         "files": written,
         "grid_step_m": s,
@@ -343,9 +376,14 @@ def make(files: list[dict[str, Any]], folder: str, *, area_layers: list[str], it
                         f"{'side' if aisle_side != 'none' else 'nothing'}) = {per_item:.4g} m2 each"},
         "largest_item_m": [biggest["length"], biggest["width"]],
         "spec": spec,
-        "not_modelled": ("Each chosen item keeps an aisle free on one side, so none is boxed in by its "
+        "access": access,
+        "not_modelled": ("Nothing: every chosen item's aisle joins a way of free cells to "
+                         f"{', '.join(access_layers or [])}." + (
+                             f" Areas with none of those features ({', '.join(access['areas_without_access'])}) "
+                             "can take no item." if access and access["areas_without_access"] else ""))
+        if access is not None else ("Each chosen item keeps an aisle free on one side, so none is boxed in by its "
                          "neighbours; whether every aisle joins up with a door across the whole drawing is not "
-                         "a rule of this model (check it on the map or the DXF of the answer).")
+                         "a rule of this model (give access_layers to make it one).")
         if aisle_rows else "No aisle was asked for: items may be packed with no way between them.",
     }
 
@@ -368,7 +406,7 @@ def _write(folder: str, name: str, header: list[str], rows) -> None:
         writer.writerows(rows)
 
 
-def _spec(kinds, names, aisles: bool, prefix: str) -> dict[str, Any]:
+def _spec(kinds, names, aisles: bool, prefix: str, access: bool = False) -> dict[str, Any]:
     """The plan's seed and model over the files written: ready for check_spec, with domain and names to add."""
     item, cell = "item", "cell"
     seed = {
@@ -407,10 +445,32 @@ def _spec(kinds, names, aisles: bool, prefix: str) -> dict[str, Any]:
                       "forall": [i, {"index": "k", "set": cell, "via": {"rel": "keeps_free", "from": "i"}}],
                       "left": {"add": [{"var": "place", "index": ["i"]}, covering]},
                       "relation": "<=", "right": {"const": 1}, "severity": "hard"})
+    variables: dict[str, Any] = {"place": {"index": [item], "domain": "binary"}}
+    if access:
+        # A cell is a way (open) or covered by an item, not both; a chosen item's aisle is way; every way is
+        # joined to an entrance cell along next_to (`connected` with `sources`).
+        seed["entity_types"][1]["attributes"].append({"name": "entrance", "data_type": "integer"})
+        seed["entities_from_file"][1]["attrs"]["entrance"] = "entrance"
+        seed["relationship_types"].append({"name": "next_to", "from": cell, "to": cell, "cardinality": "many_to_many"})
+        seed["relationships_from_file"].append({"file": names["next_to"], "type": "next_to",
+                                                "from": [cell, "cell"], "to": [cell, "cell2"]})
+        relationships.append("next_to")
+        variables["way"] = {"index": [cell], "domain": "binary"}
+        rules[0] = {"id": "c_one_per_cell", "note": "A cell is a way or covered by one item at most", "forall": [k],
+                    "left": {"add": [{"var": "way", "index": ["k"]}, covering]}, "relation": "<=",
+                    "right": {"const": 1}, "severity": "hard"}
+        if aisles:
+            rules[1] = {"id": "c_aisle_free", "note": "A chosen item's aisle cells are way",
+                        "forall": [i, {"index": "k", "set": cell, "via": {"rel": "keeps_free", "from": "i"}}],
+                        "left": {"var": "place", "index": ["i"]}, "relation": "<=",
+                        "right": {"var": "way", "index": ["k"]}, "severity": "hard"}
+        rules.append({"id": "c_access", "note": "Every way joins an entrance", "severity": "hard", "connected": {
+            "assign": {"var": "way", "index": ["k"]}, "units": {"index": "k", "set": cell},
+            "via": "next_to", "sources": "entrance"}})
     values = {kd["value"] for kd in kinds}
     goal = {"sum": {"var": "place", "index": ["i"]}, "over": [i]}
     ir: dict[str, Any] = {"version": 2, "sets": [item, cell], "relationships": relationships, "parameters": {},
-                          "variables": {"place": {"index": [item], "domain": "binary"}},
+                          "variables": variables,
                           "constraints": rules,
                           "objective": {"sense": "maximize", "terms": [{"id": "o_items", "weight": 1, "expression": goal}]}}
     if len(values) > 1:

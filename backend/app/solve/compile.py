@@ -300,6 +300,7 @@ class Compiled:
     sense: str
     # Kept for the result: solutions are reported in domain terms.
     var_index_sets: dict[str, list[str]]
+    gpu_options: dict = field(default_factory=dict, kw_only=True)
     # `weighted` (default) is a scalarised sum; `lex` is term order, first
     # term most important. Omit `mode` on the IR and this is `weighted`.
     objective_mode: str = "weighted"

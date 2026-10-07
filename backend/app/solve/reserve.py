@@ -110,9 +110,6 @@ def can_admit(held: list[Need], extra: Need, capacity: Capacity) -> str | None:
     check_w = max(1, int(capacity.workers * capacity.check_share))
     check_m = max(64, int(capacity.memory_mb * capacity.check_share))
     check_s = max(1, int(capacity.license_seats * capacity.check_share))
-    planner_w = capacity.workers - check_w
-    planner_m = capacity.memory_mb - check_m
-    planner_s = capacity.license_seats - check_s
 
     w_pool, m_pool, s_pool = _sum(held, extra.pool)
     if extra.pool == "check":
@@ -131,23 +128,17 @@ def can_admit(held: list[Need], extra: Need, capacity: Capacity) -> str | None:
                 f"check pool licence seats exhausted (need {extra.license_seats}, "
                 f"cap {check_s} for shadow/suite)"
             )
-    else:
-        if w_pool + extra.workers > planner_w:
-            return (
-                f"host workers exhausted (need {extra.workers}, "
-                f"planner floor {planner_w})"
-            )
-        if m_pool + extra.memory_mb > planner_m:
-            return (
-                f"host memory exhausted (need {extra.memory_mb} MB, "
-                f"planner floor {planner_m})"
-            )
-        if s_pool + extra.license_seats > planner_s:
-            return (
-                f"licence seats exhausted (need {extra.license_seats}, "
-                f"planner floor {planner_s})"
-            )
+    # Planners may borrow idle check capacity. The aggregate checks above
+    # still prevent oversubscription when a check is actually running.
     return None
+
+
+def allocated_workers(requested: int, purpose: str, capacity: Capacity) -> int:
+    """Fit a thread preference to the deployment, including already queued runs."""
+    limit = min(capacity.workers, max(1, int(os.environ.get("SOLVE_WORKER_CPUS", str(capacity.workers)))))
+    if purpose in CHECK_PURPOSES:
+        limit = min(limit, max(1, int(capacity.workers * capacity.check_share)))
+    return min(max(1, requested), limit)
 
 
 def need_from_params(params: dict[str, Any] | None, purpose: str) -> Need | None:

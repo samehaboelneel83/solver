@@ -5,6 +5,21 @@ from __future__ import annotations
 from app.solve.reserve import Capacity, Need, can_admit, host_capacity, need_for
 
 
+def test_planner_borrows_idle_check_capacity():
+    assert can_admit([], Need(32, 4096, 1, "planner"), Capacity(32, 32768, 8, .25)) is None
+
+
+def test_single_cpu_and_license_are_usable():
+    assert can_admit([], Need(1, 64, 1, "planner"), Capacity(1, 64, 1, .25)) is None
+
+
+def test_thread_preference_is_capped_to_container(monkeypatch):
+    from app.solve.reserve import allocated_workers
+    monkeypatch.setenv("SOLVE_WORKER_CPUS", "8")
+    assert allocated_workers(32, "plan", Capacity(32, 32768, 8, .25)) == 8
+    assert allocated_workers(32, "suite", Capacity(8, 32768, 8, .25)) == 2
+
+
 def test_plan_run_needs_its_workers_one_seat_and_planner_pool():
     need = need_for(purpose="plan", workers=8, memory_mb=1024, portfolio_size=1, licensed_entrants=0)
     assert need == Need(workers=8, memory_mb=1024, license_seats=1, pool="planner")

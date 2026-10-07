@@ -36,6 +36,7 @@ COMMANDS = ("/compact", "/summarize", "/summarise")
 RESETS = ("/reset", "/new", "/clear")
 NUMBERS_LINE = "[on record] numbers: "
 BUILT_LINE = "[on record] built: "
+TURNS_LINE = "[on record] user turns: "
 MAX_NUMBERS = 4000
 BRIEF_CHARS = 4000
 BRIEF_END = "(end of the first message)"
@@ -106,6 +107,18 @@ def recorded_build(message: dict[str, Any]) -> dict[str, Any] | None:
             except ValueError:
                 return {"built": True}
     return None
+
+
+def recorded_turns(message: dict[str, Any]) -> int:
+    if not is_summary(message):
+        return 0
+    for line in str(message.get("content") or "").splitlines():
+        if line.startswith(TURNS_LINE):
+            try:
+                return max(0, int(line[len(TURNS_LINE):]))
+            except ValueError:
+                return 0
+    return 0
 
 
 def _body(message: dict[str, Any]) -> str:
@@ -202,6 +215,7 @@ def compact(messages: list[dict[str, Any]], *, summarize: Callable[[str, str], s
         if brief and latest == brief:
             latest = None
     parts = [SUMMARY_MARK + " (to stay within the model's memory; the recent messages follow word for word)"]
+    parts.append(TURNS_LINE + str(len(real_users) + sum(recorded_turns(m) for m in earlier)))
     if brief:
         parts.append("The person's first message, word for word:\n" + _clip(brief, BRIEF_CHARS) + "\n" + BRIEF_END)
     parts.append(notes.strip() or "(no notes)")

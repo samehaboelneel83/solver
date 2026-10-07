@@ -133,6 +133,14 @@ def _parse(filename: str, data: bytes, max_bytes: int) -> dict[str, Any]:
 # -- for the model ------------------------------------------------------------------
 
 
+SMALL_SHEET_ROWS = 25
+# Or this few cells: a narrow sheet of 30 places (6 columns) was shown 3 rows, and the Assistant asked whether
+# "Abu Nomros" was in it (row 15; fibre test, October 2026).
+SMALL_SHEET_CELLS = 480
+# A bigger sheet's first column (its names) is listed up to this many values.
+NAMES_LISTED = 200
+
+
 def outline(files: list[dict[str, Any]]) -> str:
     """What the system prompt says about the attached files: names, columns, sizes, a taste of the rows."""
     if not files:
@@ -173,8 +181,22 @@ def outline(files: list[dict[str, Any]]) -> str:
             totals = profile(s)
             if totals:
                 lines.append(f"    totals (exact; use these, never add up yourself): {totals}")
-            for row in (s.get("rows") or [])[:3]:
+            rows = s.get("rows") or []
+            # A small sheet is shown whole (the blend test: 6 ingredients, 3 shown, and the person was asked to
+            # name the other 3); a big one, its first rows and how to read the rest.
+            width = max(len(s.get("columns") or []), 1)
+            small = len(rows) <= SMALL_SHEET_ROWS or len(rows) * width <= SMALL_SHEET_CELLS
+            shown = rows if small else rows[:3]
+            for row in shown:
                 lines.append("    " + json.dumps([_shown(v) for v in row], ensure_ascii=False, default=str))
+            total = int(s.get("total_rows") or len(rows))
+            if not small and total <= NAMES_LISTED and len(rows) >= total:
+                names = [r[0] for r in rows if r and isinstance(r[0], str)]
+                if len(names) == total and len(set(names)) == total:
+                    lines.append(f"    every {json.dumps((s.get('columns') or ['first'])[0], ensure_ascii=False)}: "
+                                 + json.dumps(names, ensure_ascii=False))
+            lines.append("    (every row is shown above)" if len(shown) >= total else
+                         f"    ...{total - len(shown)} more rows: read_file / query_file, never ask the user for them")
     return "\n".join(lines)
 
 
@@ -337,6 +359,26 @@ def _column(s: dict[str, Any], col: str, what: str = "a column") -> int:
     return columns.index(col)
 
 
+def _columns(s: dict[str, Any], col: Any, what: str = "a column") -> list[int]:
+    """One column, or several (["job", "step"]) whose values joined with "-" make a key: a step of a job, a
+    shift of a day (the job-shop field test, October 2026: operations had no single key column)."""
+    if isinstance(col, (list, tuple)) and col:
+        return [_column(s, c, what) for c in col]
+    return [_column(s, col, what)]
+
+
+def _joined(row: list[Any], at: list[int]) -> str | None:
+    parts = [row[i] for i in at]
+    if any(p in (None, "") for p in parts):
+        return None
+    if len(parts) == 1:
+        return str(parts[0])  # one column: the key as it always was
+
+    def part(v: Any) -> str:
+        return str(int(v)) if isinstance(v, float) and v.is_integer() else str(v)
+    return "-".join(part(p) for p in parts)
+
+
 def expand(seed: dict[str, Any], files: list[dict[str, Any]]) -> dict[str, Any]:
     """`entities_from_file` and `parameter_values_from_file` as plain `entities` and `parameter_values`."""
     out = {k: v for k, v in seed.items()
@@ -344,15 +386,16 @@ def expand(seed: dict[str, Any], files: list[dict[str, Any]]) -> dict[str, Any]:
     entities = list(seed.get("entities") or [])
     for spec in seed.get("entities_from_file") or []:
         s = find_sheet(files, spec.get("file"), spec.get("sheet"))
-        key_at = _column(s, spec.get("key"), f'entities_from_file for "{spec.get("type")}": "key" (the column '
-                                                       "with each record's key)")
+        key_at = _columns(s, spec.get("key"), f'entities_from_file for "{spec.get("type")}": "key" (the column '
+                                                        "with each record's key, or a list of columns)")
         label_at = _column(s, spec["label"]) if spec.get("label") else None
         attrs_at = {attr: _column(s, col) for attr, col in (spec.get("attrs") or {}).items()}
         made: dict[str, dict[str, Any]] = {}
         for row in s.get("rows") or []:
-            if row[key_at] in (None, ""):
+            key = _joined(row, key_at)
+            if key is None:
                 continue
-            entity = {"type": spec.get("type"), "key": str(row[key_at]),
+            entity = {"type": spec.get("type"), "key": key,
                       "attrs": {a: _shape_or_value(row[i]) for a, i in attrs_at.items() if row[i] is not None}}
             # A key repeated in the file (days from a sheet with a row per day and shift -- the retest):
             # one record, when the rows agree on its fields; when they disagree, the file is asked about.
@@ -377,18 +420,34 @@ def expand(seed: dict[str, Any], files: list[dict[str, Any]]) -> dict[str, Any]:
             pair = spec.get(end)
             if not (isinstance(pair, (list, tuple)) and len(pair) == 2):
                 raise FileRefused(f'relationships_from_file "{end}" must be [record type, column]')
-            ends.append((str(pair[0]), _column(s, pair[1])))
+            ends.append((str(pair[0]), _columns(s, pair[1])))
         for row in s.get("rows") or []:
-            if any(row[i] in (None, "") for _, i in ends):
+            keys = [_joined(row, at) for _, at in ends]
+            if None in keys:
                 continue
-            links.append({"type": spec.get("type"), "from": [ends[0][0], str(row[ends[0][1]])],
-                          "to": [ends[1][0], str(row[ends[1][1]])]})
+            links.append({"type": spec.get("type"), "from": [ends[0][0], keys[0]], "to": [ends[1][0], keys[1]]})
     if links:
         out["relationships"] = links
+    from app.seed import field_distances, order_links, order_links_problems
+
+    problems = order_links_problems(out)
+    if problems:
+        raise FileRefused("; ".join(problems))
+    out = order_links(out)
+    links = out.get("relationships") or []
     cells = list(seed.get("parameter_values") or [])
     for spec in seed.get("parameter_values_from_file") or []:
         s = find_sheet(files, spec.get("file"), spec.get("sheet"))
-        ends = [(str(t), _column(s, c)) for t, c in (spec.get("entities") or [])]
+        ends = [(str(t), _columns(s, c)) for t, c in (spec.get("entities") or [])]
+        if len(ends) >= 2 and len({tuple(at) for _, at in ends}) < len(ends):
+            # Two indices read from one column give each record only with itself (the evaluation's routing
+            # test: distance[place, place] from ["place","place"] twice -- 9 cells of 81, the rest 999,999).
+            raise FileRefused(
+                f'parameter_values_from_file for "{spec.get("parameter")}" reads two of its indices from the same '
+                f'column, so only each record paired with itself would get a value. Name a different column for '
+                f'each index (a file of pairs), or, for distances between records with coordinate columns, use '
+                f'"distances_from_fields": [{{"name": "{spec.get("parameter")}", "of": <type>, "x": <column>, '
+                f'"y": <column>}}] in the seed instead')
         # "value": a column, or a number for every row: a file that only LISTS pairs (days off asked for,
         # bans, skills held) is a 0/1 parameter with "value": 1 (the nurse roster field test, October 2026).
         constant = spec.get("value") if isinstance(spec.get("value"), (int, float)) \
@@ -398,13 +457,19 @@ def expand(seed: dict[str, Any], files: list[dict[str, Any]]) -> dict[str, Any]:
                                   "number for every row)")
         for row in s.get("rows") or []:
             value = constant if value_at is None else row[value_at]
-            if value is None or any(row[i] in (None, "") for _, i in ends):
+            keys = [_joined(row, at) for _, at in ends]
+            if value is None or None in keys:
                 continue
             cells.append({"parameter": spec.get("parameter"),
-                          "entities": [[t, str(row[i])] for t, i in ends], "value": value})
+                          "entities": [[t, k] for (t, _), k in zip(ends, keys)], "value": value})
     if cells:
         out["parameter_values"] = cells
-    return out
+    from app.seed import fitting_patterns, pattern_problems
+
+    problems = pattern_problems(out)
+    if problems:
+        raise FileRefused("; ".join(problems))
+    return fitting_patterns(field_distances(out))
 
 
 # -- map files: the platform's own CAD / GIS readers (app/gis), as tables of features ----------------

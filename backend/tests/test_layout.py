@@ -103,3 +103,17 @@ def test_the_assistant_tool_attaches_the_files_and_returns_the_plan(tmp_path, mo
     assert text.startswith("LAYOUT made") and '"entities_from_file"' in text
     assert {"layout_items.csv", "layout_occupies.csv", "layout_keeps_free.csv"} <= {x["name"] for x in agent.ctx.files}
     assert "make_layout" in {t["function"]["name"] for t in core.MODEL_TOOLS}
+
+
+def test_access_layers_root_every_aisle_at_an_entrance(tmp_path):
+    """The camp field test: items must reach a door through free cells. The plan carries a sourced connected rule;
+    an area with no access feature is named, not assumed to have one."""
+    files = _room(tmp_path, w=6, h=4)
+    files[0]["sheets"].append({"name": "plan__DOORS", "columns": ["feature", "kind", "shape_m"],
+                               "rows": [["DOORS_1", "line", "LINESTRING (0 1, 0 2)"]], "total_rows": 1})
+    out = layout.make(files, str(tmp_path), area_layers=["ROOMS"], access_layers=["DOORS"],
+                      items=[{"name": "desk", "length": 2, "width": 1}], aisle=1, aisle_side="any", step=1)
+    assert out["access"]["entrance_cells"] >= 1 and out["access"]["areas_without_access"] == []
+    rule = next(c for c in out["spec"]["ir"]["constraints"] if c["id"] == "c_access")
+    assert rule["connected"]["sources"] == "entrance" and "groups" not in rule["connected"]
+    assert "layout_next_to.csv" in out["files"] and out["not_modelled"].startswith("Nothing")

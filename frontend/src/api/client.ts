@@ -6,6 +6,9 @@ export function setToken(token: string | null) {
       localStorage.setItem(TOKEN_KEY, token);
     } else {
       localStorage.removeItem(TOKEN_KEY);
+      // The Assistant's conversations shown in this browser belong to who signed out.
+      localStorage.removeItem("solver_assistant_assistant");
+      localStorage.removeItem("solver_assistant_model");
     }
   } catch {
     // localStorage unavailable (private mode, etc.) — token just won't persist

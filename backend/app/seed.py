@@ -32,11 +32,12 @@ has no meaning there, and a second run would either create version 2 or
 have to compare `ir_hash` by hand. Skipping is the honest shape.
 """
 
+import json
 import logging
+import re
 from typing import Any
 
 from sqlalchemy import func, insert, select, text, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -48,7 +49,6 @@ from app.models.v1_domain import (
     Entity,
     EntityType,
     ParameterDef,
-    ParameterValue,
     Relationship,
     RelationshipType,
 )
@@ -669,6 +669,262 @@ def _seed_end(value: Any) -> tuple[str, str] | None:
     return None
 
 
+#: `"by": "#row"` in relationships_in_order: the records' own order, as their file lists them.
+ROW_ORDER = "#row"
+_MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+_DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+
+def order_key(v: Any) -> tuple:
+    """How a field orders records: numbers by value, month and weekday names by the calendar ("Jan" .. "Dec",
+    "January", "Mon" .. "Sunday", any case), and other text naturally ("P2" before "P10"). The production-plan
+    field test (October 2026): months Jan..Jun sorted as text put April first and linked "Apr" -> "Feb"."""
+    try:
+        return (0, float(v), "")
+    except (TypeError, ValueError):
+        pass
+    text = str(v).strip()
+    low = text.lower()
+    short = low if low in _MONTHS or low in _DAYS else (low[:3] if low in _CALENDAR_WORDS else None)
+    for names, rank in ((_MONTHS, 1), (_DAYS, 2)):
+        if short in names:
+            return (rank, float(names.index(short)), "")
+    parts = re.split(r"(\d+(?:\.\d+)?)", low)
+    return (3, 0.0, tuple((0, float(p), "") if i % 2 else (1, 0.0, p) for i, p in enumerate(parts) if p != ""))
+
+
+_CALENDAR_WORDS = {"january", "february", "march", "april", "june", "july", "august", "september", "october",
+                   "november", "december", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
+                   "sunday", "sept", "tues", "thur", "thurs"}
+
+
+def order_links(seed: Any) -> Any:
+    """`relationships_in_order`: links between records that follow each other -- the next step of the same job,
+    the next day, the next period -- made from their own fields instead of a file of pairs. Each entry is
+    {"type", "of": record type, "by": the ordering field, "within": a field that groups them (optional),
+    "wrap": true to link the last back to the first (a week that repeats)}. Records come from the seed's
+    entities (after their files are read); a link already given is not repeated. The job-shop field test
+    (October 2026) had steps numbered within each part and no way to say "the next step"."""
+    if not isinstance(seed, dict) or not seed.get("relationships_in_order"):
+        return seed
+    out = {k: v for k, v in seed.items() if k != "relationships_in_order"}
+    links = list(out.get("relationships") or [])
+    have = {(r.get("type"), tuple(r.get("from") or ()), tuple(r.get("to") or ())) for r in links if isinstance(r, dict)}
+
+    def number(v: Any) -> Any:
+        return order_key(v)
+
+    for spec in seed["relationships_in_order"]:
+        if not isinstance(spec, dict) or not spec.get("type") or not spec.get("of") or not spec.get("by"):
+            continue
+        groups: dict[Any, list[dict]] = {}
+        by_row = spec["by"] == ROW_ORDER
+        rows: dict[int, int] = {}
+        for e in out.get("entities") or []:
+            if not isinstance(e, dict) or e.get("type") != spec["of"]:
+                continue
+            attrs = e.get("attrs") or {}
+            if (not by_row and spec["by"] not in attrs) or (spec.get("within") and spec["within"] not in attrs):
+                continue
+            rows[id(e)] = len(rows)
+            groups.setdefault(attrs.get(spec["within"]) if spec.get("within") else None, []).append(e)
+        for members in groups.values():
+            members.sort(key=(lambda e: rows[id(e)]) if by_row else
+                         (lambda e: number((e.get("attrs") or {}).get(spec["by"]))))
+            pairs = list(zip(members, members[1:]))
+            if spec.get("wrap") and len(members) > 2:
+                pairs.append((members[-1], members[0]))
+            for a, b in pairs:
+                link = {"type": spec["type"], "from": [spec["of"], str(a["key"])], "to": [spec["of"], str(b["key"])]}
+                if (link["type"], tuple(link["from"]), tuple(link["to"])) not in have:
+                    links.append(link)
+    out["relationships"] = links
+    return out
+
+
+def order_links_problems(seed: Any) -> list[str]:
+    """Why a `relationships_in_order` entry would make no links, in words the writer can act on (the job-shop
+    retest: "within": "job" with job loaded only as the label -- three times "then has NO links")."""
+    problems: list[str] = []
+    if not isinstance(seed, dict):
+        return problems
+    for spec in seed.get("relationships_in_order") or []:
+        if not isinstance(spec, dict) or not spec.get("of") or not spec.get("by"):
+            problems.append('each relationships_in_order entry names "type", "of" (a record type) and "by" '
+                            '(the field that orders them); "within" (a grouping field) is optional')
+            continue
+        records = [e for e in seed.get("entities") or [] if isinstance(e, dict) and e.get("type") == spec["of"]]
+        if not records:
+            problems.append(f'relationships_in_order "{spec.get("type")}": no {spec["of"]} records in the seed '
+                            f'(load them with entities_from_file)')
+            continue
+        fields = sorted({k for e in records for k in (e.get("attrs") or {})})
+        for need in [*([spec["by"]] if spec["by"] != ROW_ORDER else []), *([spec["within"]] if spec.get("within") else [])]:
+            if not any(need in (e.get("attrs") or {}) for e in records):
+                problems.append(f'relationships_in_order "{spec.get("type")}": the {spec["of"]} records have no field '
+                                f'"{need}" (their fields: {", ".join(fields) or "none"}); add "{need}": "<its column>" '
+                                f'to their entities_from_file attrs (and to the entity type) -- a label is not a field')
+    return problems
+
+
+#: The most pairs one `distances_from_fields` entry writes (as `POST .../distances` does, app.api.distances).
+FIELD_DISTANCE_PAIRS = 250_000
+
+
+def field_distances(seed: Any) -> Any:
+    """`distances_from_fields`: straight-line distances between records from two of their own number fields
+    (x and y in km or metres -- a drawing's local metres, a plan's grid), as a parameter `name[of, to]`, in the
+    fields' own unit. Each entry is {"name", "of": record type, "to": record type (default: the same), "x", "y",
+    "round": decimals (optional)}. Map shapes have `POST .../distances`; plain coordinates had nothing, and a
+    routing model needed run_python to make its distance table (the evaluation, October 2026)."""
+    if not isinstance(seed, dict) or not seed.get("distances_from_fields"):
+        return seed
+    import math
+
+    out = {k: v for k, v in seed.items() if k != "distances_from_fields"}
+    params = list(out.get("parameters") or [])
+    cells = list(out.get("parameter_values") or [])
+    for spec in seed["distances_from_fields"]:
+        if not isinstance(spec, dict) or not all(spec.get(k) for k in ("name", "of", "x", "y")):
+            continue
+        to = spec.get("to") or spec["of"]
+
+        def points(kind: str) -> list[tuple[str, float, float]]:
+            found = []
+            for e in out.get("entities") or []:
+                attrs = (e.get("attrs") or {}) if isinstance(e, dict) else {}
+                if e.get("type") == kind:
+                    try:
+                        found.append((str(e["key"]), float(attrs[spec["x"]]), float(attrs[spec["y"]])))
+                    except (KeyError, TypeError, ValueError):
+                        continue
+            return found
+
+        origins, targets = points(spec["of"]), points(to)
+        if len(origins) * len(targets) > FIELD_DISTANCE_PAIRS:
+            continue
+        if not any(isinstance(p, dict) and p.get("name") == spec["name"] for p in params):
+            params.append({"name": spec["name"], "index": [spec["of"], to], "default_value": 0})
+        places = spec.get("round")
+        for a, ax, ay in origins:
+            for b, bx, by in targets:
+                d = math.hypot(ax - bx, ay - by)
+                cells.append({"parameter": spec["name"], "entities": [[spec["of"], a], [to, b]],
+                              "value": round(d, int(places)) if isinstance(places, int) else d})
+    out["parameters"] = params
+    out["parameter_values"] = cells
+    return out
+
+
+#: The most patterns one `patterns_that_fit` entry writes; past it only the full ones (nothing more fits) are kept.
+PATTERN_LIMIT = 5_000
+
+
+def _fits(spec: dict[str, Any], seed: dict[str, Any]) -> tuple[list[tuple[str, float]], float] | str:
+    """The items (key, size) and the capacity of one `patterns_that_fit` entry, or why there are none."""
+    try:
+        capacity = float(spec.get("capacity"))
+    except (TypeError, ValueError):
+        return f'patterns_that_fit "{spec.get("type")}": "capacity" must be a number (the roll, bin or truck size)'
+    if capacity <= 0:
+        return f'patterns_that_fit "{spec.get("type")}": "capacity" must be above 0'
+    records = [e for e in seed.get("entities") or [] if isinstance(e, dict) and e.get("type") == spec.get("of")]
+    if not records:
+        return (f'patterns_that_fit "{spec.get("type")}": no {spec.get("of")} records in the seed (load them with '
+                f'entities_from_file)')
+    items = []
+    for e in records:
+        try:
+            size = float((e.get("attrs") or {})[spec["size"]])
+        except (KeyError, TypeError, ValueError):
+            fields = sorted({k for r in records for k in (r.get("attrs") or {})})
+            return (f'patterns_that_fit "{spec.get("type")}": the {spec.get("of")} records have no number field '
+                    f'"{spec.get("size")}" (their fields: {", ".join(fields) or "none"}); load it as a field')
+        if size <= 0:
+            return f'patterns_that_fit "{spec.get("type")}": {e.get("key")} has size {size}; sizes must be above 0'
+        items.append((str(e["key"]), size))
+    return items, capacity
+
+
+def pattern_problems(seed: Any) -> list[str]:
+    """Why a `patterns_that_fit` entry would make nothing, in words the writer can act on."""
+    problems: list[str] = []
+    if not isinstance(seed, dict):
+        return problems
+    for spec in seed.get("patterns_that_fit") or []:
+        if not isinstance(spec, dict) or not all(spec.get(k) for k in ("type", "of", "size", "count")):
+            problems.append('each patterns_that_fit entry names "type" (the new pattern records), "of" (the item '
+                            'records), "size" (their size field), "capacity" (a number) and "count" (the parameter '
+                            'count[pattern, item] it writes)')
+            continue
+        found = _fits(spec, seed)
+        if isinstance(found, str):
+            problems.append(found)
+    return problems
+
+
+def fitting_patterns(seed: Any) -> Any:
+    """`patterns_that_fit`: every way to fill one roll, bin or truck of a given capacity with the item records
+    (as many of each as fit), as new records of `type` with fields `used` and `waste`, and a parameter
+    `count[type, of]` -- how many of each item a pattern holds. A cutting-stock or bin-packing model then decides
+    how often to use each pattern (the Gilmore-Gomory model: exact, and small for a handful of sizes). Each entry is
+    {"type", "of", "size", "capacity", "count"}. Past PATTERN_LIMIT patterns only the full ones are kept (nothing
+    more fits), which is enough when surplus is allowed. The paper-cutting field test (October 2026): the Assistant
+    set out to write the patterns by hand."""
+    if not isinstance(seed, dict) or not seed.get("patterns_that_fit"):
+        return seed
+    out = {k: v for k, v in seed.items() if k != "patterns_that_fit"}
+    types = list(out.get("entity_types") or [])
+    entities = list(out.get("entities") or [])
+    params = list(out.get("parameters") or [])
+    cells = list(out.get("parameter_values") or [])
+    for spec in seed["patterns_that_fit"]:
+        if not isinstance(spec, dict) or not all(spec.get(k) for k in ("type", "of", "size", "count")):
+            continue
+        found = _fits(spec, out)
+        if isinstance(found, str):
+            continue
+        items, capacity = found
+        items.sort(key=lambda kv: -kv[1])
+        smallest = min(size for _, size in items)
+        patterns: list[tuple[list[int], float]] = []
+        full_only = False
+
+        def walk(i: int, room: float, counts: list[int]) -> None:
+            if len(patterns) > PATTERN_LIMIT * 4:
+                return
+            if i == len(items):
+                if any(counts) and (not full_only or room < smallest - 1e-9):
+                    patterns.append((counts[:], capacity - room))
+                return
+            size = items[i][1]
+            for k in range(int((room + 1e-9) // size), -1, -1):
+                counts.append(k)
+                walk(i + 1, room - k * size, counts)
+                counts.pop()
+
+        walk(0, capacity, [])
+        if len(patterns) > PATTERN_LIMIT:
+            full_only, patterns = True, []
+            walk(0, capacity, [])
+        patterns = patterns[:PATTERN_LIMIT]
+        if not any(isinstance(t, dict) and t.get("name") == spec["type"] for t in types):
+            types.append({"name": spec["type"], "role": "other", "attributes": [
+                {"name": "used", "data_type": "number"}, {"name": "waste", "data_type": "number"}]})
+        if not any(isinstance(p, dict) and p.get("name") == spec["count"] for p in params):
+            params.append({"name": spec["count"], "index": [spec["type"], spec["of"]], "default_value": 0})
+        for counts, used in patterns:
+            key = " + ".join(f"{name} x{k}" if k > 1 else name for (name, _), k in zip(items, counts) if k)
+            entities.append({"type": spec["type"], "key": key,
+                             "attrs": {"used": round(used, 6), "waste": round(capacity - used, 6)}})
+            for (name, _), k in zip(items, counts):
+                if k:
+                    cells.append({"parameter": spec["count"], "entities": [[spec["type"], key], [spec["of"], name]],
+                                  "value": k})
+    out.update(entity_types=types, entities=entities, parameters=params, parameter_values=cells)
+    return out
+
+
 def plant_domain_seed(db: Session, domain_id: int, seed: Any, *, fresh_types: bool = False) -> None:
     """Create missing types, records and cells named by a template's seed.
 
@@ -760,6 +1016,14 @@ def plant_domain_seed(db: Session, domain_id: int, seed: Any, *, fresh_types: bo
             continue
         key = (spec["type"], spec["key"])
         if key in entities:
+            # Kept as it is, but a field it lacks is filled in: a model built again from new files (a new
+            # column, such as a layout's `entrance`) must not read nothing there. Differing values are
+            # refused before the build (model_spec.stale_records).
+            row = entities[key]
+            if row.id is not None:
+                fill = {a: v for a, v in (spec.get("attrs") or {}).items() if (row.attrs or {}).get(a) is None}
+                if fill:
+                    row.attrs = {**(row.attrs or {}), **fill}
             continue
         # Added now, written in one flush below: a flush per record took 38 s for the 20,000 candidates
         # of a layout (camp-bed retest); ids are only needed from the relationships on.
@@ -824,7 +1088,18 @@ def plant_domain_seed(db: Session, domain_id: int, seed: Any, *, fresh_types: bo
     if cells:
         # Ruling 24: Core, not db.add() -- the primary key contains an array.
         # Skip cells that already exist so a second apply does not 409.
-        db.execute(pg_insert(ParameterValue).values(cells).on_conflict_do_nothing())
+        # One JSON parameter, not a VALUES list (the general-purpose evaluation, October 2026: compiling
+        # 24,000 VALUES rows took SQLAlchemy 3 s of a 19 s build); checked per statement since 0112.
+        db.execute(
+            text(
+                "INSERT INTO parameter_value (parameter_def_id, entity_ids, value)"
+                " SELECT r.parameter_def_id, r.entity_ids, r.value"
+                " FROM jsonb_to_recordset(CAST(:cells AS jsonb))"
+                " AS r(parameter_def_id bigint, entity_ids bigint[], value numeric)"
+                " ON CONFLICT DO NOTHING"
+            ),
+            {"cells": json.dumps(cells, default=str)},
+        )
 
     for spec in seed.get("grids") or []:
         _plant_grid(db, domain_id, spec, entities)

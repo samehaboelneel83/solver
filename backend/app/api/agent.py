@@ -31,6 +31,7 @@ it can do exactly what they can and every change is audited as theirs.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import queue
 import threading
@@ -98,6 +99,27 @@ class ChatRequest(BaseModel):
     keep_files: list[str] | None = Field(default=None, max_length=200)
     # The client's id for this conversation: names run_python's working folder.
     conversation_id: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
+
+
+# Turns that keep running after the browser left (the blend test, October 2026: changing page lost a turn
+# that was minutes into writing the model, and nothing showed it on return). One web process (the Dockerfile
+# runs a single uvicorn worker), so the registry is in memory: conversation id -> its current turn's events.
+TURNS: dict[str, dict[str, Any]] = {}
+TURN_KEEP_S = 1800
+_turns_lock = threading.Lock()
+
+
+def _turn_start(conversation_id: str, owner: str, agent: Any) -> dict[str, Any]:
+    with _turns_lock:
+        now = time.time()
+        for key in [k for k, t in TURNS.items() if t["done"] and now - t["ended"] > TURN_KEEP_S]:
+            TURNS.pop(key, None)
+        old = TURNS.get(conversation_id)
+        if old and not old["done"]:
+            old["agent"].cancelled.set()  # a new message replaces a turn still running
+        turn = {"owner": owner, "agent": agent, "events": [], "done": False, "ended": 0.0, "started": now}
+        TURNS[conversation_id] = turn
+        return turn
 
 
 # The spec is the app's own; built once per process (FastAPI caches it too).
@@ -190,8 +212,9 @@ def chat(
                      can_run_python=can_run_python),
     )
     allow = body.confirm.allow if body.confirm is not None else None
+    turn = _turn_start(body.conversation_id, owner, agent) if body.server_history and body.conversation_id else None
 
-    def stream() -> Iterator[bytes]:
+    async def stream():
         # The loop runs in a thread so this generator can send a `ping` while a
         # model reply or a solve takes its time.
         events: queue.Queue = queue.Queue()
@@ -204,25 +227,32 @@ def chat(
             try:
                 for event in agent.run(messages, allow):
                     kind = event.get("type")
+                    if body.server_history and kind == "result" and not agent.cancelled.is_set():
+                        _keep(body.conversation_id, owner, organization, body.mode, messages, agent.ctx.files)
                     steps += kind == "tool"
                     if kind in ("answer", "error", "confirm", "plan", "built"):
                         last = event
                     if body.server_history and kind == "state":
                         # Kept here, not sent back whole: the browser shows the turn, the server holds it.
-                        _keep(body.conversation_id, owner, organization, body.mode, event["messages"],
-                              agent.ctx.files)
+                        if not agent.cancelled.is_set():
+                            _keep(body.conversation_id, owner, organization, body.mode, event["messages"],
+                                  agent.ctx.files)
                         event = {"type": "state", "messages": [], "wrote": event.get("wrote"),
                                  "stored": {"messages": len(event["messages"]),
                                             "tokens": len(json.dumps(event["messages"], ensure_ascii=False,
                                                                      default=str)) // 2}}
                     elif body.server_history and kind == "file":
                         event = {"type": "file", "file": _light(event["file"])}
+                    if turn is not None and kind not in ("thinking", "ping"):
+                        turn["events"].append(event)
                     events.put(event)
             except BaseException as exc:  # noqa: BLE001 -- logged, then the stream ends as before
                 ending = f"crashed: {type(exc).__name__}: {exc}"
                 raise
             finally:
                 events.put(done)
+                if turn is not None:
+                    turn["done"], turn["ended"] = True, time.time()
                 text_ = str((last or {}).get("text") or "")
                 logger.info("assistant.turn", user=user.username, conversation=body.conversation_id,
                             mode=body.mode, seconds=round(time.monotonic() - started, 1), tool_calls=steps,
@@ -230,16 +260,25 @@ def chat(
                             text=text_[:400], history_messages=len(messages))
 
         threading.Thread(target=work, daemon=True, name="assistant").start()
-        while True:
-            try:
-                event = events.get(timeout=10)
-            except queue.Empty:
-                yield b'{"type": "ping"}\n'
-                continue
-            if event is done:
-                return
-            yield (json.dumps(event, ensure_ascii=False, default=str) + "\n").encode()
-
+        try:
+            while True:
+                if await request.is_disconnected():
+                    return
+                try:
+                    event = await asyncio.to_thread(events.get, True, 1)
+                except queue.Empty:
+                    yield b'{"type": "ping"}\n'
+                    continue
+                if event is done:
+                    return
+                yield (json.dumps(event, ensure_ascii=False, default=str) + "\n").encode()
+        finally:
+            # The browser leaving is not a Stop: a turn whose conversation the server keeps runs on and is
+            # picked up again (GET /conversations/{id}/turn). Stop is POST /conversations/{id}/stop.
+            # Starlette may cancel this generator on a disconnect instead of letting is_disconnected() say so,
+            # so the test is whether the server keeps the conversation, not how the stream ended.
+            if turn is None:
+                agent.cancelled.set()
     return StreamingResponse(stream(), media_type="application/x-ndjson",
                              headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
@@ -256,9 +295,56 @@ def _keep(conversation_id: str, owner: str, organization: str, mode: str, messag
         agent_store.save(db, conversation_id, owner, organization, mode, messages, files)
 
 
+@router.get("/conversations/{conversation_id}/turn")
+def current_turn(conversation_id: str, after: int = 0, user: UserAccount = Depends(get_current_user)) -> dict:
+    """The conversation's latest turn: whether it is still running and its events from `after` on, for a
+    browser that left during the turn and came back."""
+    turn = TURNS.get(conversation_id)
+    if turn is None or turn["owner"] != str(user.id):
+        return {"running": False, "known": False, "events": [], "count": 0}
+    events = turn["events"]
+    return {"running": not turn["done"], "known": True, "events": events[max(0, after):], "count": len(events)}
+
+
+@router.post("/conversations/{conversation_id}/handover")
+def handover(conversation_id: str, db: Session = Depends(get_db),
+             user: UserAccount = Depends(get_current_user)) -> dict:
+    """An Ask conversation's problem carried to Describe a problem: a new conversation in model mode with the same
+    attached files (the server keeps their rows) and the person's first message, to send there."""
+    import uuid
+
+    kept = agent_store.load(db, conversation_id, str(user.id))
+    if kept is None:
+        raise HTTPException(status_code=404, detail="no such conversation")
+    first = next((m.get("content") for m in kept.get("messages") or []
+                  if m.get("role") == "user" and not str(m.get("content") or "").startswith(core.PLATFORM)), None)
+    if first is None:
+        # A long conversation was summarized: its first message is kept word for word in the summary.
+        summary = next((str(m.get("content")) for m in kept.get("messages") or [] if m.get("role") == "user"), "")
+        marker = "The person's first message, word for word:\n"
+        if marker in summary:
+            first = summary.split(marker, 1)[1].split("\n(end of the first message)", 1)[0]
+    new_id = uuid.uuid4().hex
+    files = list(kept.get("files") or [])
+    agent_store.save(db, new_id, str(user.id), str(user.organization_id), "model", [], files, turned=False)
+    return {"conversation_id": new_id, "text": first or "", "files": [_light(f) for f in files]}
+
+
+@router.post("/conversations/{conversation_id}/stop", status_code=204, response_class=Response)
+def stop_turn(conversation_id: str, user: UserAccount = Depends(get_current_user)) -> Response:
+    """Stop: no further action is started in this conversation's running turn."""
+    turn = TURNS.get(conversation_id)
+    if turn is not None and turn["owner"] == str(user.id):
+        turn["agent"].cancelled.set()
+    return Response(status_code=204)
+
+
 @router.delete("/conversations/{conversation_id}", status_code=204, response_class=Response)
 def forget(conversation_id: str, db: Session = Depends(get_db), user: UserAccount = Depends(get_current_user)) -> Response:
     """A new chat: the old conversation is no longer needed."""
+    turn = TURNS.get(conversation_id)
+    if turn is not None and turn["owner"] == str(user.id):
+        turn["agent"].cancelled.set()
     agent_store.delete(db, conversation_id, str(user.id))
     return Response(status_code=204)
 
@@ -296,6 +382,8 @@ def read_file(
          "sm": json.dumps(summary)}).scalar_one()
     db.commit()
     parsed["spatial"]["upload_id"] = str(upload_id)
+    # Its fingerprint: an import uses the upload up, so a later workspace finds the same drawing's map by it.
+    parsed["spatial"]["sha256"] = summary["sha256"]
     return parsed
 
 
@@ -384,4 +472,27 @@ def result(run_id: int, db: Session = Depends(get_db), user: UserAccount = Depen
     from app.agent import result as agent_result
     from app.api.run_export import _record
 
-    return {"text": agent_result.summary(_record(db, run_id))}
+    rec = _record(db, run_id)
+    if rec.get("domain_id") is not None:
+        rec["map_placed"] = any(
+            (p or {}).get("kind") == "local" and (p or {}).get("anchor") is not None
+            for (p,) in db.execute(text("SELECT placement FROM gis_dataset WHERE domain_id = :d"),
+                                   {"d": rec["domain_id"]}).all())
+    points = db.execute(text("SELECT seq, first_value, second_value, status, point_run_id FROM pareto_point"
+                             " WHERE run_id = :r ORDER BY seq"), {"r": run_id}).all()
+    if points:
+        # A trade-off front: each point's two goal values and what it chooses, from its own run.
+        rec["front"] = []
+        for seq, first, second, status, point_run in points:
+            chosen: dict[str, list[str]] = {}
+            if point_run is not None:
+                point = db.execute(text("SELECT assignments FROM solution WHERE run_id = :r"),
+                                   {"r": point_run}).scalar()
+                for var, cells in (point or {}).items():
+                    keys = [" · ".join(map(str, c)) for c in cells or [] if isinstance(c, list)
+                            and not (c and isinstance(c[-1], (int, float)) and not isinstance(c[-1], bool))]
+                    if keys:
+                        chosen[var] = keys
+            rec["front"].append({"seq": seq, "first": first, "second": second, "status": status,
+                                 "run_id": point_run, "chosen": chosen})
+    return {"text": agent_result.summary(rec)}
