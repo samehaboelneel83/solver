@@ -163,9 +163,13 @@ def test_a_place_plan_builds_runs_and_reports_through_the_platform(tmp_path, ten
     while (claimed := claim_next(db)) is not None:  # the build may have queued a first run of its own
         done = execute_run(db, claimed)
         outcome = done if claimed == run_id else outcome
-    row = db.execute(text("SELECT status, solver, objective, best_bound, error FROM run WHERE id = :r"),
+    row = db.execute(text("SELECT status, solver, objective, best_bound, error, wall_time_s,"
+                          "       extract(epoch FROM finished_at - started_at) AS took FROM run WHERE id = :r"),
                      {"r": run_id}).mappings().one()
     assert row["solver"] == "layout" and row["status"] in ("optimal", "feasible"), dict(row)
+    # The run's clock is the wall clock: a run that solved for seconds did not finish the moment it started
+    # (live camp test, October 2026: a 118 s run was stored as finishing 1.2 s after it started).
+    assert float(row["took"]) >= 0.9 * float(row["wall_time_s"]), dict(row)
     assert outcome.objective >= 9 and out["upper_bound"]["items"] == 10
     assert (row["status"] == "optimal") == (outcome.objective == 10)
     result = TestClient(app).get(f"/api/v1/agent/result/{run_id}", headers=tenants["a"]).json()
@@ -247,3 +251,15 @@ def test_two_kinds_of_different_worth_are_both_laid_out(tmp_path):
     # A table is worth 10 a square metre and a stool 4: all three tables, and stools on the rest (72 cells).
     assert tables == 3 and stools == 72 and result.objective == 3 * 20 + 72
     assert verify.accept(model, result)["accepted"]
+
+
+def test_the_read_back_says_where_the_aisle_runs_in_plain_words():
+    from app.agent.readback import readback
+
+    ir = {"sets": ["slot", "area", "access_point"], "variables": {}, "objective": {}, "constraints": [{"id": "c", "place": {
+        "slots": {"set": "slot"}, "areas": {"set": "area"}, "step": 0.05, "aisle": 7, "aisle_sides": "any",
+        "access": {"set": "access_point"}}}]}
+    text = readback({"ir": ir})
+    assert "free on any side" in text and "one access_point" in text and "a any" not in text and "a access" not in text
+    ir["constraints"][0]["place"]["aisle_sides"] = "long"
+    assert "free along a long side" in readback({"ir": ir})

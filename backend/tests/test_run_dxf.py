@@ -112,3 +112,18 @@ def test_a_huge_placed_set_draws_only_what_was_chosen():
     ir = {"variables": {"pick": {"index": ["bed"], "domain": "binary"}}, "constraints": []}
     mapped = answer_map(ir, {"sets": {"bed": rows}}, {"pick": [["b1"], ["b7"]]}, {}, [])
     assert len(mapped["features"]) == 2 and "only the chosen drawn" in mapped["layers"][0]["title"]
+
+
+def test_the_report_draws_records_placed_by_metres_on_its_map():
+    """A placement run's report has a map: its chosen slots carry only metres, so the report gives them their
+    shape through the domain's drawing, as the GeoJSON export does (live camp test, October 2026)."""
+    from app.api.run_export import to_html, with_map_shapes
+
+    placement = {"kind": "local", "anchor": [7.2, -65.0], "lonlat": [31.2357, 30.0444], "rotation": 0, "scale": 1, "units": 1}
+    rec = _rec()
+    rec = {**rec, "domain_id": 5, "solver": "layout", "params": {}, "error": None, "finished_at": None,
+           "ir": {**rec["ir"], "variables": {"pick": rec["ir"]["variables"]["pick"]}},
+           "data": {"sets": {"cand": rec["data"]["sets"]["cand"]}}, "assignments": {"pick": [["c0"], ["c2"]]}}
+    assert "On the map" not in to_html(rec)  # metres alone: nothing to draw
+    assert "On the map" in to_html(with_map_shapes(_OneMap(placement), rec))
+    assert with_map_shapes(None, rec)["data"] == rec["data"]  # no drawing in the domain: left as it is

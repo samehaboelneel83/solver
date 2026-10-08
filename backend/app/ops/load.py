@@ -53,8 +53,8 @@ def fairness_trial(
         total += 1
         db.execute(
             text(
-                "UPDATE run SET status = 'optimal', finished_at = now(),"
-                " started_at = coalesce(started_at, now()), heartbeat_at = now()"
+                "UPDATE run SET status = 'optimal', finished_at = clock_timestamp(),"
+                " started_at = coalesce(started_at, clock_timestamp()), heartbeat_at = clock_timestamp()"
                 " WHERE id = :r"
             ),
             {"r": run_id},

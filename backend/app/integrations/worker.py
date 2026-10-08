@@ -44,7 +44,7 @@ def process_one(session_factory, output: str) -> bool:
     with session_factory() as db:
         # A crashed supervisor cannot leave a job permanently active. There is
         # no automatic replay: the caller may explicitly submit a new job.
-        db.execute(text("UPDATE ingestion_job SET state='failed',error_code='worker_lost',finished_at=now() WHERE state='running' AND started_at < now() - interval '10 minutes'"))
+        db.execute(text("UPDATE ingestion_job SET state='failed',error_code='worker_lost',finished_at=clock_timestamp() WHERE state='running' AND started_at < now() - interval '10 minutes'"))
         job = db.execute(text("SELECT * FROM ingestion_job WHERE state='queued' ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1")).mappings().one_or_none()
         if job is None:
             db.commit()
@@ -52,12 +52,12 @@ def process_one(session_factory, output: str) -> bool:
         job = dict(job)
         connection = db.execute(text("SELECT * FROM integration_connection WHERE id=:id AND organization_id=:o"), {"id": job["connection_id"], "o": job["organization_id"]}).mappings().one()
         if job["cancel_requested"] or not connection["enabled"]:
-            db.execute(text("UPDATE ingestion_job SET state='cancelled',finished_at=now() WHERE id=:id"), {"id": job["id"]})
+            db.execute(text("UPDATE ingestion_job SET state='cancelled',finished_at=clock_timestamp() WHERE id=:id"), {"id": job["id"]})
             db.commit()
             return True
         row = dict(connection)
         attempt = uuid4()
-        db.execute(text("UPDATE ingestion_job SET state='running',attempt=:a,started_at=now() WHERE id=:id"), {"a": attempt, "id": job["id"]})
+        db.execute(text("UPDATE ingestion_job SET state='running',attempt=:a,started_at=clock_timestamp() WHERE id=:id"), {"a": attempt, "id": job["id"]})
         db.commit()
     context = mp.get_context("spawn")
     cancelled = context.Event()
@@ -108,7 +108,7 @@ def process_one(session_factory, output: str) -> bool:
             settled = db.execute(text("""UPDATE ingestion_job j SET
                 state=CASE WHEN j.cancel_requested OR NOT c.enabled THEN 'cancelled' ELSE :state END,
                 artifact_id=CASE WHEN j.cancel_requested OR NOT c.enabled THEN NULL ELSE CAST(:artifact AS uuid) END,
-                error_code=:error,finished_at=now()
+                error_code=:error,finished_at=clock_timestamp()
                 FROM integration_connection c WHERE j.id=:id AND j.connection_id=c.id
                 AND j.state='running' AND j.attempt=:attempt RETURNING j.state"""),
                 {"state": state, "artifact": artifact, "error": error, "id": job["id"], "attempt": attempt}).scalar_one_or_none()

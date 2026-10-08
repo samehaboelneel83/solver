@@ -2252,16 +2252,18 @@ export function noteWithNumber(note: string | undefined, before: unknown, after:
 
 type PlaceBody = {
   slots?: { set?: string }; areas?: { set?: string }; step?: number; aisle?: number; aisle_sides?: string;
+  access?: { set?: string };
 };
 
 /** A place rule (plan phase 1C), read back: it is made by the layout tool from a drawing, not typed here. */
 function PlaceSummary({ body }: { body: PlaceBody }) {
-  const aisle = body.aisle ? `, each with an aisle of ${body.aisle} cells (${(body.aisle * (body.step ?? 0)).toFixed(2)} m) free along a ${body.aisle_sides} side` : "";
+  const aisle = body.aisle ? `, each with an aisle of ${body.aisle} cells (${(body.aisle * (body.step ?? 0)).toFixed(2)} m) free ${!body.aisle_sides || body.aisle_sides === "any" ? "on any side" : `along a ${body.aisle_sides} side`}` : "";
+  const access = body.access?.set ? `; every one's aisle joins, through free cells, one ${body.access.set}` : "";
   return (
     <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">
       <p>
         Each chosen <strong>{body.slots?.set}</strong> lies wholly on the free cells of one{" "}
-        <strong>{body.areas?.set}</strong> on a {body.step} m grid, no two on the same cell{aisle}.
+        <strong>{body.areas?.set}</strong> on a {body.step} m grid, no two on the same cell{aisle}{access}.
       </p>
       <p className="mt-1 text-xs text-slate-600">
         Laid out by the placement solver, without a list of positions. To change the areas, sizes or aisle, lay the

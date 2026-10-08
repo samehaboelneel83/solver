@@ -65,7 +65,7 @@ def reclaim_stale(db) -> int:
     """
     cancelled = db.execute(
         text(
-            "UPDATE run SET status = 'cancelled', finished_at = now()"
+            "UPDATE run SET status = 'cancelled', finished_at = clock_timestamp()"
             " WHERE status = 'running' AND cancel_requested"
             "   AND COALESCE(heartbeat_at, started_at) < now() - make_interval(secs => :secs)"
             " RETURNING id"
@@ -127,7 +127,7 @@ def work_once(db) -> int | None:
         log.exception("run failed")
         db.execute(
             text(
-                "UPDATE run SET status = 'error', error = :e, finished_at = now()"
+                "UPDATE run SET status = 'error', error = :e, finished_at = clock_timestamp()"
                 " WHERE id = :r"
             ),
             {"e": failure_text(exc), "r": run_id},

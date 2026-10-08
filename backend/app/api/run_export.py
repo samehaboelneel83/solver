@@ -61,6 +61,15 @@ def _record(db: Session, run_id: int) -> dict[str, Any]:
     return with_positions({**dict(row), "results": results})
 
 
+def with_map_shapes(db: Session | None, rec: dict[str, Any]) -> dict[str, Any]:
+    """The run with records placed by metres (a layout's candidates or placed slots) given their shape on the map
+    through the domain's drawing, as the GeoJSON export and the app's map give them, so the report draws them too
+    (live camp test, October 2026: the report of a placement run had no map)."""
+    from app.api.answer_map import with_metre_shapes
+
+    return {**rec, "data": with_metre_shapes(db, rec.get("domain_id"), rec.get("data") or {})}
+
+
 def _labels(data: dict[str, Any]) -> dict[str, dict[str, str]]:
     out: dict[str, dict[str, str]] = {s: dict(v) for s, v in (data.get("labels") or {}).items() if isinstance(v, dict)}
     for set_name, rows in (data.get("sets") or {}).items():
@@ -377,8 +386,11 @@ def _svg_map(features: list[dict[str, Any]], width: int = 720, height: int = 440
     world = [_mercator(p[0], p[1], 0) for p in pts]
     xs, ys = [w[0] for w in world], [w[1] for w in world]
     span = max(max(xs) - min(xs), 1e-9), max(max(ys) - min(ys), 1e-9)
-    # The zoom that fits the places with a margin; never closer than street level.
-    zf = min(math.log2(min((width - 60) / span[0], (height - 60) / span[1])), 18.0)
+    # The zoom that fits the places with a margin. A drawing's layout of a few tens of metres needs to come closer
+    # than street level (live camp test, October 2026: 2,305 beds were one small patch at zoom 18); the cap, a few
+    # centimetres a pixel, only stops a single place from zooming without end. Base-map tiles stop at 19 and are
+    # scaled up beyond it.
+    zf = min(math.log2(min((width - 60) / span[0], (height - 60) / span[1])), 22.0)
     k = 2 ** zf
     cx, cy = (min(xs) + max(xs)) / 2 * k, (min(ys) + max(ys)) / 2 * k
     left, top = cx - width / 2, cy - height / 2
@@ -557,10 +569,11 @@ def export_run(run_id: int, format: str = Query("xlsx", pattern="^(xlsx|csv|geoj
     if format == "html":
         # The base map the person had under the run's map, by its id (never an address from the request).
         under = basemap_of(db, rec.get("domain_id"), basemap)
-        return Response(to_html(rec, print_now=print, basemap=under), media_type="text/html; charset=utf-8")
+        return Response(to_html(with_map_shapes(db, rec), print_now=print, basemap=under),
+                        media_type="text/html; charset=utf-8")
     if format == "pdf":
         under = basemap_of(db, rec.get("domain_id"), basemap)
-        return Response(to_pdf(rec, basemap=under), media_type="application/pdf",
+        return Response(to_pdf(with_map_shapes(db, rec), basemap=under), media_type="application/pdf",
                         headers={"Content-Disposition": f'attachment; filename="{_filename(rec, "pdf")}"'})
     if rec["assignments"] is None and rec["amounts"] is None and format != "xlsx":
         raise HTTPException(409, f"run {run_id} has no answer to export (it is {rec['status']})")

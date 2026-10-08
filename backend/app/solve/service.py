@@ -482,7 +482,7 @@ def claim_next(db: Session) -> int | None:
             continue
         db.execute(
             text(
-                "UPDATE run SET status = 'running', started_at = now(), heartbeat_at = now(),"
+                "UPDATE run SET status = 'running', started_at = clock_timestamp(), heartbeat_at = clock_timestamp(),"
                 "               execution_attempt = execution_attempt + 1,"
                 "               params = coalesce(params, '{}'::jsonb) || CAST(:n AS jsonb)"
                 " WHERE id = :r"
@@ -661,7 +661,7 @@ def cancel_run(db: Session, run_id: int) -> str:
             text(
                 "UPDATE run SET status = CASE WHEN status = 'queued' THEN 'cancelled'::run_status ELSE status END,"
                 "               cancel_requested = true,"
-                "               finished_at = CASE WHEN status = 'queued' THEN now() ELSE finished_at END"
+                "               finished_at = CASE WHEN status = 'queued' THEN clock_timestamp() ELSE finished_at END"
                 " WHERE parent_run_id = :r AND purpose = 'shadow' AND status IN ('queued', 'running')"
             ),
             {"r": run_id},
@@ -670,7 +670,7 @@ def cancel_run(db: Session, run_id: int) -> str:
         db.execute(
             text(
                 "UPDATE run SET status = 'cancelled', cancel_requested = true,"
-                "               finished_at = now() WHERE id = :r"
+                "               finished_at = clock_timestamp() WHERE id = :r"
             ),
             {"r": run_id},
         )
@@ -690,7 +690,7 @@ def _honour_cancel(db: Session, run_id: int) -> bool:
     """If the run was asked to stop, record `cancelled` and return True."""
     done = db.execute(
         text(
-            "UPDATE run SET status = 'cancelled', finished_at = now()"
+            "UPDATE run SET status = 'cancelled', finished_at = clock_timestamp()"
             " WHERE id = :r AND cancel_requested"
             "   AND status IN ('queued', 'running')"
             " RETURNING id"
@@ -731,7 +731,7 @@ def _heartbeat(run_id: int, stop: threading.Event) -> Iterator[None]:
             try:
                 asked = session.execute(
                     text(
-                        "UPDATE run SET heartbeat_at = now()"
+                        "UPDATE run SET heartbeat_at = clock_timestamp()"
                         " WHERE id = :r AND status = 'running'"
                         " RETURNING cancel_requested"
                     ),
@@ -827,7 +827,7 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
                 if _owns_attempt(db, run_id, attempt):
                     db.execute(
                         text(
-                            "UPDATE run SET status = 'error', error = :e, finished_at = now()"
+                            "UPDATE run SET status = 'error', error = :e, finished_at = clock_timestamp()"
                             " WHERE id = :r AND execution_attempt = :a"
                         ),
                         {"e": str(exc)[:2000], "r": run_id, "a": attempt},
@@ -914,7 +914,7 @@ def _execute(
             if _owns_attempt(db, run_id, attempt):
                 db.execute(
                     text(
-                        "UPDATE run SET status = 'error', error = :e, finished_at = now()"
+                        "UPDATE run SET status = 'error', error = :e, finished_at = clock_timestamp()"
                         " WHERE id = :r AND execution_attempt = :a"
                     ),
                     {"e": str(exc), "r": run_id, "a": attempt},
@@ -934,7 +934,7 @@ def _execute(
                 moving = robust_rows.deviations(ir, data, unlocked)
             except (robust_rows.NotRobust, Unsupported) as exc:
                 db.execute(
-                    text("UPDATE run SET status = 'error', error = :e, finished_at = now() WHERE id = :r"),
+                    text("UPDATE run SET status = 'error', error = :e, finished_at = clock_timestamp() WHERE id = :r"),
                     {"e": str(exc), "r": run_id},
                 )
                 db.commit()
@@ -1088,7 +1088,7 @@ def _execute(
         except NoBackend as exc:
             db.execute(
                 text(
-                    "UPDATE run SET status = 'error', error = :e, finished_at = now() WHERE id = :r"
+                    "UPDATE run SET status = 'error', error = :e, finished_at = clock_timestamp() WHERE id = :r"
                 ),
                 {"e": str(exc), "r": run_id},
             )
@@ -1104,7 +1104,7 @@ def _execute(
                                       {"r": run_id}).scalar_one()
             licence, missing = licences.for_solve(db, organization, backend)
             if missing:
-                db.execute(text("UPDATE run SET status = 'error', error = :e, finished_at = now() WHERE id = :r"),
+                db.execute(text("UPDATE run SET status = 'error', error = :e, finished_at = clock_timestamp() WHERE id = :r"),
                            {"e": missing, "r": run_id})
                 db.commit()
                 return RunOutcome(run_id, dataset_id, "error", None, {})
@@ -1192,7 +1192,7 @@ def _execute(
                 )
             except (pareto.NotTwoGoals, Unsupported, sandbox.SandboxFailed) as exc:
                 db.execute(
-                    text("UPDATE run SET status = 'error', error = :e, finished_at = now() WHERE id = :r"),
+                    text("UPDATE run SET status = 'error', error = :e, finished_at = clock_timestamp() WHERE id = :r"),
                     {"e": str(exc), "r": run_id},
                 )
                 db.commit()
@@ -1494,7 +1494,7 @@ def _execute(
             # not a crash and not an empty answer.
             db.execute(
                 text(
-                    "UPDATE run SET status = 'error', error = :e, finished_at = now()"
+                    "UPDATE run SET status = 'error', error = :e, finished_at = clock_timestamp()"
                     " WHERE id = :r"
                 ),
                 {"e": str(exc), "r": run_id},
@@ -1665,7 +1665,7 @@ def _execute(
         db.execute(
             text(
                 "UPDATE run SET status = 'error', error = :e, solver = :s,"
-                "               params = params || CAST(:extra AS jsonb), finished_at = now()"
+                "               params = params || CAST(:extra AS jsonb), finished_at = clock_timestamp()"
                 " WHERE id = :r AND execution_attempt = :a"
             ),
             {
@@ -1754,7 +1754,7 @@ def run_scenario(
         return _stored_outcome(db, run_id)
     db.execute(
         text(
-            "UPDATE run SET status = 'running', started_at = now(), heartbeat_at = now()"
+            "UPDATE run SET status = 'running', started_at = clock_timestamp(), heartbeat_at = clock_timestamp()"
             " WHERE id = :r"
         ),
         {"r": run_id},
@@ -1882,7 +1882,7 @@ def _record(
     updated = db.execute(
         text(
             "UPDATE run SET status = :st, solver_version = :sv, objective = :obj,"
-            "               wall_time_s = :wall, finished_at = now(),"
+            "               wall_time_s = :wall, finished_at = clock_timestamp(),"
             "               best_bound = :bound, gap = :gap,"
             "               params = coalesce(params, '{}'::jsonb) || jsonb_build_object('execution', CAST(:execution AS jsonb))"
             f" {where}"

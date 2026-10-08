@@ -15,6 +15,13 @@ from typing import Any
 MAX_CHARS = 5000
 
 
+
+def _aisle_side(sides: object) -> str:
+    """Where a place rule's aisle runs, in words: "on any side", or "along a long side" (live camp test, October
+    2026: the read-back said "along a any side")."""
+    return "on any side" if sides in (None, "any") else f"along a {sides} side"
+
+
 def _num(v: Any) -> str:
     try:
         f = float(v)
@@ -178,9 +185,9 @@ def readback(spec: dict[str, Any]) -> str:
             lines.append(f"- rule {c.get('id')}: each chosen {slots} lies wholly on the free cells of one {areas} "
                          f"(a {body.get('step')} m grid), no two on the same cell"
                          + (f", each with an aisle of {aisle} cells ({float(aisle) * float(body.get('step') or 0):g} m) "
-                            f"free along a {body.get('aisle_sides')} side; aisles may be shared, never covered"
+                            f"free {_aisle_side(body.get('aisle_sides'))}; aisles may be shared, never covered"
                             if aisle else "")
-                         + (f"; every one's aisle joins, through uncovered free cells, a {(body.get('access') or {}).get('set')}"
+                         + (f"; every one's aisle joins, through uncovered free cells, one {(body.get('access') or {}).get('set')}"
                             if body.get("access") else "")
                          + " (hard; laid out by the placement solver, no position list)")
             continue

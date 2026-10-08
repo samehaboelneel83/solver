@@ -330,16 +330,16 @@ def _train_in_background(job_id: int, organization_id, user_id, body: dict[str, 
         except HTTPException as exc:
             db.rollback()
             detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail)
-            db.execute(text("UPDATE predictor_training SET state = 'failed', error = :e, finished_at = now()"
+            db.execute(text("UPDATE predictor_training SET state = 'failed', error = :e, finished_at = clock_timestamp()"
                             " WHERE id = :j"), {"e": detail[:4000], "j": job_id})
         except Exception:
             db.rollback()
             logger.exception("predictor training %s failed", job_id)
-            db.execute(text("UPDATE predictor_training SET state = 'failed', finished_at = now(),"
+            db.execute(text("UPDATE predictor_training SET state = 'failed', finished_at = clock_timestamp(),"
                             " error = 'the training failed on the server; see the server log' WHERE id = :j"),
                        {"j": job_id})
         else:
-            db.execute(text("UPDATE predictor_training SET state = 'done', predictor_id = :p, finished_at = now()"
+            db.execute(text("UPDATE predictor_training SET state = 'done', predictor_id = :p, finished_at = clock_timestamp()"
                             " WHERE id = :j"), {"p": made["id"], "j": job_id})
         db.commit()
     finally:

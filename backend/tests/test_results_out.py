@@ -473,3 +473,21 @@ def test_a_what_if_makes_within_data_again_from_scaled_times():
     assert data["parameters"]["within_30"][1]["value"] == 1  # the frozen data is untouched
     assert whatif.describe({"rederive": [{"param": "within_30", "source": "travel_min", "op": "<=", "limit": 30}]}) == [
         "within_30 made again: 1 where travel_min ≤ 30"]
+
+
+def test_a_drawing_sized_answer_fills_the_report_map():
+    """A camp of ~90 m is drawn across the map, not as a speck in its middle: the map may zoom closer than
+    street level (live camp test, October 2026: 2,305 beds made one small blue patch)."""
+    import re
+
+    from app.api import run_export
+
+    def bed(lon, lat, d=0.000006):
+        ring = [[lon, lat], [lon + d * 3, lat], [lon + d * 3, lat + d], [lon, lat + d], [lon, lat]]
+        return {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [ring]},
+                "properties": {"layer": "placed", "status": "chosen", "title": "bed"}}
+
+    # Two beds about 90 m apart, east to west (0.0009 degrees of longitude near 30 N).
+    svg = run_export._svg_map([bed(31.2350, 30.0444), bed(31.2359, 30.0444)])
+    xs = [float(x) for x in re.findall(r'(-?\d+\.\d),-?\d+\.\d', svg)]
+    assert max(xs) - min(xs) > 400, (min(xs), max(xs))  # most of the 720 px width
