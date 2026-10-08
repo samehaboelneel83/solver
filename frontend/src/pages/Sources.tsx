@@ -16,7 +16,7 @@ import { useDocumentTitle } from "../hooks/useDocumentTitle";
  * with their lineage recorded.
  */
 
-type Connection = { id: number; name: string; enabled: boolean; config?: { schema?: string; table?: string; columns?: string[]; host?: string; url?: string; kind?: string; engine?: string } };
+type Connection = { id: number; name: string; enabled: boolean; config?: { schema?: string; table?: string; columns?: string[]; host?: string; url?: string; kind?: string; engine?: string; changed_column?: string } };
 type TargetKind = "entity_type" | "relationship_type" | "parameter";
 type Target = { kind: TargetKind; id: number; name: string };
 type Load = {
@@ -34,6 +34,7 @@ function loadedText(load: Load): string {
 export type Job = {
   id: number; state: "queued" | "running" | "extracted" | "failed" | "cancelled"; cancel_requested: boolean;
   created_at: string; finished_at: string | null; artifact_id: string | null; error_code: string | null; loads: Load[];
+  incremental?: boolean;
 };
 
 const post = <T,>(path: string, body?: unknown) =>
@@ -352,13 +353,14 @@ function SourceForm({ domainId, onDone }: { domainId: string; onDone: (created: 
   const id = useId();
   const [kind, setKind] = useState<"postgres" | "http">("postgres");
   const [fields, setFields] = useState({ name: "", engine: "postgres", host: "", port: "5432", database: "", username: "", schema: "public", table: "", columns: "", password: "",
-    url: "", format: "json", auth: "none", sheet: "", records_at: "", paging: "none", next_at: "", page_param: "" });
+    url: "", format: "json", auth: "none", sheet: "", records_at: "", paging: "none", next_at: "", page_param: "", changed_column: "" });
   const columns = fields.columns.split(",").map((c) => c.trim()).filter(Boolean);
   const create = useMutation({
     mutationFn: () => post<{ id: number }>("/api/v1/connections", kind === "postgres" ? {
       domain_id: Number(domainId), name: fields.name.trim(), password: fields.password,
       source: { engine: fields.engine, host: fields.host.trim(), port: Number(fields.port), database: fields.database.trim(), username: fields.username.trim(),
-        schema: fields.schema.trim() || (fields.engine === "mysql" ? fields.database.trim() : ""), table: fields.table.trim(), columns },
+        schema: fields.schema.trim() || (fields.engine === "mysql" ? fields.database.trim() : ""), table: fields.table.trim(), columns,
+        ...(fields.changed_column.trim() ? { changed_column: fields.changed_column.trim() } : {}) },
     } : {
       domain_id: Number(domainId), name: fields.name.trim(), ...(fields.auth === "none" ? {} : { password: fields.password }),
       source: { kind: "http", url: fields.url.trim(), format: fields.format, auth: fields.auth, columns,
@@ -410,6 +412,7 @@ function SourceForm({ domainId, onDone }: { domainId: string; onDone: (created: 
       {field("password", "Password", "password")}
       {field("schema", fields.engine === "oracle" ? "Owner (schema)" : fields.engine === "mysql" ? "Database the table is in" : "Schema")}
       {field("table", "Table or view")}
+      {field("changed_column", "Changed column, to read only what changed (an update time or version; optional)")}
     </> : <>
       <div className="sm:col-span-2">{field("url", "Address (https://…)")}</div>
       {choice("format", "What it answers", [["json", "JSON list of records"], ["csv", "CSV file"], ["xlsx", "Excel workbook"]])}
@@ -453,13 +456,19 @@ function JobHistory({ domainId, source, canManage, onChanged }: { domainId: stri
     return () => clearInterval(timer);
   }, [active, jobs]);
   const refresh = () => client.invalidateQueries({ queryKey: ["ingestion-jobs", source.id] });
-  const run = useMutation({ mutationFn: () => post(`/api/v1/connections/${source.id}/jobs`), onSuccess: () => void refresh() });
+  // A source with a changed column may be read for only what changed since its last read (migration 0118).
+  const run = useMutation({ mutationFn: (incremental: boolean) => post(`/api/v1/connections/${source.id}/jobs`, incremental ? { incremental } : undefined),
+    onSuccess: () => void refresh() });
   const cancel = useMutation({ mutationFn: (job: number) => post(`/api/v1/ingestion-jobs/${job}/cancel`), onSuccess: () => void refresh() });
   const disable = useMutation({ mutationFn: () => post(`/api/v1/connections/${source.id}/disable`), onSuccess: () => { void refresh(); onChanged(); } });
   return <div className="mt-3 space-y-2 border-t border-slate-100 pt-3 text-sm">
     <div className="flex flex-wrap gap-2">
       <button type="button" className="rounded bg-blue-700 px-3 py-1.5 text-white disabled:opacity-50" disabled={!source.enabled || active || run.isPending}
-        onClick={() => run.mutate()}>{active ? "An extraction is running" : "Run extraction"}</button>
+        onClick={() => run.mutate(false)}>{active ? "An extraction is running" : "Run extraction"}</button>
+      {source.config?.changed_column && <button type="button" className="rounded border border-blue-300 px-3 py-1.5 text-blue-800 disabled:opacity-50"
+        disabled={!source.enabled || active || run.isPending} onClick={() => run.mutate(true)}
+        title={`Only rows whose ${source.config.changed_column} is at least the highest the last read saw; a refresh from it adds and updates, and takes nothing away`}>
+        Read only what changed</button>}
       {canManage && source.enabled && <button type="button" className="rounded border border-red-300 px-3 py-1.5 text-red-800" onClick={() => disable.mutate()}>Disable source</button>}
     </div>
     {run.isError && <p role="alert" className="text-red-700">{formatApiError(run.error)}</p>}
@@ -469,7 +478,7 @@ function JobHistory({ domainId, source, canManage, onChanged }: { domainId: stri
       : <ul className="space-y-2" aria-label={`Extractions of ${source.name}`}>{jobs.data.items.map((job) => (
         <li key={job.id} className="rounded border border-slate-200 p-2">
           <div className="flex flex-wrap items-center gap-3">
-            <span className="font-medium">Extraction {job.id}</span>
+            <span className="font-medium">Extraction {job.id}{job.incremental ? " · only what changed" : ""}</span>
             <span role="status">{STATE_TEXT[job.state]}{job.cancel_requested && job.state !== "cancelled" ? " (cancelling)" : ""}</span>
             <span className="text-xs text-slate-500">{new Date(job.created_at).toLocaleString()}</span>
             {(job.state === "queued" || job.state === "running") && !job.cancel_requested &&

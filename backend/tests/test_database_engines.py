@@ -138,3 +138,48 @@ class TestRealMySql:
         with pytest.raises(ExtractionError) as failed:
             list(adapter.extract(request, Event()))
         assert failed.value.code == "tls_failed"
+
+
+def test_an_incremental_read_asks_only_for_what_changed_in_each_engines_terms():
+    """Migration 0118: SELECT ... WHERE <changed> >= <mark>, the mark bound as a parameter (never spliced), as a
+    datetime or a number so each engine compares it by type."""
+    from datetime import datetime
+    from decimal import Decimal
+
+    from app.integrations.contracts import later
+    from app.integrations.databases import MySqlConnector, OracleConnector
+
+    for cls, mark in ((MySqlConnector, "%s"), (OracleConnector, ":since")):
+        connector = cls.__new__(cls)
+        connector.source = type("S", (), {"schema": "plan", "table": "staff"})()
+        sql = connector.select(("id", "updated_at"), "updated_at")
+        assert sql.endswith(f"WHERE {connector.quote('updated_at')} >= {mark}") and "'" not in sql
+        assert connector.since_value("2026-10-08T10:00:00") == datetime(2026, 10, 8, 10)
+        assert connector.since_value("41") == Decimal("41")
+    assert OracleConnector.params(OracleConnector.__new__(OracleConnector), 5) == {"since": 5}
+    assert later("9", "10") == "10" and later("2026-10-08T09:00:00", "2026-10-08T10:00:00") == "2026-10-08T10:00:00"
+    assert later(None, 3) == 3
+
+
+def test_a_snapshot_keeps_the_highest_changed_value_and_the_mark_it_read_from(tmp_path):
+    """The next incremental read starts from the manifest's high_water; an incremental read says its `since`."""
+    import json
+
+    from app.integrations.contracts import ConnectorCapabilities
+    from app.integrations.snapshots import stage_snapshot
+
+    class Rows:
+        capabilities = ConnectorCapabilities("fake", "1")
+
+        def extract(self, request, cancelled):
+            yield from ({"id": 1, "updated_at": "2026-10-08T09:00:00"}, {"id": 2, "updated_at": "2026-10-08T11:30:00"},
+                        {"id": 3, "updated_at": "2026-10-08T10:00:00"})
+
+    org = uuid4()
+    request = ExtractionRequest(org, 9, "staff", ("id", "updated_at"), ExtractionLimits(),
+                                since_column="updated_at", since="2026-10-08T09:00:00")
+    folder = stage_snapshot(tmp_path, Rows(), request, Event())
+    manifest = json.loads((folder / "manifest.json").read_text())
+    assert manifest["high_water"] == "2026-10-08T11:30:00" and manifest["since"] == "2026-10-08T09:00:00"
+    with pytest.raises(ValueError):
+        ExtractionRequest(org, 9, "staff", ("id",), ExtractionLimits(), since_column="updated_at")

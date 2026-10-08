@@ -217,3 +217,28 @@ def test_an_attached_file_is_kept_by_version_and_refreshed(tenants, db):  # noqa
     assert "version 2" in reader.run_tool("use_source", {"source": name})
     db.execute(text("DELETE FROM source_binding WHERE file_name = :n"), {"n": name})
     db.commit()
+
+
+def test_a_refresh_from_an_incremental_read_adds_and_updates_but_takes_nothing_away(extracted, db):  # noqa: F811
+    """Migration 0118: a read of only what changed since a mark has no row for an unchanged record; that record
+    is unchanged, not gone."""
+    client, tenants, connection, _, job, root = extracted
+    domain = tenants["domain_a"]
+    kind, _ = _build(client, tenants, job(FIRST))
+    partial = job([{"staff_id": "n1", "full_name": "Ada", "hours": "41", "grade": 3}])
+    artifact, org = db.execute(text("SELECT artifact_id, organization_id FROM ingestion_job WHERE id = :j"),
+                               {"j": partial}).one()
+    path = root / str(org) / str(connection) / str(artifact) / "manifest.json"
+    manifest = json.loads(path.read_text())
+    path.write_text(json.dumps({**manifest, "changed_column": "updated_at", "since": "2026-10-08T09:00:00",
+                                "high_water": "2026-10-08T10:00:00"}))
+    body = client.post(f"/api/v1/domains/{domain}/sources/refresh", json={"jobs": {str(connection): partial}},
+                       headers=tenants["a"]).json()
+    records = body["bindings"][0]
+    assert records["counts"]["changed"] == 1 and records["counts"]["removed"] == 0, records["counts"]
+    applied = client.post(f"/api/v1/domains/{domain}/sources/refresh", json={"jobs": {str(connection): partial},
+                                                                             "apply": True}, headers=tenants["a"]).json()
+    assert applied["applied"] is True
+    active = db.execute(text("SELECT count(*) FROM entity e JOIN entity_type t ON t.id = e.entity_type_id"
+                             " WHERE t.name = :k AND e.active"), {"k": kind}).scalar_one()
+    assert active == 3  # n2 and n3 kept

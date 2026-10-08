@@ -227,3 +227,32 @@ def test_a_refused_body_never_echoes_its_password(setup):
     assert response.status_code == 422
     assert "never-return-me" not in response.text and '"***"' in response.text
     assert response.json()["detail"][0]["loc"] == ["body", "domain_id"]
+
+
+def test_an_incremental_job_needs_a_changed_column_and_starts_from_the_last_mark(setup, tmp_path):  # noqa: F811
+    """Migration 0118: asked without a changed column, an incremental read is refused in words; with one, the
+    worker starts from the high_water of the source's latest extracted read."""
+    import json
+    from uuid import uuid4
+
+    from app.core.db import SessionLocal
+    from app.integrations.worker import last_high_water
+
+    client, body, tenants = setup
+    connection = create(setup)
+    refused = client.post(f"/api/v1/connections/{connection}/jobs", json={"incremental": True}, headers=tenants["a"])
+    assert refused.status_code == 422 and "changed column" in refused.text
+    with SessionLocal() as s:
+        org, user = s.execute(text("SELECT organization_id, requested_by FROM ingestion_job WHERE false UNION ALL "
+                                   "SELECT c.organization_id, u.id FROM integration_connection c JOIN iam.user_account u"
+                                   " ON u.organization_id = c.organization_id WHERE c.id = :c LIMIT 1"),
+                              {"c": connection}).one()
+        artifact = str(uuid4())
+        folder = tmp_path / str(org) / str(connection) / artifact
+        folder.mkdir(parents=True)
+        (folder / "manifest.json").write_text(json.dumps({"high_water": "2026-10-08T11:30:00"}))
+        s.execute(text("INSERT INTO ingestion_job (connection_id, organization_id, requested_by, state, artifact_id,"
+                       " finished_at) VALUES (:c, :o, :u, 'extracted', CAST(:a AS uuid), now())"),
+                  {"c": connection, "o": org, "u": user, "a": artifact})
+        s.commit()
+        assert last_high_water(s, org, connection, str(tmp_path)) == "2026-10-08T11:30:00"

@@ -41,6 +41,9 @@ class PostgresSource:
     extraction_timeout_seconds: int = 300
     #: The database engine (app/integrations/databases.py): postgres, mysql, sqlserver or oracle.
     engine: str = "postgres"
+    #: A column that grows when a row changes (an update time, a version): lets a read take only what changed
+    #: (migration 0118). One of `columns`; empty when the source is always read whole.
+    changed_column: str = ""
 
     def __post_init__(self):
         if self.engine not in ("postgres", "mysql", "sqlserver", "oracle"):
@@ -60,6 +63,8 @@ class PostgresSource:
                 raise ValueError("Timeouts must be positive integers")
         for network in self.allowed_networks:
             ipaddress.ip_network(network)
+        if self.changed_column and self.changed_column not in self.columns:
+            raise ValueError("The changed column must be one of the columns read")
 
 
 def resolve_address(source: PostgresSource) -> str:
@@ -183,10 +188,16 @@ class PostgresConnector:
             watcher.start()
             with connection.cursor(name="oaas_snapshot") as cursor:
                 cursor.itersize = request.limits.batch_rows
-                cursor.execute(sql.SQL("SELECT {} FROM {}.{}").format(
+                select = sql.SQL("SELECT {} FROM {}.{}").format(
                     sql.SQL(", ").join(sql.Identifier(column) for column in request.columns),
                     sql.Identifier(source.schema), sql.Identifier(source.table),
-                ))
+                )
+                if request.since_column and request.since is not None:
+                    # Only what changed since the last read; >= so rows stamped in the same instant are not lost.
+                    cursor.execute(select + sql.SQL(" WHERE {} >= %s").format(sql.Identifier(request.since_column)),
+                                   (request.since,))
+                else:
+                    cursor.execute(select)
                 while True:
                     if cancelled.is_set():
                         raise ExtractionCancelled("Extraction cancelled")

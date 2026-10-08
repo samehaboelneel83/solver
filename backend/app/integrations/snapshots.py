@@ -11,7 +11,7 @@ from pathlib import Path
 from threading import Event
 from uuid import uuid4
 
-from .contracts import ExtractionCancelled, ExtractionRequest, SnapshotConnector, extract_batches
+from .contracts import ExtractionCancelled, ExtractionRequest, SnapshotConnector, extract_batches, later
 
 
 def stage_snapshot(
@@ -32,6 +32,8 @@ def stage_snapshot(
     started = datetime.now(timezone.utc).isoformat()
     count = size = 0
     digest = hashlib.sha256()
+    high = None  # the highest value of the changed column read (migration 0118)
+    watched = request.since_column
     try:
         stream = extract_batches(connector, request, cancelled)
         try:
@@ -40,6 +42,8 @@ def stage_snapshot(
                     for row in batch:
                         output.write(row)
                         digest.update(row)
+                        if watched:
+                            high = later(high, json.loads(row).get(watched))
                         count += 1
                         size += len(row)
                 output.flush()
@@ -59,6 +63,10 @@ def stage_snapshot(
             "started_at": started, "completed_at": datetime.now(timezone.utc).isoformat(),
             "rows": count, "bytes": size, "sha256": digest.hexdigest(),
             "status": "extracted_requires_mapping_validation",
+            # An incremental read says so, and every read of a source with a changed column keeps its highest
+            # value: where the next incremental read starts.
+            **({"changed_column": watched, "high_water": high} if watched else {}),
+            **({"since": request.since} if watched and request.since is not None else {}),
         }
         with (pending / "manifest.json").open("x", encoding="utf-8") as output:
             json.dump(manifest, output, ensure_ascii=False, indent=2)

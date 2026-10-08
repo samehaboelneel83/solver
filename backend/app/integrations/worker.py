@@ -29,7 +29,9 @@ def _extract(row, output, cancelled, result):
                 raise ExtractionError("The stored credential cannot be read with this server's keys",
                                       "credential_unreadable") from None
         adapter = connector_for(source, lambda _: password)
-        request = ExtractionRequest(row["organization_id"], row["id"], source.table, tuple(source.columns), ExtractionLimits())
+        changed = getattr(source, "changed_column", "")
+        request = ExtractionRequest(row["organization_id"], row["id"], source.table, tuple(source.columns), ExtractionLimits(),
+                                    since_column=changed, since=row.get("since") if changed else None)
         artifact = stage_snapshot(Path(output), adapter, request, cancelled)
         result.send(("extracted", artifact.name))
     except ExtractionError as error:
@@ -38,6 +40,24 @@ def _extract(row, output, cancelled, result):
         result.send(("failed", "extraction_failed"))
     finally:
         result.close()
+
+
+def last_high_water(db, organization_id, connection_id, output: str):
+    """The highest value of the changed column the connection's latest extracted read recorded; None when no read
+    has one (the first incremental read is then a full one)."""
+    import json
+
+    for (artifact,) in db.execute(text(
+            "SELECT artifact_id FROM ingestion_job WHERE connection_id = :c AND state = 'extracted'"
+            " AND artifact_id IS NOT NULL ORDER BY finished_at DESC, id DESC LIMIT 5"), {"c": connection_id}).all():
+        manifest = Path(output).resolve() / str(organization_id) / str(connection_id) / str(artifact) / "manifest.json"
+        try:
+            mark = json.loads(manifest.read_text(encoding="utf-8")).get("high_water")
+        except (OSError, ValueError):
+            continue
+        if mark is not None:
+            return mark
+    return None
 
 
 def process_one(session_factory, output: str) -> bool:
@@ -56,6 +76,9 @@ def process_one(session_factory, output: str) -> bool:
             db.commit()
             return True
         row = dict(connection)
+        if job.get("incremental"):
+            # From the highest changed value the source's last read saw (migration 0118); none yet: a full read.
+            row["since"] = last_high_water(db, job["organization_id"], job["connection_id"], output)
         attempt = uuid4()
         db.execute(text("UPDATE ingestion_job SET state='running',attempt=:a,started_at=clock_timestamp() WHERE id=:id"), {"a": attempt, "id": job["id"]})
         db.commit()

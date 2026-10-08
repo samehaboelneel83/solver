@@ -75,9 +75,33 @@ class _DatabaseConnector:
         connection.close()
 
     # -- shared ---------------------------------------------------------------------------------------------------
-    def select(self, columns: tuple[str, ...]) -> str:
+    #: How the engine's driver marks a parameter in a statement.
+    placeholder = "%s"
+
+    def select(self, columns: tuple[str, ...], since_column: str = "") -> str:
         return (f"SELECT {', '.join(self.quote(c) for c in columns)} FROM "
-                f"{self.quote(self.source.schema)}.{self.quote(self.source.table)}")
+                f"{self.quote(self.source.schema)}.{self.quote(self.source.table)}"
+                + (f" WHERE {self.quote(since_column)} >= {self.placeholder}" if since_column else ""))
+
+    def since_value(self, since: object) -> object:
+        """The mark as the driver should be given it: a time as a datetime, a number as a number, so the engine
+        compares it by its type (Oracle reads a text '2026-10-08T…' by its own date format, not ISO 8601)."""
+        if isinstance(since, str):
+            from datetime import datetime
+            from decimal import Decimal, InvalidOperation
+
+            try:
+                return Decimal(since)
+            except InvalidOperation:
+                pass
+            try:
+                return datetime.fromisoformat(since)
+            except ValueError:
+                return since
+        return since
+
+    def params(self, value: object) -> object:
+        return (value,)
 
     def extract(self, request: ExtractionRequest, cancelled: Event):
         source = self.source
@@ -114,7 +138,12 @@ class _DatabaseConnector:
             watcher.start()
             cursor = self.cursor(connection)
             try:
-                cursor.execute(self.select(request.columns))
+                if request.since_column and request.since is not None:
+                    # Only what changed since the last read; >= so rows stamped in the same instant are not lost.
+                    cursor.execute(self.select(request.columns, request.since_column),
+                                   self.params(self.since_value(request.since)))
+                else:
+                    cursor.execute(self.select(request.columns))
                 while True:
                     if cancelled.is_set():
                         raise ExtractionCancelled("Extraction cancelled")
@@ -318,6 +347,11 @@ class OracleConnector(_DatabaseConnector):
         connection = oracledb.connect(user=source.username, password=password, params=params)  # thin mode
         connection.call_timeout = int(source.statement_timeout_ms)
         return connection
+
+    placeholder = ":since"
+
+    def params(self, value: object) -> object:
+        return {"since": value}
 
     def quote(self, name: str) -> str:
         return '"' + name.replace('"', '""') + '"'

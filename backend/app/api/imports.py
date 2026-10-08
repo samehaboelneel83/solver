@@ -129,7 +129,7 @@ def list_jobs(connection_id: int, limit: int = Query(20, ge=1, le=100), offset: 
     if exists is None:
         raise HTTPException(404, "Connection not found")
     jobs = [dict(r) for r in db.execute(text(
-        "SELECT id, state, cancel_requested, created_at, started_at, finished_at, artifact_id, error_code"
+        "SELECT id, state, cancel_requested, created_at, started_at, finished_at, artifact_id, error_code, incremental"
         " FROM ingestion_job WHERE connection_id = :c AND organization_id = :o ORDER BY id DESC LIMIT :l OFFSET :p"),
         params).mappings()]
     total = db.execute(text("SELECT count(*) FROM ingestion_job WHERE connection_id = :c AND organization_id = :o"), params).scalar_one()

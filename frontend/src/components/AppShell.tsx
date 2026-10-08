@@ -12,7 +12,7 @@ import AssistantPanel from "./assistant/AssistantPanel";
 import { setToken } from "../api/client";
 import { applyDirection, applyTheme, isDark, storedDirection, storedTheme, type ThemeChoice } from "../lib/theme";
 import CommandPalette from "./CommandPalette";
-import RecentRuns from "./RecentRuns";
+import RecentRuns, { useNotices } from "./RecentRuns";
 import ContextHeader from "./ContextHeader";
 import ReachabilityBanner from "./ReachabilityBanner";
 import { useCapabilities } from "../hooks/useCapability";
@@ -270,6 +270,7 @@ function AppShellContent() {
     });
   }
   const [openMenu, setOpenMenu] = useState<null | "user" | "runs">(null);
+  const unread = useNotices().data?.unread ?? 0;
   const { username } = useCapabilities();
   const where = whereAmI(location.pathname);
   const say = (text: string) => plainText(text, level === "simple");
@@ -673,12 +674,17 @@ function AppShellContent() {
         <div className="relative">
           <button
             type="button"
-            aria-label="Recent runs"
+            aria-label={unread > 0 ? `Recent runs and ${unread} unread notice${unread === 1 ? "" : "s"}` : "Recent runs"}
             aria-expanded={openMenu === "runs"}
             onClick={() => setOpenMenu((m) => (m === "runs" ? null : "runs"))}
-            className="rounded-md p-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+            className="relative rounded-md p-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
           >
             <Bell className="h-4 w-4" aria-hidden />
+            {unread > 0 && (
+              <span aria-hidden="true" className="absolute -end-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-red-600 px-1 text-[10px] font-semibold text-white">
+                {unread > 9 ? "9+" : unread}
+              </span>
+            )}
           </button>
           {openMenu === "runs" && <RecentRuns onClose={() => setOpenMenu(null)} />}
         </div>

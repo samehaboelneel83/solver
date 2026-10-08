@@ -54,6 +54,7 @@ from app.api.drafts import router as drafts_router
 from app.api.layouts import router as layouts_router
 from app.api.integrations import router as integrations_router
 from app.api.imports import router as imports_router
+from app.api.notices import router as notices_router
 from app.api.source_refresh import router as source_refresh_router
 from app.api.preflight import router as preflight_router
 from app.api.workflow import router as workflow_router
@@ -264,6 +265,7 @@ app.include_router(layouts_router)
 app.include_router(integrations_router)
 app.include_router(imports_router)
 app.include_router(source_refresh_router)
+app.include_router(notices_router)
 app.include_router(preflight_router)
 app.include_router(workflow_router)
 app.include_router(run_events_router)

@@ -45,6 +45,24 @@ def compact(out: dict) -> dict:
             **({"failed": out["failed"]} if out.get("failed") else {})}
 
 
+def notice_for(workspace: str, mode: str, report: dict | None, error: str | None) -> tuple[str, str] | None:
+    """What a scheduled refresh tells the person who set it: changes found (to review), changes applied (and runs
+    queued), or why it could not finish. Nothing when there was nothing to say."""
+    report = report or {}
+    changes, runs = int(report.get("changes") or 0), len(report.get("runs") or [])
+    where = f'"{workspace}"'
+    if error:
+        return (f"The scheduled refresh of {where} did not finish", error)
+    if not changes:
+        return None
+    if report.get("applied"):
+        return (f"The scheduled refresh of {where} applied {changes} change{'s' if changes != 1 else ''}",
+                f"{runs} scenario{'s' if runs != 1 else ''} queued to solve again." if runs else
+                "No scenario was solved again.")
+    return (f"The scheduled refresh of {where} found {changes} change{'s' if changes != 1 else ''} to review",
+            "Nothing was written: open the workspace's sources to see them and apply them.")
+
+
 def tick(engine=None, now: datetime | None = None) -> int:
     """Advance every schedule that is due or extracting. Returns how many were advanced."""
     if engine is None:
@@ -88,6 +106,14 @@ def _advance(engine, domain_id: int, organization_id, now: datetime) -> int:
                 " WHERE domain_id = :d"),
                 {"now": now, "r": None if report is None else __import__("json").dumps(report, default=str),
                  "e": error, "next": _next(row["next_at"], row["every_hours"], now), "d": domain_id})
+            name = db.execute(text("SELECT name FROM domain WHERE id = :d"), {"d": domain_id}).scalar() or f"workspace {domain_id}"
+            told = notice_for(str(name), row["mode"], report, error)
+            if told is not None:
+                # The person who set the schedule hears what it did (migration 0119).
+                db.execute(text("INSERT INTO notice (organization_id, user_id, kind, title, body, link)"
+                                " VALUES (:o, :u, 'scheduled_refresh', :t, :b, :l)"),
+                           {"o": row["organization_id"], "u": row["owner_id"], "t": told[0], "b": told[1],
+                            "l": f"/domains/{domain_id}/data/sources"})
             db.commit()
             return 1
 

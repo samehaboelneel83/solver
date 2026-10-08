@@ -70,6 +70,15 @@ def test_a_scheduled_refresh_of_a_kept_file_applies_and_solves_again(tenants, db
         rows = db.execute(text("SELECT e.key, e.active FROM entity e JOIN entity_type t ON t.id = e.entity_type_id"
                                " WHERE t.name = :k ORDER BY e.key"), {"k": kind}).all()
         assert [(k, a) for k, a in rows] == [("A", True), ("B", True), ("C", False), ("D", True)]
+        # The person who set it is told, in the app (migration 0119).
+        told = client.get("/api/v1/notices", headers=tenants["a"]).json()
+        assert told["unread"] >= 1
+        notice = told["items"][0]
+        assert "applied 3 changes" in notice["title"] and notice["body"] == "1 scenario queued to solve again."
+        assert notice["link"] == f"/domains/{domain}/data/sources"
+        assert client.get("/api/v1/notices", headers=tenants["b"]).json()["items"] == []
+        assert client.post(f"/api/v1/notices/{notice['id']}/read", headers=tenants["b"]).status_code == 404
+        assert client.post(f"/api/v1/notices/{notice['id']}/read", headers=tenants["a"]).status_code == 200
         # Not due again yet: nothing happens.
         assert schedule.tick(engine, now + timedelta(hours=1)) == 0
         # Someone else's workspace schedule is not theirs.
@@ -95,6 +104,10 @@ def test_a_report_only_schedule_writes_nothing_and_says_what_changed(tenants, db
         size = db.execute(text("SELECT (e.attrs->>'size')::numeric FROM entity e JOIN entity_type t"
                                " ON t.id = e.entity_type_id WHERE t.name = :k AND e.key = 'A'"), {"k": kind}).scalar()
         assert float(size) == 4.0
+        told = client.get("/api/v1/notices?unread=true", headers=tenants["a"]).json()
+        assert "found 1 change to review" in told["items"][0]["title"]
+        assert client.post("/api/v1/notices/read-all", headers=tenants["a"]).json()["read"] >= 1
+        assert client.get("/api/v1/notices", headers=tenants["a"]).json()["unread"] == 0
         # Run now brings it forward.
         assert client.post(url + "/run-now", headers=tenants["a"]).status_code == 200
     finally:

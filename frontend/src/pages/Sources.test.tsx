@@ -81,6 +81,26 @@ describe("sources and extractions (Epic UX, U-4)", () => {
     expect(body.source).toEqual({ engine: "mysql", host: "10.0.0.6", port: 3306, database: "planning", username: "reader", schema: "planning", table: "products", columns: ["id", "profit"] });
   });
 
+  it("reads only what changed for a source with a changed column, and says so in its history", async () => {
+    vi.mocked(apiFetch).mockImplementation(async (path) => {
+      const p = String(path);
+      if (p.startsWith("/api/v1/connections?")) return { items: [{ id: 4, name: "HR database", enabled: true,
+        config: { schema: "hr", table: "staff", changed_column: "updated_at" } }], total: 1 };
+      if (p.startsWith("/api/v1/connections/4/jobs?")) return { total: 1, items: [{ id: 14, state: "extracted",
+        cancel_requested: false, created_at: "2026-10-08T08:00:00Z", finished_at: null, artifact_id: "a", error_code: null,
+        loads: [], incremental: true }] };
+      if (p === "/api/v1/connections/4/jobs") return { id: 15, state: "queued", incremental: true };
+      throw new Error(`unexpected ${p}`);
+    });
+    mount("/domains/7/data/sources");
+    fireEvent.click(await screen.findByRole("button", { name: "Extractions" }));
+    expect(await screen.findByText(/Extraction 14 · only what changed/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Read only what changed" }));
+    await waitFor(() => expect(calls()).toContain("POST /api/v1/connections/4/jobs"));
+    const sent = vi.mocked(apiFetch).mock.calls.find(([p, i]) => p === "/api/v1/connections/4/jobs" && (i as RequestInit)?.method === "POST");
+    expect(JSON.parse(String((sent![1] as RequestInit).body))).toEqual({ incremental: true });
+  });
+
   it("adds a REST source read in pages, with where its next address is", async () => {
     mount("/domains/7/data/sources");
     fireEvent.click(await screen.findByRole("button", { name: "Add a source" }));

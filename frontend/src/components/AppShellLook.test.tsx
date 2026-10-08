@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AppShell, { whereAmI } from "./AppShell";
@@ -28,6 +28,8 @@ function renderAt(path = "/") {
   );
 }
 
+let notices: { id: number; kind: string; title: string; body: string; link: string | null; created_at: string; read_at: string | null }[] = [];
+
 describe("the app's look (queue R22)", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -39,6 +41,8 @@ describe("the app's look (queue R22)", () => {
       if (path.startsWith("/api/domain/")) return Promise.resolve({ items: [], total: 0 });
       if (path === "/api/health") return Promise.resolve({ postgres: "ok", clickhouse: "ok" });
       if (path.startsWith("/api/v1/me")) return Promise.resolve({ username: "sameh", display_name: null, capabilities: ["domain.edit"] });
+      if (path.startsWith("/api/v1/notices/read-all")) return Promise.resolve({ read: notices.length });
+      if (path.startsWith("/api/v1/notices")) return Promise.resolve({ items: notices, unread: notices.filter((n) => !n.read_at).length });
       if (path.startsWith("/api/v1/runs")) {
         return Promise.resolve({ items: [{ id: 41, scenario_id: 5, status: "optimal", queued_at: new Date().toISOString(), finished_at: new Date().toISOString() }], total: 1 });
       }
@@ -98,6 +102,23 @@ describe("the app's look (queue R22)", () => {
     fireEvent.keyDown(search, { key: "Enter" });
     expect(screen.getByTestId("path")).toHaveTextContent("/parameters");
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("counts unread notices on the bell and lists them above the runs", async () => {
+    notices = [
+      { id: 2, kind: "scheduled_refresh", title: 'The scheduled refresh of "Rota" found 3 changes to review',
+        body: "Nothing was written: open the workspace's sources to see them and apply them.", link: "/domains/7/data/sources",
+        created_at: new Date().toISOString(), read_at: null },
+      { id: 1, kind: "scheduled_refresh", title: 'The scheduled refresh of "Rota" did not finish', body: "no source could be read",
+        link: null, created_at: new Date().toISOString(), read_at: null },
+    ];
+    renderAt();
+    fireEvent.click(await screen.findByRole("button", { name: "Recent runs and 2 unread notices" }));
+    expect(await screen.findByText(/found 3 changes to review/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /found 3 changes/ })).toHaveAttribute("href", "/domains/7/data/sources");
+    fireEvent.click(screen.getByRole("button", { name: "Mark all read" }));
+    await waitFor(() => expect((apiFetch as any).mock.calls.some(([p]: [string]) => p === "/api/v1/notices/read-all")).toBe(true));
+    notices = [];
   });
 
   it("lists recent runs under the bell, and signs out from the account menu", async () => {

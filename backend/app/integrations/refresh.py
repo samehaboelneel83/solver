@@ -54,7 +54,8 @@ def job_sheet(job: dict, organization_id) -> dict:
             "sheets": [{"name": str(manifest.get("source_object") or "rows"), "columns": columns, "rows": rows,
                         "total_rows": total, "truncated": total > len(rows)}],
             "source": {"connection_id": job["connection_id"], "job_id": job["id"],
-                       "sha256": manifest.get("sha256"), "extracted_at": manifest.get("completed_at")}}
+                       "sha256": manifest.get("sha256"), "extracted_at": manifest.get("completed_at"),
+                       **({"since": manifest["since"]} if manifest.get("since") is not None else {})}}
 
 
 # -- bindings -------------------------------------------------------------------------------------------------
@@ -282,10 +283,18 @@ def _cells(db: Session, domain_id: int, binding: dict, wanted: list[dict]) -> di
 def compare(db: Session, domain_id: int, binding: dict, sheet: dict) -> dict:
     wanted = _wanted(binding, sheet)
     if binding["kind"] == "entities":
-        return _entities(db, domain_id, binding, wanted)
-    if binding["kind"] == "relationships":
-        return _relationships(db, domain_id, binding, wanted)
-    return _cells(db, domain_id, binding, wanted)
+        out = _entities(db, domain_id, binding, wanted)
+    elif binding["kind"] == "relationships":
+        out = _relationships(db, domain_id, binding, wanted)
+    else:
+        out = _cells(db, domain_id, binding, wanted)
+    since = (sheet.get("source") or {}).get("since")
+    if since is not None:
+        # An incremental read (migration 0118) has only what changed since `since`: a record it does not have is
+        # unchanged, not gone. A full read finds what was removed.
+        out["removed"] = []
+        out["incremental_since"] = since
+    return out
 
 
 # -- writing it ------------------------------------------------------------------------------------------------

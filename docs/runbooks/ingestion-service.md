@@ -147,6 +147,18 @@ default 1) until a page is empty. Every page is read under the policy above; the
 source's host over https (else `network_not_allowed`), the 20 MB cap is for all pages together, at most 1,000 pages
 are read (`limit_exceeded`), and an address seen twice ends the reading.
 
+Only what changed (migration 0118): a database source may name `changed_column`, one of its columns that grows when
+a row changes (an update time or a version number). Every read of such a source keeps the column's highest value in
+its manifest (`high_water`); `POST /api/v1/connections/{id}/jobs {"incremental": true}` then reads only the rows
+whose value is at least that (`>=`, so rows stamped in the same instant are read again rather than lost; the mark is
+bound as a parameter, a time as a datetime and a number as a number, for every engine). A refresh from such a read
+adds and updates records and values but takes nothing away: a row it did not read is unchanged, not gone. Read the
+source whole now and then to find what was deleted. With no earlier mark, an incremental read is a whole one.
+
+Notices (migration 0119): a scheduled refresh that found changes to review, applied changes (and queued runs), or
+could not finish leaves a notice for the person who set it, shown under the bell in the app's header
+(`GET /api/v1/notices`, `POST /api/v1/notices/{id}/read`, `POST /api/v1/notices/read-all`).
+
 ## Database engines (plan of 8 October 2026, phase 4A)
 
 A database source names its `engine`: `postgres` (default), `mysql` (MySQL and MariaDB), `sqlserver` or `oracle`;

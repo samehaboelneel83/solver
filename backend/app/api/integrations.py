@@ -27,6 +27,14 @@ class SourceBody(BaseModel):
     schema_name: str = Field(alias="schema", min_length=1, max_length=128)
     table: str = Field(min_length=1, max_length=128)
     columns: list[str] = Field(min_length=1, max_length=200)
+    changed_column: str = Field(default="", max_length=128, description="a column that grows when a row changes "
+                                "(an update time or a version), one of `columns`: lets a read take only what changed")
+
+    @model_validator(mode="after")
+    def _changed_is_read(self):
+        if self.changed_column and self.changed_column not in self.columns:
+            raise ValueError("changed_column must be one of the columns read")
+        return self
 
 
 class HttpSourceBody(BaseModel):
@@ -152,24 +160,37 @@ def disable_connection(identity: int, db: Session = Depends(get_db), user=Depend
     db.commit()
 
 
+class JobBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    #: Only the rows changed since the source's last read (migration 0118); needs the source's changed_column.
+    incremental: bool = False
+
+
 @router.post("/connections/{identity}/jobs", status_code=202)
-def submit(identity: int, db: Session = Depends(get_db), user=Depends(requires("integration.run"))):
+def submit(identity: int, body: JobBody | None = None, db: Session = Depends(get_db),
+           user=Depends(requires("integration.run"))):
     row = _connection(db, identity, user.organization_id)
     if not row["enabled"]:
         raise HTTPException(409, "Connection is disabled")
+    incremental = bool(body and body.incremental)
+    if incremental and not (row["config"] or {}).get("changed_column"):
+        raise HTTPException(422, "This source names no changed column (an update time or a version), so it can only be "
+                                 "read whole")
     try:
-        job = db.execute(text("INSERT INTO ingestion_job(connection_id,organization_id,requested_by) VALUES (:id,:o,:u) RETURNING id"), {"id": identity, "o": user.organization_id, "u": user.id}).scalar_one()
+        job = db.execute(text("INSERT INTO ingestion_job(connection_id,organization_id,requested_by,incremental)"
+                              " VALUES (:id,:o,:u,:inc) RETURNING id"),
+                         {"id": identity, "o": user.organization_id, "u": user.id, "inc": incremental}).scalar_one()
         _audit(db, user, "integration.job.submit", job)
         db.commit()
     except IntegrityError:
         db.rollback()
         raise HTTPException(409, "An ingestion job is already active") from None
-    return {"id": job, "state": "queued"}
+    return {"id": job, "state": "queued", "incremental": incremental}
 
 
 @router.get("/ingestion-jobs/{identity}")
 def job_status(identity: int, db: Session = Depends(get_db), user=Depends(requires("integration.run"))):
-    row = db.execute(text("SELECT id,connection_id,state,cancel_requested,created_at,started_at,finished_at,artifact_id,error_code FROM ingestion_job WHERE id=:id AND organization_id=:o"), {"id": identity, "o": user.organization_id}).mappings().one_or_none()
+    row = db.execute(text("SELECT id,connection_id,state,cancel_requested,created_at,started_at,finished_at,artifact_id,error_code,incremental FROM ingestion_job WHERE id=:id AND organization_id=:o"), {"id": identity, "o": user.organization_id}).mappings().one_or_none()
     if row is None:
         raise HTTPException(404, "Ingestion job not found")
     return dict(row)

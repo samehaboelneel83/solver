@@ -71,6 +71,10 @@ class ExtractionRequest:
     source_object: str
     columns: tuple[str, ...]
     limits: ExtractionLimits = ExtractionLimits()
+    #: An incremental read (migration 0118): only rows whose `since_column` is at least `since`. A column the
+    #: request also reads, so the read's own highest value is known; empty for a full read.
+    since_column: str = ""
+    since: object = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.organization_id, UUID):
@@ -81,6 +85,10 @@ class ExtractionRequest:
             raise ValueError("A source and explicit columns are required")
         if len(set(self.columns)) != len(self.columns):
             raise ValueError("Columns must be unique")
+        if self.since_column and self.since_column not in self.columns:
+            raise ValueError("The changed column must be one of the columns read")
+        if self.since is not None and not isinstance(self.since, (str, int, float)) or isinstance(self.since, bool):
+            raise ValueError("The mark to read from must be a number or a text value")
 
 
 class SnapshotConnector(Protocol):
@@ -165,3 +173,16 @@ def extract_batches(
                 close()
             except Exception:
                 raise ExtractionError("Source cleanup failed") from None
+
+
+def later(a: object, b: object) -> object:
+    """The later of two values of a changed column, as an extraction encodes them: numbers (a decimal or a
+    large integer arrives as text) by their value, everything else -- ISO 8601 times -- as text."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    try:
+        return a if float(a) >= float(b) else b  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return a if str(a) >= str(b) else b
