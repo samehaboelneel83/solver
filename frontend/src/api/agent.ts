@@ -19,16 +19,30 @@ export type PlanCounts = Partial<Record<
   number
 >>;
 
+/** A run's facts as the platform renders them beside the Assistant's answer (never typed by the model). */
+export type RunFacts = {
+  run_id: number;
+  status: string;
+  status_words: string;
+  sense: string;
+  goal: number | null;
+  bound: number | null;
+  gap_pct: number | null;
+  parts?: { id: string; value: number | null }[];
+  decisions: { var: string; header: string[]; rows: string[][]; count: number; chosen: boolean }[];
+  rules: { id: string; state: "broken" | "tight"; short_by: number | null; hard: boolean }[];
+};
+
 export type AgentEvent =
   | { type: "thinking" }
   | { type: "ping" }
   | { type: "note"; text: string }
   | { type: "tool"; name: string; args: Record<string, unknown> }
   | { type: "result"; name: string; ok: boolean; preview: string }
-  | { type: "confirm"; calls: { method?: string; path?: string; body?: unknown }[] }
+  | { type: "confirm"; calls: { method?: string; path?: string; body?: unknown; text?: string }[] }
   | { type: "plan"; summary: string; counts: PlanCounts; spec: Record<string, unknown> }
   | { type: "built"; domain_id: number; problem_id: number; model_version_id: number; scenario_id: number; domain_created: boolean; created: PlanCounts }
-  | { type: "answer"; text: string }
+  | { type: "answer"; text: string; facts?: RunFacts[] }
   | { type: "error"; text: string }
   | { type: "handover"; mode: AgentMode; text: string }
   | { type: "file"; file: AttachedFile }

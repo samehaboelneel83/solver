@@ -180,6 +180,15 @@ def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classifi
         )
         planner.append("some groups must be one connected piece")
 
+    if any(isinstance(c, dict) and "place" in c for c in ir.get("constraints", [])):
+        needs.add("placement")
+        reasons.append(
+            "a rule places items on a drawing's free area without a list of positions, which the placement "
+            "solver holds on the grid itself"
+        )
+        planner.append("items are laid out on the drawing")
+        refusals["placement"] = "a place rule is solved by the placement solver, the one solver here that holds it"
+
     if any(isinstance(c, dict) and "route" in c for c in ir.get("constraints", [])):
         needs.add("route")
         reasons.append(
@@ -222,6 +231,9 @@ def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classifi
             f"{fractional} is not a whole number, so a yes-or-no solver cannot take this model"
         )
 
+    if "placement" in needs:
+        # Its own class: only the placement solver takes it, and it takes nothing else (plan phase 1C).
+        model_class = "placement"
     return Classification(model_class, reasons, needs, planner, refusals=refusals, convex=convex)
 
 

@@ -19,7 +19,7 @@ from uuid import UUID
 FAILURE_CODES = frozenset({
     "extraction_failed", "authentication_failed", "tls_failed", "source_unreachable", "network_not_allowed",
     "source_missing", "not_permitted", "trust_unavailable", "credential_unreadable", "deadline_exceeded",
-    "limit_exceeded",
+    "limit_exceeded", "format_invalid",
 })
 
 

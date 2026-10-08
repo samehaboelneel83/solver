@@ -45,6 +45,8 @@ from app.ir.contract import (
     EDGE_MARK,
     PATH_COMBINATIONS,
     ROUTE_KEYS,
+    PLACE_KEYS,
+    PLACE_REQUIRED,
     CONSTRAINT_KEYS,
     INTERVAL_KEYS,
     UNCERTAINTY_KINDS,
@@ -733,7 +735,7 @@ class _ShapeChecker:
                 scope = result
 
             if "chance" in constraint and (
-                "connected" in constraint or "route" in constraint
+                "connected" in constraint or "route" in constraint or "place" in constraint
                 or any(kind in constraint for kind in SCHEDULING_KEYS)
             ):
                 problem = self._check_chance(constraint, at, identifier)
@@ -751,6 +753,11 @@ class _ShapeChecker:
                 continue
             if "route" in constraint:
                 problem = self._check_route(constraint, at, identifier)
+                if problem:
+                    return problem
+                continue
+            if "place" in constraint:
+                problem = self._check_place(constraint, at, identifier)
                 if problem:
                     return problem
                 continue
@@ -1113,6 +1120,83 @@ class _ShapeChecker:
                 )
         return None
 
+    def _check_place(self, constraint: dict[str, Any], at: Loc, identifier: str):
+        """`place` (version 2, plan phase 1C): items on a drawing's free area, without a list of positions. The
+        rule binds its own slots and areas, so it stands outside any forall; it is hard and unconditional."""
+        loc: Loc = [*at, "place"]
+        if self.ir.get("version") == 1:
+            return Refusal("place_needs_version_2", at,
+                           f"the constraint {identifier!r} is a place rule, which version 1 does not have; "
+                           "publish it as version 2")
+        beside = [key for key in ("left", "relation", "right", "forall", "connected", "route", *SCHEDULING_KEYS)
+                  if key in constraint]
+        if beside:
+            return Refusal("place_malformed", [*at, beside[0]],
+                           f"the constraint {identifier!r} is a place rule and also carries {beside[0]}")
+        body = constraint["place"]
+        if not isinstance(body, dict):
+            return Refusal("place_malformed", loc, "a place rule is an object: " + ", ".join(sorted(PLACE_REQUIRED)))
+        odd = next((k for k in sorted(PLACE_REQUIRED) if k not in body), None)
+        what = "missing"
+        if odd is None:
+            odd, what = next((k for k in body if k not in PLACE_KEYS), None), "not one of its keys"
+        if odd is not None:
+            return Refusal("place_malformed", [*loc, odd],
+                           f"a place rule names {', '.join(sorted(PLACE_REQUIRED))} and optionally turn, side, "
+                           f"can_turn, aisle and aisle_sides; {odd!r} is {what}")
+        for key in ("severity", "weight", "when", "chance"):
+            if key in constraint and (key != "severity" or constraint[key] != "hard"):
+                return Refusal("place_on_soft", [*at, key],
+                               f"the place rule {identifier!r} is hard and unconditional")
+        if constraint.get("severity") != "hard":
+            return Refusal("constraint_severity_unsupported", [*at, "severity"],
+                           'a place rule is hard: write "severity": "hard"')
+        step, origin = body["step"], body["origin"]
+        if not _is_number(step) or step <= 0:
+            return Refusal("place_malformed", [*loc, "step"], "the grid step is a positive number of metres")
+        if not isinstance(origin, list) or len(origin) != 2 or not all(_is_number(v) for v in origin):
+            return Refusal("place_malformed", [*loc, "origin"], "the grid's origin is [x, y] in metres")
+        if "aisle" in body and (not isinstance(body["aisle"], int) or isinstance(body["aisle"], bool)
+                                or body["aisle"] < 0):
+            return Refusal("place_malformed", [*loc, "aisle"], "the aisle is a whole number of cells, 0 or more")
+        if body.get("aisle") and body.get("aisle_sides") not in ("long", "short", "any"):
+            return Refusal("place_malformed", [*loc, "aisle_sides"],
+                           'an aisle names its sides: "long", "short" or "any"')
+        if body.get("aisle") and "side" not in body:
+            return Refusal("place_malformed", [*loc, "side"], "an aisle needs the side variable that says where it is")
+        for key in ("length", "width", "can_turn", "shape", "access_shape"):
+            if key in body and not (isinstance(body[key], str) and body[key]):
+                return Refusal("place_malformed", [*loc, key], f"{key} names a field")
+        if ("access" in body) != ("access_shape" in body):
+            return Refusal("place_malformed", [*loc, "access" if "access" not in body else "access_shape"],
+                           "access names the features (a set) and access_shape the field holding their shape")
+        scope: dict[str, str] = {}
+        for part in ("slots", "areas", "access"):
+            if part not in body:
+                continue
+            inner = self.check_bindings([body[part]], [*loc, part], {})
+            if isinstance(inner, Refusal):
+                return Refusal(inner.code, [*loc, part, *inner.loc[len(loc) + 2:]], inner.message)
+            if part == "slots":
+                scope = inner
+        slot = body["slots"].get("index")
+        domains = {"chosen": ("binary",), "x": ("integer",), "y": ("integer",), "turn": ("binary",),
+                   "side": ("integer",)}
+        for key, allowed in domains.items():
+            if key not in body:
+                continue
+            ref = body[key]
+            if not isinstance(ref, dict) or set(ref) != {"var", "index"} or ref.get("index") != [slot]:
+                return Refusal("place_index_mismatch", [*loc, key],
+                               f'{key} is a variable read per slot: {{"var": "...", "index": ["{slot}"]}}')
+            problem = self._reference(ref, [*loc, key], scope, "var", self.variables)
+            if problem:
+                return problem
+            if self.ir["variables"][ref["var"]].get("domain") not in allowed:
+                return Refusal("place_domain", [*loc, key, "var"],
+                               f"{ref['var']!r} must be {allowed[0]} for a place rule's {key}")
+        return None
+
     def _check_chance(self, constraint: dict[str, Any], at: Loc, identifier: str):
         """`chance` (version 2): the rule must hold in all but `epsilon` of the
         futures a stochastic solve samples -- one switch per future, at most
@@ -1137,7 +1221,8 @@ class _ShapeChecker:
                 "a chance is the share of futures the rule may fail in, strictly between 0 and 1: "
                 '{"epsilon": 0.1} holds it in 90% of them',
             )
-        if "connected" in constraint or "route" in constraint or any(kind in constraint for kind in SCHEDULING_KEYS):
+        if ("connected" in constraint or "route" in constraint or "place" in constraint
+                or any(kind in constraint for kind in SCHEDULING_KEYS)):
             return Refusal("chance_misplaced", loc, f"the constraint {identifier!r} is a scheduling, connected or route rule; a chance is on an expression rule")
         if constraint.get("severity") == "soft":
             return Refusal("chance_misplaced", loc, f"the constraint {identifier!r} is soft; a rule that may bend at a cost needs no chance -- make it hard")
@@ -2293,6 +2378,15 @@ class _DomainChecker:
                 problem = self._connected(constraint["connected"], [*at, "connected"])
                 if problem:
                     return problem
+                continue
+            if "place" in constraint:
+                inner = {}
+                for part in ("slots", "areas", "access"):
+                    if part not in constraint["place"]:
+                        continue
+                    problem = self._bindings([constraint["place"][part]], [*at, "place", part], inner)
+                    if problem:
+                        return Refusal(problem.code, [*at, "place", part, *problem.loc[len(at) + 3:]], problem.message)
                 continue
             if "route" in constraint:
                 inner: dict[str, str] = {}

@@ -21,7 +21,7 @@ MAX_BYTES = 10 * 1024 * 1024
 MAX_ROWS = 5000
 #: Rows read from a file the Assistant generated with run_python and loads straight from its working folder
 #: (never sent through the chat): a layout's candidates run to tens of thousands (the camp-bed retest).
-MAX_GENERATED_ROWS = 200_000
+MAX_GENERATED_ROWS = __import__("app.core.limits", fromlist=["x"]).GENERATED_ROWS
 _ROWS = __import__("contextvars").ContextVar("agent_file_rows", default=MAX_ROWS)
 MAX_SHEETS = 10
 MAX_COLUMNS = 60
@@ -383,9 +383,35 @@ def expand(seed: dict[str, Any], files: list[dict[str, Any]]) -> dict[str, Any]:
     """`entities_from_file` and `parameter_values_from_file` as plain `entities` and `parameter_values`."""
     out = {k: v for k, v in seed.items()
            if k not in ("entities_from_file", "parameter_values_from_file", "relationships_from_file")}
+    bindings = list(seed.get("source_bindings") or [])
+    kept_files: dict[str, dict[str, Any]] = {}
+
+    def bound(kind: str, spec: dict[str, Any], target: Any) -> None:
+        """A *_from_file entry reading a workspace data source (use_source): remembered with the build, so a
+        refresh can read the source again and update what this entry made (migration 0114)."""
+        found = next((f for f in files if f.get("name") == spec.get("file")), None)
+        if found is None:
+            return
+        src = found.get("source")
+        mapping = {k: v for k, v in spec.items() if k != "file"}
+        if isinstance(src, dict) and src.get("connection_id"):
+            bindings.append({"connection_id": src["connection_id"], "job_id": src.get("job_id"),
+                             "sha256": src.get("sha256"), "kind": kind, "target": str(target), "mapping": mapping})
+            return
+        # A file the person attached (or one kept in the workspace, re-attached): kept with the build as a
+        # workspace file, version by version (migration 0115), and bound like a database source.
+        from app.integrations.refresh import keepable
+
+        name = (src or {}).get("file") or found["name"]
+        if isinstance(src, dict) and src.get("file") or keepable(found):
+            bindings.append({"file_name": name, "kind": kind, "target": str(target), "mapping": mapping})
+            if not (isinstance(src, dict) and src.get("file")) and name not in kept_files:
+                kept_files[name] = found
+
     entities = list(seed.get("entities") or [])
     for spec in seed.get("entities_from_file") or []:
         s = find_sheet(files, spec.get("file"), spec.get("sheet"))
+        bound("entities", spec, spec.get("type"))
         key_at = _columns(s, spec.get("key"), f'entities_from_file for "{spec.get("type")}": "key" (the column '
                                                         "with each record's key, or a list of columns)")
         label_at = _column(s, spec["label"]) if spec.get("label") else None
@@ -415,6 +441,7 @@ def expand(seed: dict[str, Any], files: list[dict[str, Any]]) -> dict[str, Any]:
     for spec in seed.get("relationships_from_file") or []:
         # One link per row: {"type": "works_in", "from": ["employee", "employee column"], "to": ["unit", "unit column"]}
         s = find_sheet(files, spec.get("file"), spec.get("sheet"))
+        bound("relationships", spec, spec.get("type"))
         ends = []
         for end in ("from", "to"):
             pair = spec.get(end)
@@ -438,6 +465,7 @@ def expand(seed: dict[str, Any], files: list[dict[str, Any]]) -> dict[str, Any]:
     cells = list(seed.get("parameter_values") or [])
     for spec in seed.get("parameter_values_from_file") or []:
         s = find_sheet(files, spec.get("file"), spec.get("sheet"))
+        bound("parameter_values", spec, spec.get("parameter"))
         ends = [(str(t), _columns(s, c)) for t, c in (spec.get("entities") or [])]
         if len(ends) >= 2 and len({tuple(at) for _, at in ends}) < len(ends):
             # Two indices read from one column give each record only with itself (the evaluation's routing
@@ -464,6 +492,10 @@ def expand(seed: dict[str, Any], files: list[dict[str, Any]]) -> dict[str, Any]:
                           "entities": [[t, k] for (t, _), k in zip(ends, keys)], "value": value})
     if cells:
         out["parameter_values"] = cells
+    if bindings:
+        out["source_bindings"] = bindings
+    if kept_files:
+        out["source_files"] = list(kept_files.values())
     from app.seed import fitting_patterns, pattern_problems
 
     problems = pattern_problems(out)

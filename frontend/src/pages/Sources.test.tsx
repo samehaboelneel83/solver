@@ -9,7 +9,7 @@ vi.mock("../api/client", async () => ({
 const access = vi.hoisted(() => ({ capabilities: ["integration.run", "integration.manage"] }));
 vi.mock("../hooks/useCapability", () => ({ useCapabilities: () => ({ known: true, can: (c: string) => access.capabilities.includes(c) }) }));
 import { apiFetch } from "../api/client";
-import { ImportWizard, SourcesPage, guessMapping } from "./Sources";
+import { ImportWizard, SourcesPage, changeLines, everyOptions, guessMapping } from "./Sources";
 
 function mount(path: string) {
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
@@ -62,7 +62,23 @@ describe("sources and extractions (Epic UX, U-4)", () => {
     fireEvent.click(within(form).getByRole("button", { name: "Save source" }));
     await waitFor(() => expect(calls()).toContain("POST /api/v1/connections"));
     const body = JSON.parse(String((vi.mocked(apiFetch).mock.calls.find(([p]) => p === "/api/v1/connections")![1] as RequestInit).body));
-    expect(body.source).toEqual({ host: "10.0.0.5", port: 5432, database: "rota", username: "reader", schema: "public", table: "shifts", columns: ["id", "day", "hours"] });
+    expect(body.source).toEqual({ engine: "postgres", host: "10.0.0.5", port: 5432, database: "rota", username: "reader", schema: "public", table: "shifts", columns: ["id", "day", "hours"] });
+  });
+
+  it("adds a MySQL source with its usual port, the table's database as its schema", async () => {
+    mount("/domains/7/data/sources");
+    fireEvent.click(await screen.findByRole("button", { name: "Add a source" }));
+    const form = screen.getByRole("form", { name: "Add a source" });
+    fireEvent.change(within(form).getByLabelText("Database engine"), { target: { value: "mysql" } });
+    expect(within(form).getByLabelText("Port")).toHaveValue("3306");
+    for (const [label, value] of [["Name", "Plant"], ["Host", "10.0.0.6"], ["Database", "planning"], ["User name", "reader"],
+      ["Password", "s3cret"], ["Table or view", "products"], ["Columns to extract, separated by commas", "id, profit"]]) {
+      fireEvent.change(within(form).getByLabelText(label), { target: { value } });
+    }
+    fireEvent.click(within(form).getByRole("button", { name: "Save source" }));
+    await waitFor(() => expect(calls()).toContain("POST /api/v1/connections"));
+    const body = JSON.parse(String((vi.mocked(apiFetch).mock.calls.find(([p]) => p === "/api/v1/connections")![1] as RequestInit).body));
+    expect(body.source).toEqual({ engine: "mysql", host: "10.0.0.6", port: 3306, database: "planning", username: "reader", schema: "planning", table: "products", columns: ["id", "profit"] });
   });
 
   it("offers no source form to an account that may only run extractions", async () => {
@@ -142,5 +158,33 @@ describe("the import wizard", () => {
 describe("guessing a mapping", () => {
   it("maps same-named columns and an id column onto the key, each target once", () => {
     expect(guessMapping(["ID", "label", "hours", "Hours"], ["key", "label", "hours"])).toEqual({ ID: "key", label: "label", hours: "hours" });
+  });
+});
+
+describe("a refresh's changes in words", () => {
+  it("names each record, field and value that changes", () => {
+    const lines = changeLines({
+      binding_id: 1, connection_id: 4, source: "Products", kind: "entities", target: "product", job_id: 9, same_extraction: false,
+      counts: { added: 1, changed: 1, removed: 1, unchanged: 3 },
+      added: [{ key: "P6", label: "Bench" }],
+      changed: [{ key: "P1", fields: [{ field: "profit", before: 45, after: 50 }] }],
+      removed: [{ key: "P3" }],
+    });
+    expect(lines).toEqual(["+ P6 (Bench)", "P1: profit 45 → 50", "− P3"]);
+    expect(changeLines({ ...{ binding_id: 3, connection_id: null, source: "f", kind: "entities", target: "t", job_id: null,
+      same_extraction: false, counts: { added: 1, changed: 0, removed: 0, unchanged: 0 }, changed: [], removed: [] },
+      added: [{ key: "P7", label: "P7" }] })).toEqual(["+ P7"]);
+    expect(changeLines({
+      binding_id: 2, connection_id: 4, source: "Lanes", kind: "parameter_values", target: "cost", job_id: 9, same_extraction: false,
+      counts: { added: 0, changed: 1, removed: 0, unchanged: 0 }, added: [], removed: [],
+      changed: [{ index: ["N", "A"], before: 4, after: 5 }],
+    })).toEqual(["N · A: 4 → 5"]);
+  });
+});
+
+describe("how often a refresh runs", () => {
+  it("offers the usual intervals, and keeps one set elsewhere", () => {
+    expect(everyOptions(168).map(([h]) => h)).toEqual([1, 6, 24, 168, 720]);
+    expect(everyOptions(48).at(-1)).toEqual([48, "48 hours"]);
   });
 });

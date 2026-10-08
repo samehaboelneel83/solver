@@ -230,7 +230,9 @@ RESULT_TOOL: dict[str, Any] = {"type": "function", "function": {
     "name": "read_result",
     "description": "A settled run's answer, ready to report: status and goal, what the goal is made of, every "
                    "decision with its records' names and numbers, per-record totals, and each rule held, tight or "
-                   "broken. Call it once the run has finished, and report from it.",
+                   "broken. Call it once the run has finished, and report from it. The person also sees the run's facts "
+                   "(status, goal, the first rows of each decision, tight or broken rules) in a card the platform "
+                   "draws above your reply: explain them, do not retype them.",
     "parameters": {"type": "object", "properties": {"run_id": {"type": "integer"}}, "required": ["run_id"]}}}
 OUTPUT_TOOL: dict[str, Any] = {"type": "function", "function": {
     "name": "read_output",
@@ -244,10 +246,12 @@ OUTPUT_TOOL: dict[str, Any] = {"type": "function", "function": {
 LAYOUT_TOOL: dict[str, Any] = {"type": "function", "function": {
     "name": "make_layout",
     "description": "For any problem of PLACING ITEMS ON A DRAWING (beds in camps, desks in rooms, parking stalls, "
-                   "shelves, panels): the platform makes every candidate position (each turn and aisle side) on a "
-                   "grid over the free area, which cells each covers, and which cells its aisle needs free; writes "
-                   "the files, and returns the counts, an upper bound and the READY plan (seed + model) to give to "
-                   "check_spec. Use it instead of writing geometry code. Sizes in metres.",
+                   "shelves, panels): the platform writes the files and returns the counts, an upper bound and the "
+                   "READY plan (seed + model) to give to check_spec. Use it instead of writing geometry code. Sizes "
+                   "in metres. By default (form 'place') there is NO list of positions: the placement solver lays "
+                   "the items out on the drawing's exact grid itself (any step, however fine: the aisle exactly as "
+                   "asked), with access_layers too (every item reachable from a door). Form 'candidates' lists every "
+                   "position instead: only when the user asks for a candidate list.",
     "parameters": {"type": "object", "properties": {
         "file": {"type": "string", "description": "The attached drawing (optional when there is one)"},
         "area_layers": {"type": "array", "items": {"type": "string"},
@@ -265,6 +269,9 @@ LAYOUT_TOOL: dict[str, Any] = {"type": "function", "function": {
                        "description": "Which side the aisle is on: short (the foot of a bed), long, any"},
         "step": {"type": "number", "description": "Grid step (m). Leave it OUT unless the user named one: the "
                  "platform picks the coarsest step that is exact for every size"},
+        "form": {"type": "string", "enum": ["place", "candidates"],
+                 "description": "place (default): no candidate list, the exact grid; candidates: every position "
+                                "listed, only when asked"},
         "access_layers": {"type": "array", "items": {"type": "string"},
                           "description": "Layers of the features every item must be reachable from through free "
                                          "cells (doors, exits, gates): give them whenever the user wants access, "
@@ -319,8 +326,41 @@ SOURCE_TOOL: dict[str, Any] = {"type": "function", "function": {
                    "changed, or asks for the current figures).",
     "parameters": {"type": "object", "properties": {
         "source": {"type": "string", "description": "The source's name or id, as data_sources lists it"},
+        "domain_id": {"type": "integer", "description": "The workspace; omit for the selected one (give the id of a "
+                      "workspace this conversation built in, when that is another)"},
         "refresh": {"type": "boolean", "description": "Read the database again now instead of the latest extraction"}},
         "required": ["source"]}}}
+REFRESH_TOOL: dict[str, Any] = {"type": "function", "function": {
+    "name": "refresh_sources",
+    "description": "Read the workspace's DATA SOURCES (database tables) again and update the records, links and "
+                   "values that were built from them. apply=false (first): reads each source afresh and reports "
+                   "what would change -- records added, fields changed (before -> after), records gone, values "
+                   "changed -- writing nothing; show it to the person. apply=true (after they agree): writes exactly "
+                   "those changes (records gone are set inactive, not deleted). Then solve the scenario again "
+                   "(POST /api/v1/scenarios/{id}/runs) and compare the new answer with the last one.",
+    "parameters": {"type": "object", "properties": {
+        "sources": {"type": "array", "items": {"type": "string"},
+                    "description": "Only these sources (names or ids, or kept file names); omit for every one the "
+                                   "workspace uses. A newer copy of a kept file attached in this conversation is "
+                                   "kept as its next version and compared"},
+        "apply": {"type": "boolean", "description": "false: report only; true: write the changes just reported"},
+        "keep_missing": {"type": "boolean", "description": "true: keep records the source no longer has active"},
+        "domain_id": {"type": "integer", "description": "The workspace; omit for the selected one (give the id of a "
+                      "workspace this conversation built in, when that is another)"}}}}}
+SCHEDULE_TOOL: dict[str, Any] = {"type": "function", "function": {
+    "name": "schedule_refresh",
+    "description": "Refresh the workspace from its sources on a schedule (the person asks for 'every week', "
+                   "'daily', 'keep it up to date'): every every_hours the platform reads the sources again; "
+                   "mode report keeps what changed for a person to apply, mode apply writes it, and solve=true (with "
+                   "apply) solves again every scenario that reads the data. It runs as the person, with their "
+                   "permissions. enabled=false pauses it. describe_workspace shows it and its last run.",
+    "parameters": {"type": "object", "properties": {
+        "every_hours": {"type": "integer", "description": "24 daily, 168 weekly"},
+        "mode": {"type": "string", "enum": ["report", "apply"]},
+        "solve": {"type": "boolean"},
+        "enabled": {"type": "boolean"},
+        "domain_id": {"type": "integer", "description": "The workspace; omit for the selected one"}},
+        "required": ["every_hours", "mode"]}}}
 #: Why an extraction failed, for the person: the platform's failure classes (app.integrations.contracts).
 SOURCE_FAILURES = {
     "authentication_failed": "the database refused the stored user name or password (replace the credential on the "
@@ -334,12 +374,15 @@ SOURCE_FAILURES = {
     "credential_unreadable": "the stored password cannot be decrypted with this server's keys",
     "deadline_exceeded": "reading the table took longer than one extraction is allowed",
     "limit_exceeded": "the table is larger than one extraction allows (100,000 rows or 20 MB)",
+    "format_invalid": "the web source's answer is not the format it was set up for (JSON list, CSV or Excel)",
     "worker_lost": "the import worker stopped during the extraction",
 }
 #: How long use_source waits for a fresh extraction.
 SOURCE_WAIT_S = 120
-TOOLS.extend([WORKSPACE_TOOL, SOURCE_TOOL, RESULT_TOOL, OUTPUT_TOOL, WHATIF_TOOL, HANDOVER_TOOL])
-MODEL_TOOLS.extend([WORKSPACE_TOOL, SOURCE_TOOL, CHECK_TOOL, RESULT_TOOL, OUTPUT_TOOL, LAYOUT_TOOL, WHATIF_TOOL])
+TOOLS.extend([WORKSPACE_TOOL, SOURCE_TOOL, REFRESH_TOOL, SCHEDULE_TOOL, RESULT_TOOL, OUTPUT_TOOL, WHATIF_TOOL,
+              HANDOVER_TOOL])
+MODEL_TOOLS.extend([WORKSPACE_TOOL, SOURCE_TOOL, REFRESH_TOOL, SCHEDULE_TOOL, CHECK_TOOL, RESULT_TOOL, OUTPUT_TOOL,
+                    LAYOUT_TOOL, WHATIF_TOOL])
 #: How long what_if waits for its run before handing back the run id to poll.
 WHATIF_WAIT_S = 90
 SETTLED = ("optimal", "feasible", "infeasible", "unbounded", "error", "cancelled", "timeout", "unknown")
@@ -358,6 +401,8 @@ MAX_API_REJECTIONS = 3  # a write endpoint rejecting the request is not a reason
 MAX_TOTAL_API_REJECTIONS = 8  # endpoint-hopping cannot evade the per-endpoint limit
 MAX_TOOL_FAILURES = 3  # an unavailable file or failed tool is surfaced instead of retried all turn
 MAX_TOTAL_NUDGES = 8
+#: Runs whose facts are shown beside an answer: a what-if and its base.
+FACTS_SHOWN = 2
 CUT_OFF = (PLATFORM + "Your last reply was cut off at the length limit, so its tool call was NOT run. Send a smaller "
            "call: load rows from files with *_from_file instead of writing them out (generate the files with "
            "run_python if you have it), split the work into several calls, and keep prose short.")
@@ -480,7 +525,8 @@ def bind_literal_keys(ir: dict) -> list[str]:
 
 
 #: Tools whose results are data or calculations, so their numbers may be used in a plan.
-DATA_TOOLS = {"read_file", "query_file", "run_python", "call_api", "describe_workspace", "read_result", "use_source"}
+DATA_TOOLS = {"read_file", "query_file", "run_python", "call_api", "describe_workspace", "read_result", "use_source",
+              "refresh_sources"}
 _NUMBER = re.compile(r"(?<![A-Za-z_])-?\d[\d,]*(?:\.\d+)?%?")
 
 
@@ -1254,7 +1300,7 @@ def model_prompt(ctx: "Context") -> str:
     layout_generation = ("Only when the candidate API cannot express the problem, use run_python to generate "
                          "candidates.csv (cand, x_m, y_m, rot, ...), cells.csv (cell, x_m, y_m) on a grid whose "
                          "step divides every item size, and occupies.csv (cand, cell: one row per cell a candidate "
-                         "covers; keep it under about 200,000 rows). Load with entities_from_file and "
+                         "covers; keep it under about 2,000,000 rows). Load with entities_from_file and "
                          "relationships_from_file; declare occupies from cand to cell and list it in the IR."
                          if ctx.can_run_python else
                          "If the candidate API cannot express a required relationship, do not attempt client-side "
@@ -1280,6 +1326,15 @@ PHASE 1 - UNDERSTAND. This is most of the conversation. Do not just accept what 
   call use_source for each one: it arrives as an attached sheet, loaded in the plan with *_from_file like any
   file -- never ask the person to export or retype a table a source already has. refresh=true when they say the
   data changed or want today's figures. Say in the plan which source each kind of record comes from.
+  Take EVERY number a source holds from the source -- a record's field in the rule (p.capacity_hours), or
+  parameter_values_from_file -- never type it into the plan: only what is loaded from a source is updated when
+  the data is refreshed later. For a problem already built from sources, "the data changed" / "run it with
+  today's data" is refresh_sources (report, ask, apply), then a new run, compared with the last answer.
+- KEPT FILES: a file the person attaches and the plan loads with *_from_file is kept in the workspace by name and
+  version (describe_workspace lists them under files). Next time, the person attaches the new file under the same
+  name and asks to update: refresh_sources keeps it as the next version, reports what changes, and applies on yes.
+  use_source also attaches a kept file by name, for reading.
+- SCHEDULED REFRESH: "every week", "keep it up to date" -> schedule_refresh (report, or apply and solve again).
 - Each turn: an "Agreed so far" list (short bullets), then the open questions, numbered, at most 4, most
   important first, in plain words, with examples of possible answers. Never ask again about an agreed item.
   Ask only what would change the model: never about names (choose them), never about coordinate systems unless a
@@ -1380,8 +1435,10 @@ first call inspect_decomposition with the scenario id from BUILT. Independent bl
 by the platform when eligible; reported near-independent groups with linking rules are diagnostics, not an exact split.
 Then call read_result with its id and report whether a block-by-block solve actually ran (never recompute numbers yourself),
 then explain in plain language what was built (sets, parameters, variables, rules, goals,
-assumptions) and the results: status, the goal's value, the decisions as a table in the user's names, and for an
-infeasible run which rules conflict and what to relax. If the user asked for the answer as a map, a drawing or a file, give the links from read_result's EXPORTS line
+assumptions) and the results. The platform shows a FACTS card above your reply, rendered from the result: the status,
+the goal and its parts, the first rows of each decision and the tight or broken rules. Do not retype that card or its
+table; explain what it means in the user's terms (larger decision tables beyond its rows may be summarised from
+read_result), and for an infeasible run which rules conflict and what to relax. If the user asked for the answer as a map, a drawing or a file, give the links from read_result's EXPORTS line
 (a map: GeoJSON and the CAD drawing). A run you start gets 2 minutes unless the user asks for longer; when it ends "feasible" with
 a gap, say how far from proven best it is and offer a longer run (time_limit_s, e.g. 600). Name the rules that are TIGHT (they hold the goal back) and,
 when read_result has SENSITIVITY, what each costs in the user's units (its "per +1 on <parameter>" line) and how
@@ -1558,7 +1615,9 @@ How to work:
 2. Look things up before changing them; use ids you got from the API, never invented ones.
    describe_workspace gives a domain's whole contents (kinds of record, fields, relationships, data values,
    map data, problems, data sources) in one call: start there. A data source (a database table) is read with
-   use_source, which attaches it as a sheet for read_file / query_file.
+   use_source, which attaches it as a sheet for read_file / query_file. When the person says a source's data
+   changed, or asks to solve again with current data: refresh_sources (apply=false) shows what would change;
+   show it and ask; on yes apply=true; then solve the scenario again and say how the answer changed.
 3. Before writing or changing a model (IR), read_doc('contracts/problem-ir.md').
 4. Solving is asynchronous: POST /api/v1/scenarios/{{id}}/runs queues a run; poll GET /api/v1/runs/{{id}}
    with wait between polls until it settles, then read_result(run_id) and report from it.
@@ -1602,6 +1661,22 @@ def _figure(text: str) -> float:
     return float(text.replace(",", ""))
 
 
+def _when_next(next_at: Any) -> str:
+    """A schedule's next run in words: "the first run starts now" when it is due, else the time in UTC (the
+    distribution test, October 2026: a run due at once was told to the person as a later time, with no zone)."""
+    from datetime import datetime, timezone
+
+    try:
+        when = datetime.fromisoformat(str(next_at).replace("Z", "+00:00"))
+    except ValueError:
+        return f"next run {next_at}"
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    if (when - datetime.now(timezone.utc)).total_seconds() <= 120:
+        return "the first run starts now (within a minute), then on this schedule"
+    return "next run " + when.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
 def trial_said(trial: Any) -> str:
     """The plan's trial solve, in words, with what to look at (the field tests: plans that passed every check and
     did something else than meant -- a trial on the real data shows it before the person approves)."""
@@ -1611,7 +1686,8 @@ def trial_said(trial: Any) -> str:
     if status in ("not compiled", "skipped", "no solver", "failed"):
         return f"\n\nTRIAL SOLVE: {status}" + (f" ({trial.get('why')})" if trial.get("why") else "")
     used = trial.get("used") or {}
-    parts = ", ".join(f"{v} {u.get('non_zero')} of {u.get('cells')} cells non-zero" for v, u in used.items())
+    parts = ", ".join(f"{v} {u.get('non_zero')} of {u.get('cells')} cells non-zero"
+                      + (f" ({', '.join(u['chosen'])})" if u.get("chosen") else "") for v, u in used.items())
     goal = trial.get("objective")
     line = (f"\n\nTRIAL SOLVE (this plan on its real data, {trial.get('seconds')} s, nothing kept): {status}"
             + (f", goal {_amount_text(float(goal))}" if isinstance(goal, (int, float)) else "") + f"; {parts}.")
@@ -1625,6 +1701,9 @@ def trial_said(trial: Any) -> str:
         flags.append("every decision is 0: the plan chooses or makes nothing -- check the goal's sense and the rules")
     if flags:
         line += " WARNING: " + "; ".join(flags) + "."
+    if any(u.get("chosen") for u in used.values()):
+        line += (" The cells named are the trial's own choice: when the summary mentions the trial, name exactly "
+                 "these, never others.")
     return line + (" Check this against what the person described (does the goal and what is used make sense?) "
                    "before proposing; say the trial result in the plan.")
 
@@ -1638,7 +1717,8 @@ def trial_for_person(trial: Any) -> str:
     goal = trial.get("objective")
     line = (f"\n- TRIAL on your data (solved once, nothing kept): {trial.get('status')}"
             + (f", goal {_amount_text(float(goal))}" if isinstance(goal, (int, float)) else "")
-            + ("; " + ", ".join(f"{v} used in {u.get('non_zero')} of {u.get('cells')}" for v, u in used.items())
+            + ("; " + ", ".join(f"{v} used in {u.get('non_zero')} of {u.get('cells')}"
+                                + (f" ({', '.join(u['chosen'])})" if u.get("chosen") else "") for v, u in used.items())
                if used else ""))
     if trial.get("status") == "infeasible":
         line += " -- NO answer exists with these rules and data"
@@ -1674,6 +1754,9 @@ def stale_totals(answer: str, tool_texts: list[str]) -> list[tuple[str, str, str
                     found.append((said, f"{near:,.0f}" if near == int(near) else f"{near:,.2f}", field))
     return list(dict.fromkeys(found))
 
+_PROVEN = re.compile(r"\b(?:optimal|optimum|proven best|best possible (?:answer|plan|solution|result)|"
+                     r"cannot be improved|can't be improved|no better (?:answer|plan|solution) (?:exists|is possible))\b",
+                     re.I)
 _ROOM_LINE = re.compile(r"^- (\w+) \((?:hard|soft)\): held, tight \(no room left on (\d+) of (\d+): ([^)]*)\);"
                         r".*?room left on the others: (.+)$", re.M)
 _ALL_FULL = re.compile(r"\b(?:every|all|each|always|in all|throughout)\b[^.\n]{0,60}\b(?:full|fully (?:used|utili[sz]ed)|"
@@ -1722,6 +1805,16 @@ def reply_contradictions(answer: str, tool_texts: list[str]) -> list[str]:
     - a table row whose record the results identify (same name, at least two of its numbers) but whose category
       (machine, site, type...) the results give differently."""
     found: list[str] = []
+    # "Optimal" needs a proof (plan of 8 October 2026, honest answers, step 3): when every run the results report
+    # stopped without one, the answer may not call it optimal, best possible or impossible to improve.
+    statuses = re.findall(r"^RUN \d+: (\w+);", "\n".join(tool_texts), re.M)
+    if statuses and "optimal" not in statuses and "feasible" in statuses:
+        for claim in _PROVEN.finditer(answer):
+            before = answer[max(0, claim.start() - 30):claim.start()].lower()
+            if not re.search(r"\b(?:not|never|no|isn't|is not|un|without|before)\b[^.]*$", before):
+                found.append(f"it calls the answer \"{claim.group(0)}\", but the run stopped without proving it best "
+                             "(status feasible): say how far from the bound it may be, and offer a longer run")
+                break
     rooms = _ROOM_LINE.findall("\n".join(tool_texts))
     if rooms and _ALL_FULL.search(answer):
         for rule, full, total, _, rest in rooms:
@@ -1782,6 +1875,115 @@ def reply_contradictions(answer: str, tool_texts: list[str]) -> list[str]:
     return list(dict.fromkeys(found))
 
 
+_SCALE = {"k": 1e3, "thousand": 1e3, "m": 1e6, "mn": 1e6, "million": 1e6, "bn": 1e9, "billion": 1e9}
+_ROUGH = re.compile(r"(?:about|around|roughly|nearly|almost|approximately|approx\.?|over|under|some|more than|less "
+                    r"than|~)\s*$", re.I)
+#: Numbers that name or date something rather than state an amount.
+_NOT_AMOUNTS = re.compile(r"\b\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?)?\b|\b\d{1,2}:\d{2}(?::\d{2})?\b|"
+                          r"\b\d{1,2}/\d{1,2}/\d{2,4}\b|"
+                          r"\b(?:run|runs|scenario|version|v|step|id|#|no\.|number|row|item|option|part|section|"
+                          r"workspace|domain|problem|connection|job|file)\s*#?\d[\d,]*\b|"
+                          r"\b\w*[A-Za-z_]\d[\w-]*\b|\b\d+(?:st|nd|rd|th)\b", re.I)
+_ANSWER_NUMBER = re.compile(r"(?<![\w.])(-?\d[\d,]*(?:\.\d+)?)(?:\s*(%|percent\b|k\b|thousand\b|m\b|mn\b|million\b|"
+                            r"bn\b|billion\b))?", re.I)
+_REPORTS_RUN = re.compile(r"^(?:RUN \d+: |BASE goal )", re.M)
+#: The most numbers a check pairs with each other (results this size are already summarised).
+PAIRED_AT_MOST = 4000
+
+
+def _numbers_in(text: str) -> list[float]:
+    out = []
+    for raw in re.findall(r"(?<![\w.])-?\d[\d,]*(?:\.\d+)?(?:[eE][-+]?\d+)?", text):
+        try:
+            out.append(float(raw.replace(",", "")))
+        except ValueError:
+            continue
+    return out
+
+
+def unsupported_numbers(answer: str, results: list[str], person: list[str]) -> list[str]:
+    """Amounts in the answer that neither the results nor the person gave, and that no single step makes from them.
+
+    The plan for honest answers (October 2026): every number the model writes must come from this turn's results
+    (or the conversation's), the person's own words, or one step of arithmetic on them -- a sum, difference,
+    product or ratio of two, or a percentage or percentage change. Rounding as shown is allowed ("about 1,900" for
+    1,939). What is left was made up, or added up wrongly, and is sent back before the person sees it. Dates, times,
+    names with digits (P3, Q2), record numbers ("run 132") and small whole numbers (counts up to 12) are not
+    checked."""
+    import bisect
+
+    given = sorted(set(_numbers_in("\n".join(results)) + _numbers_in("\n".join(person))))
+    if not given:
+        return []
+    paired = sorted(set(_numbers_in("\n".join(results))))
+    if len(paired) > PAIRED_AT_MOST:
+        paired = []
+    # Column totals of the result tables: "total 3,020" is often the sum of a column.
+    for header, rows in _decision_tables(results):
+        for col in range(len(header)):
+            column = [_cell_number(r[col]) for r in rows]
+            if column and all(x is not None for x in column):
+                given.append(sum(column))
+    given.sort()
+
+    def near(target: float, tol: float, pool: list[float]) -> bool:
+        i = bisect.bisect_left(pool, target - tol)
+        return i < len(pool) and pool[i] <= target + tol
+
+    text = _NOT_AMOUNTS.sub(lambda m: " " * len(m.group(0)), answer)
+    flagged: list[str] = []
+    for m in _ANSWER_NUMBER.finditer(text):
+        raw, unit = m.group(1), (m.group(2) or "").lower()
+        try:
+            value = float(raw.replace(",", ""))
+        except ValueError:
+            continue
+        decimals = len(raw.split(".")[1]) if "." in raw else 0
+        if not unit and decimals == 0 and abs(value) <= 12:
+            continue
+        if not decimals and 1900 <= value <= 2100 and "," not in raw:
+            continue  # a year
+        scale = _SCALE.get(unit, 1.0)
+        rough = bool(_ROUGH.search(text[max(0, m.start() - 20):m.start()]))
+        step = 10.0 ** -decimals
+        if not decimals and rough:
+            digits = raw.replace(",", "").lstrip("-")
+            step = 10.0 ** (len(digits) - len(digits.rstrip("0")))
+        tol = (0.5 * step + 1e-9) * scale + 1e-9 * abs(value * scale)
+        target = value * scale
+        percent = unit in ("%", "percent")
+        if near(target, tol, given) or (percent and near(target / 100, tol / 100, given)):
+            continue
+        ok = False
+        for a in paired:
+            # b from a: a + b, a - b, b - a, a * b, a / b, b / a, and a percentage of, or change from, b.
+            tries = [(target - a, lambda b: a + b), (a - target, lambda b: a - b), (a + target, lambda b: b - a)]
+            if a:
+                tries += [(target / a, lambda b: a * b)]
+            if target:
+                tries += [(a / target, lambda b: a / b if b else None)]
+            tries += [(target * a, lambda b: b / a if a else None)]
+            if percent and target:
+                tries += [(100 * a / target, lambda b: 100 * a / b if b else None)]
+                if target != -100:
+                    tries += [(100 * a / (target + 100), lambda b: 100 * (a - b) / b if b else None)]
+            for b, made in tries:
+                i = bisect.bisect_left(paired, b - abs(b) * 1e-6 - 1e-9)
+                for j in (i - 1, i, i + 1):
+                    if 0 <= j < len(paired):
+                        got = made(paired[j])
+                        if got is not None and abs(got - (target if not percent else value)) <= tol:
+                            ok = True
+                            break
+                if ok:
+                    break
+            if ok:
+                break
+        if not ok:
+            flagged.append(raw + ("%" if percent else (" " + unit if unit else "")))
+    return list(dict.fromkeys(flagged))
+
+
 class Agent:
     def __init__(self, settings: Settings, index: ApiIndex, call: CallFn, ctx: Context):
         # The context the server really has (it may have been raised to 64k), not only the configured one.
@@ -1803,6 +2005,7 @@ class Agent:
         self.built: dict | None = None
         self.messages: list[dict] = []
         self.events: list[dict] = []  # raised by a tool, sent after its result (a re-placed file)
+        self.facts: dict[Any, dict] = {}  # runs read this turn: their facts, shown beside the answer
         self.handover: str | None = None  # set by hand_to_describe: the turn ends with the offer
         self.joined: list[str] = []
         self._spec_seen: dict[str, int] = {}
@@ -1815,11 +2018,45 @@ class Agent:
         self._typed_cells = 0  # parameter values the last spec typed itself (not loaded from files)  # each spec refusal seen this turn, by its text
         self.solves: dict[str, int] = {}  # solves queued this turn, per scenario  # keys the model gave twice and the platform joined (toolcall.strict_loads)
 
+    def _asking(self, call: dict) -> str:
+        """What a call the person must allow will do, in words (the refresh test, October 2026: the box asking
+        "Allow this?" for a tool other than call_api was empty)."""
+        name, args = call["function"]["name"], _args(call)
+        if name == "call_api":
+            return f'{str(args.get("method", "GET")).upper()} {args.get("path", "")}'
+        if name == "refresh_sources":
+            pending = getattr(self, "_refresh_pending", None) or self._reported_refresh(
+                args.get("domain_id") or self.ctx.domain_id) or {}
+            n = pending.get("changes")
+            return ("Write the changes just reported from the data sources into this workspace"
+                    + (f" ({n} change{'s' if n != 1 else ''})" if isinstance(n, int) else "")
+                    + "; records a source no longer has are set inactive, not deleted.")
+        if name == "schedule_refresh":
+            hours = int(args.get("every_hours") or 0)
+            every = {24: "every day", 168: "every week"}.get(hours, f"every {hours} hours")
+            if args.get("enabled") is False:
+                return "Pause the scheduled refresh of this workspace."
+            return (f"Refresh this workspace from its sources {every}, as you; "
+                    + ("apply the changes" + (" and solve its scenarios again" if args.get("solve") else "")
+                       if args.get("mode") == "apply" else "keep a report of what changed for you to apply") + ".")
+        if name == "what_if":
+            return (f'Make a what-if copy of scenario {args.get("scenario_id")} named "{args.get("name", "")}" and solve '
+                    "it; the base scenario is not changed.")
+        return name.replace("_", " ")
+
     def _needs_ok(self, call: dict) -> bool:
         if call["function"]["name"] == "propose_plan":
             return True  # its OK is the person's approval of the plan
         if call["function"]["name"] == "what_if":
             return self.s.confirm == "write"  # a new scenario and a run; the base is never changed
+        if call["function"]["name"] == "schedule_refresh":
+            return True  # it acts on the workspace later, as the person: they agree first
+        if call["function"]["name"] == "refresh_sources":
+            # It changes the workspace's records: the person agrees first -- when there is a report to apply
+            # (without one, apply only reports, writing nothing).
+            return bool(_args(call).get("apply")) and bool(
+                getattr(self, "_refresh_pending", None)
+                or self._reported_refresh(_args(call).get("domain_id") or self.ctx.domain_id))
         if call["function"]["name"] != "call_api":
             return False
         method = str(_args(call).get("method", "GET")).upper()
@@ -1846,7 +2083,24 @@ class Agent:
             if name == "place_file":
                 return self._place(str(args.get("file", "")), args.get("epsg"))
             if name == "use_source":
-                return self._use_source(str(args.get("source", "")).strip(), bool(args.get("refresh")))
+                return self._use_source(str(args.get("source", "")).strip(), bool(args.get("refresh")),
+                                        args.get("domain_id"))
+            if name == "refresh_sources":
+                return self._refresh_sources(args)
+            if name == "schedule_refresh":
+                domain = args.get("domain_id") or self.ctx.domain_id
+                if not domain:
+                    return "Could not: no workspace (domain) is selected."
+                body = {k: args[k] for k in ("every_hours", "mode", "solve", "enabled") if k in args}
+                res = self.call("PUT", f"/api/v1/domains/{int(domain)}/refresh-schedule", None, body)
+                if not res.get("ok"):
+                    return "Could not set the schedule: " + clip(res.get("body"), 600)
+                got = (res.get("body") or {}).get("schedule") or {}
+                return (f"SCHEDULED: every {got.get('every_hours')} h, mode {got.get('mode')}, solve again "
+                        f"{bool(got.get('solve'))}, {'on' if got.get('enabled') else 'paused'}; "
+                        f"{_when_next(got.get('next_at'))}. It runs as the person, with their permissions; "
+                        "describe_workspace shows its last run. Tell the person (say the time exactly as written "
+                        "here, with its time zone), and that the Sources page shows each run's report.")
             if name == "describe_workspace":
                 domain = args.get("domain_id") or self.ctx.domain_id
                 if not domain:
@@ -1880,7 +2134,7 @@ class Agent:
             if name == "what_if":
                 return self._what_if(args)
             if name == "read_result":
-                res = self.call("GET", f"/api/v1/agent/result/{int(args.get('run_id') or 0)}")
+                res = self._read_run(int(args.get('run_id') or 0))
                 body = res.get("body") if isinstance(res, dict) else None
                 return clip(body.get("text") if res.get("ok") and isinstance(body, dict) else res, lim)
             if name == "check_spec":
@@ -1923,7 +2177,8 @@ class Agent:
                 if self.modelling and method != "GET" and not (
                         (method == "POST" and READ_ONLY_POST.match(path.split("?")[0])) or
                         (method == "POST" and DATA_POST.match(path.split("?")[0])) or
-                        (self.built and method == "POST" and SOLVE_PATH.match(path.split("?")[0]))):
+                        (method == "POST" and SOLVE_PATH.match(path.split("?")[0])
+                         and (self.built or self._scenario_exists(path.split("?")[0])))):
                     if method == "POST" and re.fullmatch(r"/api(?:/v1)?/domains?", path.split("?")[0]):
                         return ("Refused: do not create the workspace (domain) with call_api. Put domain_name in the "
                                 "spec you give check_spec and propose_plan; the new domain is made when the person "
@@ -1970,11 +2225,12 @@ class Agent:
                 if method == "GET" and RUN_PATH.match(bare) and isinstance(body, dict) and body.get("status") == "error":
                     res = {**res, "platform_note": "This run FAILED; its error says why. Do not queue it again "
                            "unchanged: tell the user the error in plain words, and what could fix it."}
-                if (method == "GET" and RUN_PATH.match(bare) and isinstance(body, dict)
+                if (((method == "GET" and RUN_PATH.match(bare)) or (method == "POST" and SOLVE_PATH.match(bare)))
+                        and isinstance(body, dict)
                         and body.get("status") in ("optimal", "feasible", "infeasible", "unbounded")):
                     # The blend test: the report was written from the raw run (rounded differently, slips) and
                     # read_result was never called. A settled run comes back as read_result's text.
-                    got = self.call("GET", f"/api/v1/agent/result/{body.get('id')}")
+                    got = self._read_run(body.get('id'))
                     text = (got.get("body") or {}).get("text") if got.get("ok") and isinstance(got.get("body"), dict) else None
                     if text:
                         return clip(f"Run {body.get('id')} has settled ({body.get('status')}). This is read_result "
@@ -1986,9 +2242,192 @@ class Agent:
         except Exception as e:  # noqa: BLE001 -- told to the model, which can recover
             return f"tool error: {type(e).__name__}: {e}"
 
-    def _use_source(self, wanted: str, refresh: bool) -> str:
+    def _extract(self, found: dict, jobs: list[dict] | None = None) -> tuple[dict | None, str | None]:
+        """A fresh extraction of one source, waited for: (the job, None), or (None, why not -- for the person)."""
+        cid = found["id"]
+        if jobs is None:
+            jobs = ((self.call("GET", f"/api/v1/connections/{cid}/jobs", {"limit": 20}).get("body") or {})
+                    .get("items")) or []
+        job = None
+        started = self.call("POST", f"/api/v1/connections/{cid}/jobs", None, {})
+        if started.get("status") == 409:  # one is already queued or running: wait for that one
+            job = next((j for j in jobs if j.get("state") in ("queued", "running")), None)
+        elif started.get("ok"):
+            job = started.get("body")
+        if not job:
+            return None, "Could not start an extraction: " + clip(started.get("body"), 400)
+        waited = 0.0
+        while job.get("state") in ("queued", "running") and waited < SOURCE_WAIT_S:
+            time.sleep(2)
+            waited += 2
+            job = self.call("GET", f"/api/v1/ingestion-jobs/{job['id']}").get("body") or job
+        if job.get("state") in ("queued", "running"):
+            return None, (f"The extraction of \"{found['name']}\" (job {job['id']}) is still {job['state']} after "
+                          f"{SOURCE_WAIT_S} s. Wait a little and try again.")
+        if job.get("state") != "extracted":
+            code = job.get("error_code") or ""
+            why = SOURCE_FAILURES.get(code, "the source could not be read")
+            last = next((j for j in jobs if j.get("state") == "extracted"), None)
+            fallback = (f" Its previous extraction (job {last['id']}, {last.get('finished_at')}) can still be "
+                        "used: call use_source without refresh, and tell the person those figures may be old."
+                        if last else "")
+            return None, (f"Could not read \"{found['name']}\": {why} ({code or job.get('state')}). Tell the person; "
+                          f"they or an administrator fix it on the Sources page.{fallback}")
+        return job, None
+
+    _REPORTED = re.compile(r"\(reported: (\{.*\})\)")
+
+    def _reported_refresh(self, domain: Any) -> dict | None:
+        """The last refresh this conversation reported and has not applied since (its tool results)."""
+        for m in reversed(getattr(self, "_messages", None) or []):
+            if m.get("role") != "tool" or m.get("name") != "refresh_sources":
+                continue
+            content = str(m.get("content") or "")
+            if content.startswith("REFRESH APPLIED"):
+                return None
+            found = self._REPORTED.search(content)
+            if not found:
+                continue
+            try:
+                said = json.loads(found.group(1))
+            except ValueError:
+                continue
+            if str(said.get("domain")) == str(domain):
+                return {"domain": domain, "jobs": {int(c): int(j) for c, j in (said.get("jobs") or {}).items()},
+                        "files": {str(n): int(v) for n, v in (said.get("files") or {}).items()},
+                        "changes": int(said.get("changes") or 0)}
+        return None
+
+    def _refresh_sources(self, args: dict) -> str:
+        """Re-read the sources the workspace was built from; report the changes, or write the ones reported."""
+        domain = args.get("domain_id") or self.ctx.domain_id
+        try:
+            domain = int(domain) if domain else None
+        except (TypeError, ValueError):
+            return "domain_id must be a workspace's number."
+        if not domain:
+            return "Could not: no workspace (domain) is selected."
+        listed = self.call("GET", f"/api/v1/domains/{int(domain)}/source-bindings")
+        if not listed.get("ok"):
+            return "Could not read what this workspace was built from: " + clip(listed.get("body"), 400)
+        bound = (listed.get("body") or {}).get("items") or []
+        if not bound:
+            return ("Nothing in this workspace was built from a data source or a kept file, so there is nothing to "
+                    "refresh. (Data loaded with *_from_file from a source or an attached file is remembered for "
+                    "refresh; numbers typed into a plan are not.)")
+        wanted = [str(w).strip().lower().lstrip("#") for w in args.get("sources") or []]
+
+        def chosen(b: dict) -> bool:
+            return not wanted or str(b.get("connection_id")) in wanted or str(b["connection"]).lower() in wanted
+
+        conns = {b["connection_id"]: {"id": b["connection_id"], "name": b["connection"], "enabled": b["enabled"]}
+                 for b in bound if b.get("connection_id") and chosen(b)}
+        file_names = sorted({b["file_name"] for b in bound if b.get("file_name") and chosen(b)})
+        if not conns and not file_names:
+            return "None of these is a source this workspace was built from: " + ", ".join(
+                sorted({b["connection"] for b in bound}))
+        apply = bool(args.get("apply"))
+        pending = getattr(self, "_refresh_pending", None) or self._reported_refresh(domain)
+        unreported = apply and (not pending or pending.get("domain") != domain or set(pending["jobs"]) != set(conns)
+                                or set(pending.get("files") or {}) != set(file_names))
+        if unreported:
+            # Only what the person saw is written: with no report of these sources in this conversation, report
+            # now (it writes nothing) and ask again -- instead of a refusal the model retried (the refresh test).
+            apply = False
+        notes: list[str] = []
+        if apply:
+            jobs, versions = pending["jobs"], pending.get("files") or {}
+        else:
+            jobs, versions = {}, {}
+            for cid, found in conns.items():
+                if not found["enabled"]:
+                    return f'The data source "{found["name"]}" is disabled; it can be enabled on the Sources page.'
+                job, failed = self._extract(found)
+                if failed:
+                    return failed
+                jobs[cid] = job["id"]
+            for name in file_names:
+                # A newer copy attached in this conversation becomes the file's next version (kept, append-only).
+                attached = next((f for f in self.ctx.files if f.get("name") == name and not f.get("source")), None)
+                if attached is not None:
+                    kept = self.call("POST", f"/api/v1/domains/{int(domain)}/files", None, {"file": attached})
+                    if not kept.get("ok"):
+                        return f'Could not keep the attached "{name}" as a new version: ' + clip(kept.get("body"), 400)
+                    if kept["body"].get("new"):
+                        notes.append(f'The attached "{name}" is kept as version {kept["body"]["version"]} of the '
+                                     "workspace file.")
+                latest = self.call("GET", f"/api/v1/domains/{int(domain)}/files/{urllib.parse.quote(name, safe='')}")
+                if not latest.get("ok"):
+                    return f'The workspace has no file "{name}" any more: ' + clip(latest.get("body"), 300)
+                versions[name] = int(latest["body"]["source"]["version"])
+        res = self.call("POST", f"/api/v1/domains/{int(domain)}/sources/refresh", None,
+                        {"jobs": {str(k): v for k, v in jobs.items()}, "files": versions, "connections": list(conns),
+                         "apply": apply, "remove_missing": not bool(args.get("keep_missing"))})
+        if not res.get("ok"):
+            return "Could not refresh: " + clip(res.get("body"), 800)
+        body = res["body"]
+        lines = list(notes)
+        for b in body.get("bindings") or []:
+            c = b["counts"]
+            where = f' (version {b["from_version"]} -> {b["version"]})' if b.get("file_name") else ""
+            head = (f'- {b["source"]}{where} -> {b["kind"].replace("_", " ")} "{b["target"]}": {c["added"]} added, '
+                    f'{c["changed"]} changed, {c["removed"]} gone, {c["unchanged"]} unchanged')
+            lines.append(head + (" (same data as the build: nothing new)" if b.get("same_extraction") else ""))
+            for a in b["added"]:
+                if "key" in a:
+                    what = a["key"] + (f' ({a["label"]})' if a.get("label") else "") + (
+                        f' {a["attrs"]}' if a.get("attrs") else "") + (" (back again)" if a.get("returning") else "")
+                elif "from" in a:
+                    what = f'{a["from"]} -> {a["to"]}'
+                else:
+                    what = f'{a["index"]} = {a["value"]}'
+                lines.append("    + " + what)
+            for ch in b["changed"]:
+                if "fields" in ch:
+                    lines.append(f'    ~ {ch["key"]}: ' + ", ".join(f'{f["field"]} {f["before"]} -> {f["after"]}'
+                                                                     for f in ch["fields"]))
+                else:
+                    lines.append(f'    ~ {ch["index"]}: {ch["before"]} -> {ch["after"]}')
+            for r in b["removed"]:
+                lines.append("    - " + str(r.get("key") or r.get("index") or f'{r.get("from")} -> {r.get("to")}'))
+            shown = len(b["added"]) + len(b["changed"]) + len(b["removed"])
+            if shown < c["added"] + c["changed"] + c["removed"]:
+                lines.append(f"    (first {shown} shown)")
+        if not apply:
+            self._refresh_pending = {"domain": domain, "jobs": jobs, "files": versions, "changes": body.get("changes")}
+            # Kept in the conversation: the person's "yes" comes in a later turn, to a new Agent.
+            lines.append("(reported: " + json.dumps({"domain": domain, "jobs": {str(k): v for k, v in jobs.items()},
+                                                     "files": versions, "changes": body.get("changes") or 0},
+                                                    separators=(",", ":")) + ")")
+            if not body.get("changes"):
+                return ("REFRESH CHECKED: the sources hold the same data the workspace has; nothing to change, and "
+                        "the last answer still stands.\n" + "\n".join(lines))
+            if unreported:
+                return ("REFRESH REPORT -- NOT APPLIED: no report of these changes was in this conversation, so nothing "
+                        "was written; the sources were read now and this is what would change. Show these changes "
+                        "to the person and ask again; apply=true after their yes writes exactly these.\n"
+                        + "\n".join(lines))
+            return ("REFRESH REPORT (nothing written yet). Show these changes to the person in a short table and ask "
+                    "whether to apply them; on yes call refresh_sources with apply=true, then solve the scenario "
+                    "again and compare with the last answer.\n" + "\n".join(lines))
+        self._refresh_pending = None
+        for cid, job_id in jobs.items():  # a sheet of this source attached here is replaced by the one applied
+            got = self.call("GET", f"/api/v1/agent/sources/{job_id}/file")
+            if got.get("ok"):
+                sheet = got["body"]
+                attached = next((f for f in self.ctx.files
+                                 if (f.get("source") or {}).get("connection_id") == cid), None)
+                if attached is not None:
+                    sheet["name"] = attached["name"]
+                    self.ctx.files = [sheet if f is attached else f for f in self.ctx.files]
+                    self.events.append({"type": "file", "file": sheet})
+        return ("REFRESH APPLIED: the workspace now holds the sources' data. Now solve the scenario again "
+                "(POST /api/v1/scenarios/{id}/runs, then read_result) and tell the person how the answer changed.\n"
+                + "\n".join(lines))
+
+    def _use_source(self, wanted: str, refresh: bool, domain_id: Any = None) -> str:
         """A workspace data source as an attached sheet: its latest extraction, or a fresh one."""
-        domain = self.ctx.domain_id
+        domain = domain_id or self.ctx.domain_id
         if not domain:
             return "Could not: no workspace (domain) is selected, and data sources belong to one."
         listed = self.call("GET", "/api/v1/connections", {"domain_id": int(domain), "limit": 100})
@@ -1998,7 +2437,13 @@ class Agent:
         found = next((c for c in sources if str(c.get("id")) == wanted.lstrip("#")), None) or next(
             (c for c in sources if str(c.get("name", "")).strip().lower() == wanted.lower()), None)
         if found is None:
-            names = ", ".join(f'"{c.get("name")}" (id {c.get("id")})' for c in sources) or "none"
+            kept = self.call("GET", f"/api/v1/domains/{int(domain)}/files/{urllib.parse.quote(wanted, safe='')}")
+            if kept.get("ok"):
+                return self._attach_sheet(kept["body"], "its latest version, " + str(
+                    (kept["body"].get("source") or {}).get("added_at")))
+            names = ", ".join([f'"{c.get("name")}" (id {c.get("id")})' for c in sources] + [
+                f'"{f.get("name")}" (file)' for f in ((self.call("GET", f"/api/v1/domains/{int(domain)}/files")
+                                                     .get("body") or {}).get("items") or [])]) or "none"
             return f'No data source "{wanted}" in this workspace. Its data sources: {names}.'
         if not found.get("enabled"):
             return f'The data source "{found["name"]}" is disabled; it can be enabled again on the Sources page.'
@@ -2007,34 +2452,17 @@ class Agent:
         job = None if refresh else next((j for j in jobs if j.get("state") == "extracted"), None)
         fresh = job is None
         if fresh:
-            started = self.call("POST", f"/api/v1/connections/{cid}/jobs", None, {})
-            if started.get("status") == 409:  # one is already queued or running: wait for that one
-                job = next((j for j in jobs if j.get("state") in ("queued", "running")), None)
-            elif started.get("ok"):
-                job = started.get("body")
-            if not job:
-                return "Could not start an extraction: " + clip(started.get("body"), 400)
-            waited = 0.0
-            while job.get("state") in ("queued", "running") and waited < SOURCE_WAIT_S:
-                time.sleep(2)
-                waited += 2
-                job = self.call("GET", f"/api/v1/ingestion-jobs/{job['id']}").get("body") or job
-            if job.get("state") in ("queued", "running"):
-                return (f"The extraction of \"{found['name']}\" (job {job['id']}) is still {job['state']} after "
-                        f"{SOURCE_WAIT_S} s. Wait a little and call use_source again (without refresh) to pick it up.")
-            if job.get("state") != "extracted":
-                code = job.get("error_code") or ""
-                why = SOURCE_FAILURES.get(code, "the source could not be read")
-                last = next((j for j in jobs if j.get("state") == "extracted"), None)
-                fallback = (f" Its previous extraction (job {last['id']}, {last.get('finished_at')}) can still be "
-                            "used: call use_source without refresh, and tell the person those figures may be old."
-                            if last else "")
-                return (f"Could not read \"{found['name']}\": {why} ({code or job.get('state')}). Tell the person; "
-                        f"they or an administrator fix it on the Sources page.{fallback}")
+            job, failed = self._extract(found, jobs)
+            if failed:
+                return failed
         got = self.call("GET", f"/api/v1/agent/sources/{job['id']}/file")
         if not got.get("ok"):
             return "Could not read the extracted rows: " + clip(got.get("body"), 400)
-        sheet = got["body"]
+        return self._attach_sheet(got["body"], "read just now" if fresh else
+                                  f"its latest extraction, {(got['body'].get('source') or {}).get('extracted_at')}")
+
+    def _attach_sheet(self, sheet: dict, when: str) -> str:
+        """A source's sheet (a database extraction, or a file kept in the workspace) attached to this conversation."""
         name = sheet["name"]
         clash = next((f for f in self.ctx.files if f.get("name") == name and not f.get("source")), None)
         if clash is not None:  # an attached file of the same name stays; the source gets its own
@@ -2042,9 +2470,9 @@ class Agent:
         self.ctx.files = [f for f in self.ctx.files if f.get("name") != name] + [sheet]
         self.events.append({"type": "file", "file": sheet})
         src = sheet.get("source") or {}
-        rows = sum(int(s.get("total_rows") or 0) for s in sheet.get("sheets") or [])
-        when = "read just now" if fresh else f"its latest extraction, {src.get('extracted_at')}"
-        return (f'Data source "{name}" is attached as a sheet ({rows:,} rows, {when}; job {src.get("job_id")}, '
+        rows = sum(int(s.get("total_rows") or len(s.get("rows") or [])) for s in sheet.get("sheets") or [])
+        which = f'job {src.get("job_id")}' if src.get("job_id") else f'version {src.get("version")}'
+        return (f'Data source "{name}" is attached as a sheet ({rows:,} rows, {when}; {which}, '
                 f'SHA-256 {str(src.get("sha256"))[:12]}). Use it like an attached file -- the file name is "{name}":\n'
                 + agent_files.outline([sheet]))
 
@@ -2090,7 +2518,17 @@ class Agent:
 
         folder = sandbox.workdir(self.ctx.user_id or "anyone", self.ctx.conversation_id)
 
+        form = "candidates" if args.get("form") == "candidates" else "place"
+
         def run(step: float | None, into: str) -> dict:
+            if form == "place":
+                return layout.place(self.ctx.files, into, file=args.get("file"),
+                                    area_layers=list(args.get("area_layers") or []),
+                                    blocked_layers=list(args.get("blocked_layers") or []),
+                                    label_layer=args.get("label_layer"), items=list(args.get("items") or []),
+                                    aisle=float(args.get("aisle") or 0),
+                                    aisle_side=str(args.get("aisle_side") or "any"), step=step,
+                                    access_layers=list(args.get("access_layers") or []) or None)
             return layout.make(self.ctx.files, into, file=args.get("file"),
                                area_layers=list(args.get("area_layers") or []),
                                blocked_layers=list(args.get("blocked_layers") or []),
@@ -2111,8 +2549,10 @@ class Agent:
 
                 try:
                     alt = run(None, tempfile.mkdtemp(prefix="layout-try-"))
+                    size = (f"{alt['candidates']:,} candidate positions" if "candidates" in alt
+                            else f"a grid of {alt.get('free_cells', 0):,} free cells")
                     said += (f"\nLEAVING step OUT works: the platform's exact step is {alt['grid_step_m']:g} m, giving "
-                             f"{alt['candidates']:,} candidate positions (upper bound {alt['upper_bound']['items']:,} "
+                             f"{size} (upper bound {alt['upper_bound']['items']:,} "
                              "items). Unless the user themselves asked for "
                              f"{float(args['step']):g} m, call make_layout again WITHOUT step now and tell them the "
                              "step used.")
@@ -2125,6 +2565,15 @@ class Agent:
             self.ctx.files = [x for x in self.ctx.files if x.get("name") != name] + [parsed]
             self.events.append({"type": "file", "file": parsed})
         spec = out.pop("spec")
+        if out.get("form") == "place":
+            return ("LAYOUT made, placement form (files attached: " + ", ".join(out["files"]) + "): no list of "
+                    "positions -- the placement solver lays the items out on this grid itself.\n"
+                    + json.dumps(out, default=str)
+                    + "\n\nTHE PLAN, ready: give it to check_spec as it is, adding only domain_id (the domain the "
+                    "drawing is imported into; import it first if it is not) or domain_name, and problem_name. Tell "
+                    "the user the grid step and the aisle as modelled, the slots (the most that can fit by area) and "
+                    "what is not modelled, in words, before proposing. A run of it is solved by the placement "
+                    "solver: give it at least 2 minutes.\n" + json.dumps(spec))
         return ("LAYOUT made (files attached: " + ", ".join(out["files"]) + "):\n" + json.dumps(out, default=str)
                 + "\n\nTHE PLAN, ready: give it to check_spec as it is, adding only domain_id (the domain the drawing "
                 "is imported into; import it first if it is not) or domain_name, and problem_name. Tell the user the "
@@ -2203,7 +2652,7 @@ class Agent:
                          + (f" ({(after - before) / abs(before) * 100:+.2f}%)" if before else "") + ".")
         if base_run:
             lines.extend(self._what_changed(base_run["id"], run_id))
-        res = self.call("GET", f"/api/v1/agent/result/{run_id}")
+        res = self._read_run(run_id)
         body = res.get("body") if isinstance(res, dict) else None
         lines.append(body.get("text") if res.get("ok") and isinstance(body, dict) else clip(res, 1500))
         lines.append("Report the difference exactly as given; it is solved, not estimated. Take every number for the "
@@ -2420,6 +2869,36 @@ class Agent:
                 return bool(new) and not (same and same.start() > new.start())
         return False
 
+    def _facts_shown(self) -> list[dict]:
+        """The latest runs' facts, at most FACTS_SHOWN, one card for runs that found the same answer (the live
+        test: the same scenario solved twice showed two identical cards)."""
+        shown: list[dict] = []
+        for facts in reversed(list(self.facts.values())):
+            same = {k: v for k, v in facts.items() if k != "run_id"}
+            if any({k: v for k, v in f.items() if k != "run_id"} == same for f in shown):
+                continue
+            shown.insert(0, facts)
+            if len(shown) == FACTS_SHOWN:
+                break
+        return shown
+
+    def _scenario_exists(self, solve_path: str) -> bool:
+        """A scenario of a model already built (this conversation's, or one the workspace holds) that the person
+        can read: solving it changes no model (the live test of 7 October 2026: "solve the Base scenario again"
+        was refused three times in Describe a problem mode)."""
+        found = re.match(r"^/api/v1/scenarios/(\d+)/runs$", solve_path)
+        got = self.call("GET", f"/api/v1/scenarios/{found.group(1)}") if found else None
+        return bool(isinstance(got, dict) and got.get("ok"))
+
+    def _read_run(self, run_id: Any) -> dict:
+        """read_result for a run, keeping its platform-rendered facts for the answer (shown beside it)."""
+        res = self.call("GET", f"/api/v1/agent/result/{run_id}")
+        body = res.get("body") if isinstance(res, dict) else None
+        if isinstance(res, dict) and res.get("ok") and isinstance(body, dict) and isinstance(body.get("facts"), dict):
+            self.facts.pop(run_id, None)
+            self.facts[run_id] = body["facts"]
+        return res
+
     def _turn_tool_texts(self, messages: list[dict]) -> list[str]:
         """What the tools said since the person's last message."""
         out: list[str] = []
@@ -2522,6 +3001,7 @@ class Agent:
         return " ".join(notes)
 
     def _execute(self, calls: list[dict], messages: list[dict], allow: bool | None) -> Iterator[dict]:
+        self._messages = messages  # what this conversation has said so far (a refresh applies what it reported)
         for c in calls:
             name, args = c["function"]["name"], _args(c)
             yield {"type": "tool", "name": name, "args": _shown(name, args)}
@@ -2887,8 +3367,8 @@ class Agent:
         # shared budget of three, and an empty reply then ended the turn), with a cap on them all.
         spent: dict[str, int] = {}
 
-        def nudge(kind: str) -> bool:
-            if spent.get(kind, 0) >= MAX_NUDGES or sum(spent.values()) >= MAX_TOTAL_NUDGES:
+        def nudge(kind: str, most: int = MAX_NUDGES) -> bool:
+            if spent.get(kind, 0) >= most or sum(spent.values()) >= MAX_TOTAL_NUDGES:
                 return False
             spent[kind] = spent.get(kind, 0) + 1
             return True
@@ -3034,6 +3514,22 @@ class Agent:
                     messages.append({"role": "user", "content": SECOND_THOUGHTS})
                     yield {"type": "note", "text": "The answer was still thinking aloud; asking for a clean final answer."}
                     continue
+                # Only an answer that reports a run: a reply asking questions or proposing a plan may offer numbers.
+                reports = any(_REPORTS_RUN.search(t) for t in basis)
+                unsupported = reports and unsupported_numbers(content, basis, [str(sys_msg.get("content") or "")] + [
+                    str(m.get("content") or "") for m in messages if m.get("role") in ("user", "tool", "system")])
+                if unsupported and nudge("unsupported_numbers", 1):
+                    # Every number from the results, the person, or one step of arithmetic on them (plan of
+                    # 8 October 2026, honest answers, step 2).
+                    messages.append({"role": "assistant", "content": "(an answer with numbers the results do not give; "
+                                                                     "not shown)"})
+                    messages.append({"role": "user", "content": PLATFORM + "Your answer was NOT shown: these numbers are "
+                                     "not in the results or the person's messages, and no single sum, difference, ratio "
+                                     "or percentage of their numbers gives them: " + ", ".join(unsupported[:12])
+                                     + ". Write it again taking every number from the result text (or one step of "
+                                     "arithmetic on its numbers), and leave out any number you cannot take from it."})
+                    yield {"type": "note", "text": "The answer had numbers the results do not give; asking for a corrected one."}
+                    continue
                 if not content.strip():
                     if nudge("empty"):
                         messages.append({"role": "assistant", "content": "(an empty reply)"})
@@ -3041,7 +3537,10 @@ class Agent:
                         continue
                     content = "I have no answer for that yet. Say \"continue\", or tell me what to do next."
                 messages.append({"role": "assistant", "content": content})
-                yield {"type": "answer", "text": content}
+                # The facts of the runs read this turn, as the platform renders them: the model explains them,
+                # it does not type them (plan of 8 October 2026, honest answers, step 1).
+                yield {"type": "answer", "text": content,
+                       **({"facts": self._facts_shown()} if self.facts else {})}
                 return
             messages.append({"role": "assistant", "content": content or None, "tool_calls": calls})
             if content:
@@ -3084,11 +3583,12 @@ class Agent:
                     return
                 continue
 
+            self._messages = messages
             risky = [c for c in calls if self._needs_ok(c)]
             if risky:
                 yield {"type": "confirm", "calls": [
-                    {"method": _args(c).get("method"), "path": _args(c).get("path"), "body": _args(c).get("body")}
-                    for c in risky]}
+                    {"method": _args(c).get("method"), "path": _args(c).get("path"), "body": _args(c).get("body"),
+                     "text": self._asking(c)} for c in risky]}
                 return
             self.wrote |= any(self._is_write(c) for c in calls)
             yield from self._execute(calls, messages, None)

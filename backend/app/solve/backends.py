@@ -643,8 +643,32 @@ NETWORKX = Backend(
     planner_choice="A network solver will take this: min-cost flow, proven optimal.",
 )
 
+def _layout_solve(compiled: Compiled, *, time_limit: float, workers: int, should_stop: ShouldStop | None = None,
+                  seed: int | None = None, gap_rel: float = 0.0, on_progress=None, hint: dict | None = None,
+                  solver_params: dict | None = None) -> Solution:
+    from app.solve import placement
+
+    return placement.solve(compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed,
+                           gap_rel=gap_rel, on_progress=on_progress)
+
+
+LAYOUT = Backend(
+    name="layout",
+    # A place rule's decisions: chosen (yes or no), where (whole cells), turned and aisle side.
+    classes=frozenset({"placement"}),
+    provides=frozenset({"placement", "integral", "linear"}),
+    # Last: only a model with a place rule needs what it alone provides; every other model has better solvers.
+    rank=99,
+    solve=_layout_solve,
+    # It says optimal only when its answer meets the area bound, which no layout can pass.
+    proves="global",
+    note="Placement on a drawing's free area without a list of positions (app.solve.placement): greedy from "
+         "coarse to fine grids, then windows solved exactly by CP-SAT; bounded by the free area",
+    planner_choice="The placement solver will lay the items out on the drawing's grid, without listing positions.",
+)
+
 BUILT_IN: tuple[Backend, ...] = (CP_SAT, GLOP, HIGHS, MILP, SCIP, PDLP, IPOPT, CMA_ES, PSO, GA, BENDERS,
-                                 NETWORKX)
+                                 NETWORKX, LAYOUT)
 
 
 def _with_adapters() -> tuple[Backend, ...]:

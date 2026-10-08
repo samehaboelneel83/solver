@@ -29,16 +29,21 @@ import re
 from typing import Any
 
 import numpy as np
+from app.core import limits
 
 STEPS = (1.0, 0.5, 0.25, 0.2, 0.1, 0.05)
 MAX_CELLS = 400_000
-MAX_CANDIDATES = 60_000
-MAX_LINKS = 1_500_000
+MAX_CANDIDATES = limits.LAYOUT_CANDIDATES  # app/core/limits.py
+MAX_LINKS = limits.LAYOUT_LINKS
 SIDES = {"bottom": (0, -1), "top": (0, 1), "left": (-1, 0), "right": (1, 0)}
 
 
 class LayoutRefused(ValueError):
     """The request cannot be laid out as asked; the message says why and what to change."""
+
+    def __init__(self, message: str, coarser: list[float] | None = None):
+        super().__init__(message)
+        self.coarser = coarser or []  # exact coarser grid steps, when too many candidates were the reason
 
 
 def _sheet(files: list[dict[str, Any]], file: str | None, layer: str) -> dict[str, Any]:
@@ -122,13 +127,35 @@ def choose_step(sizes: list[float], aisle: float, area: float, step: float | Non
     return fitting[-1]
 
 
-def make(files: list[dict[str, Any]], folder: str, *, area_layers: list[str], items: list[dict[str, Any]],
+def make(files: list[dict[str, Any]], folder: str, *, step: float | None = None, **kwargs: Any) -> dict[str, Any]:
+    """`_make`, and -- when the grid was the platform's own choice and gave too many candidates -- the same on the
+    next coarser exact grid (the camp test: 1.75 m beds with a 0.35 m aisle chose 0.05 m to keep the aisle exact,
+    460,980 positions, and was refused although the exact 0.25 m grid was there). The aisle modelled is reported."""
+    try:
+        return _make(files, folder, step=step, **kwargs)
+    except LayoutRefused as refused:
+        if step is not None or not refused.coarser:
+            raise
+        for coarser in sorted(refused.coarser):  # finest first: closest to the aisle asked
+            try:
+                out = _make(files, folder, step=coarser, **kwargs)
+            except LayoutRefused as again:
+                if again.coarser:
+                    continue
+                raise
+            out["grid_note"] = (f"the exact grid for the aisle asked ({refused}) was too fine; laid out on the "
+                                f"coarser exact {coarser:g} m grid, so the aisle is modelled as "
+                                f"{out['aisle_m']['modelled']:g} m")
+            return out
+        raise
+
+
+def grid(files: list[dict[str, Any]], *, area_layers: list[str], items: list[dict[str, Any]],
          file: str | None = None, blocked_layers: list[str] | None = None, label_layer: str | None = None,
          aisle: float = 0.0, aisle_side: str = "long", step: float | None = None, blocked_buffer: float = 0.0,
-         max_file_rows: int = 200_000, area_indices: list[int] | None = None,
-         prefix: str = "layout", access_layers: list[str] | None = None) -> dict[str, Any]:
-    """Write `<prefix>_items.csv`, `_cells.csv`, `_occupies.csv` (and `_keeps_free.csv`) into `folder`, and
-    return the counts, an upper bound and the plan's seed and model."""
+         area_indices: list[int] | None = None, max_cells: int | None = None) -> dict[str, Any]:
+    """The drawing as a grid: the item kinds, the step, and which cells are free in which zone (-1: not free).
+    Shared by the candidate list (`make`) and the placement form (`place`), which needs no candidates."""
     import shapely
     from shapely.ops import unary_union
 
@@ -186,7 +213,7 @@ def make(files: list[dict[str, Any]], folder: str, *, area_layers: list[str], it
     minx, miny, maxx, maxy = free_all.bounds
     x0, y0 = math.floor(minx / s) * s, math.floor(miny / s) * s
     nx, ny = int(math.ceil((maxx - x0) / s)), int(math.ceil((maxy - y0) / s))
-    if nx * ny > MAX_CELLS * 4:
+    if nx * ny > (max_cells or MAX_CELLS * 4):
         raise LayoutRefused(f"a {s:g} m grid over this drawing is {nx * ny:,} cells; use a coarser step")
     xs = x0 + np.arange(nx) * s
     ys = y0 + np.arange(ny) * s
@@ -203,6 +230,28 @@ def make(files: list[dict[str, Any]], folder: str, *, area_layers: list[str], it
     usable_cells = int(ok.sum())
     if usable_cells == 0:
         raise LayoutRefused(f"no whole {s:g} m cell fits in the free area")
+    return {"kinds": kinds, "aisle": aisle, "aisle_side": aisle_side, "step": s, "n_aisle": n_aisle,
+            "areas": areas, "zones": zones, "free_by_zone": free_by_zone, "free_all": free_all,
+            "x0": x0, "y0": y0, "nx": nx, "ny": ny, "zone_of": zone_of, "ok": ok,
+            "zone_grid": zone_of.reshape(nx, ny)}
+
+
+def _make(files: list[dict[str, Any]], folder: str, *, area_layers: list[str], items: list[dict[str, Any]],
+         file: str | None = None, blocked_layers: list[str] | None = None, label_layer: str | None = None,
+         aisle: float = 0.0, aisle_side: str = "long", step: float | None = None, blocked_buffer: float = 0.0,
+         max_file_rows: int = limits.GENERATED_ROWS, area_indices: list[int] | None = None,
+         prefix: str = "layout", access_layers: list[str] | None = None) -> dict[str, Any]:
+    """Write `<prefix>_items.csv`, `_cells.csv`, `_occupies.csv` (and `_keeps_free.csv`) into `folder`, and
+    return the counts, an upper bound and the plan's seed and model."""
+    g = grid(files, area_layers=area_layers, items=items, file=file, blocked_layers=blocked_layers,
+             label_layer=label_layer, aisle=aisle, aisle_side=aisle_side, step=step, blocked_buffer=blocked_buffer,
+             area_indices=area_indices)
+    import shapely
+
+    kinds, aisle, aisle_side, s, n_aisle = g["kinds"], g["aisle"], g["aisle_side"], g["step"], g["n_aisle"]
+    areas, zones, free_all = g["areas"], g["zones"], g["free_all"]
+    x0, y0, nx, ny, zone_of, ok = g["x0"], g["y0"], g["nx"], g["ny"], g["zone_of"], g["ok"]
+    sizes = sorted({v for k in kinds for v in (k["length"], k["width"])})
 
     # Window sums: a w x h block of cells at (i, j) is all free when its sum is w * h.
     integral = np.zeros((nx + 1, ny + 1), dtype=np.int64)
@@ -254,7 +303,7 @@ def make(files: list[dict[str, Any]], folder: str, *, area_layers: list[str], it
         raise LayoutRefused(
             f"a {s:g} m grid gives {total:,} candidate positions, more than the {MAX_CANDIDATES:,} a model can take "
             f"well. Coarser exact steps: {suggestions}. Generate one selected area at a time, or reduce turns only "
-            "when the user has not required them.")
+            "when the user has not required them.", coarser=coarser)
 
     # The generated CSVs are read back into the assistant's file table. Keep each relation
     # table within that reader's row budget; otherwise parsing truncates links and the model
@@ -481,3 +530,143 @@ def _spec(kinds, names, aisles: bool, prefix: str, access: bool = False) -> dict
         ir["objective"]["terms"][0]["expression"] = {
             "sum": {"mul": [{"par": "item_value", "index": ["i"]}, {"var": "place", "index": ["i"]}]}, "over": [i]}
     return {"seed": seed, "ir": ir}
+
+
+def place(files: list[dict[str, Any]], folder: str, *, area_layers: list[str], items: list[dict[str, Any]],
+          file: str | None = None, blocked_layers: list[str] | None = None, label_layer: str | None = None,
+          aisle: float = 0.0, aisle_side: str = "long", step: float | None = None, blocked_buffer: float = 0.0,
+          area_indices: list[int] | None = None, prefix: str = "layout",
+          access_layers: list[str] | None = None) -> dict[str, Any]:
+    """The placement form (plan of 8 October 2026, phase 1C): no candidate list. Writes `<prefix>_areas.csv` (each
+    free area as a polygon in metres) and `<prefix>_slots.csv` (as many slots of each kind as can fit), and returns
+    the plan: a `place` rule the placement solver lays out on the grid itself, at any step -- the exact one for the
+    sizes and the aisle, however fine."""
+    from shapely import wkt
+
+    from app.solve import placement
+
+    exact = step
+    if exact is None:
+        sizes = sorted({float(v) for it in items for v in (it.get("length", 0), it.get("width", 0))})
+        exact = _exact_step(sizes, float(aisle or 0))
+    g = grid(files, area_layers=area_layers, items=items, file=file, blocked_layers=blocked_layers,
+             label_layer=label_layer, aisle=aisle, aisle_side=aisle_side, step=exact, blocked_buffer=blocked_buffer,
+             area_indices=area_indices, max_cells=40_000_000)
+    kinds, s, n_aisle, side = g["kinds"], g["step"], g["n_aisle"], g["aisle_side"]
+    zone = g["zone_grid"]
+    free_cells = int((zone >= 0).sum())
+    slots, slot_rows = {}, []
+    for kind in kinds:
+        cells = (round(kind["length"] / s), round(kind["width"] / s))
+        vs = placement.variants_cells([(cells[0], cells[1], kind["rotations"], kind["value"])], side, n_aisle)
+        fit = placement.area_bound(free_cells, vs, n_aisle, side)
+        asked = next((int(it["count"]) for it in items if str(it.get("name") or "").lower().startswith(kind["name"])
+                      and it.get("count")), None)
+        slots[kind["name"]] = min(fit, asked) if asked else fit
+        for n in range(slots[kind["name"]]):
+            slot_rows.append([f"{kind['name']}_{n + 1}", kind["name"], cells[0], cells[1],
+                              1 if 90 in kind["rotations"] and 0 in kind["rotations"] else 0, kind["value"]])
+    if not slot_rows:
+        raise LayoutRefused("no item fits anywhere: check the sizes, the aisle and the layers")
+    area_rows = [[f"{name}_{n + 1}" if g["zones"].count(name) > 1 else name, name,
+                  wkt.dumps(shape, rounding_precision=6)]
+                 for n, (name, shape) in enumerate(zip(g["zones"], g["free_by_zone"])) if not shape.is_empty]
+    os.makedirs(folder, exist_ok=True)
+    names = {"areas": f"{prefix}_areas.csv", "slots": f"{prefix}_slots.csv"}
+    _write(folder, names["areas"], ["area", "zone", "shape"], area_rows)
+    _write(folder, names["slots"], ["slot", "kind", "length_cells", "width_cells", "can_turn", "value"], slot_rows)
+    access_rows = []
+    if access_layers:
+        from app.solve.place_rule import entrances
+
+        features = [shape for shape, _ in _shapes(files, file, access_layers)]
+        if not features:
+            raise LayoutRefused(f"no features on {access_layers} to give access from")
+        reached = entrances(zone, features, s, (g["x0"], g["y0"]))
+        zones_reached = {g["zones"][int(z)] for z in np.unique(zone[reached]) if z >= 0}
+        without = sorted(set(g["zones"]) - zones_reached)
+        access_rows = [[f"access_{n + 1}", wkt.dumps(f, rounding_precision=6)] for n, f in enumerate(features)]
+        names["access"] = f"{prefix}_access.csv"
+        _write(folder, names["access"], ["feature", "shape"], access_rows)
+    nx, ny = g["nx"], g["ny"]
+    turns = any(r[4] for r in slot_rows)
+    seed = {
+        "entity_types": [
+            {"name": "area", "role": "location", "attributes": [{"name": "zone", "data_type": "text"},
+                                                                 {"name": "shape", "data_type": "text"}]},
+            {"name": "slot", "role": "resource", "attributes": [
+                {"name": "kind", "data_type": "text"}, {"name": "length_cells", "data_type": "integer"},
+                {"name": "width_cells", "data_type": "integer"}, {"name": "can_turn", "data_type": "integer"},
+                {"name": "value", "data_type": "number"}]}],
+        "entities_from_file": [
+            {"file": names["areas"], "type": "area", "key": "area", "attrs": {"zone": "zone", "shape": "shape"}},
+            {"file": names["slots"], "type": "slot", "key": "slot",
+             "attrs": {a: a for a in ("kind", "length_cells", "width_cells", "can_turn", "value")}}],
+    }
+    s_ref = {"index": "s", "set": "slot"}
+    variables: dict[str, Any] = {"placed": {"index": ["slot"], "domain": "binary"},
+                                 "x": {"index": ["slot"], "domain": "integer", "lower": 0, "upper": nx},
+                                 "y": {"index": ["slot"], "domain": "integer", "lower": 0, "upper": ny}}
+    body: dict[str, Any] = {"slots": s_ref, "chosen": {"var": "placed", "index": ["s"]},
+                            "x": {"var": "x", "index": ["s"]}, "y": {"var": "y", "index": ["s"]},
+                            "length": "length_cells", "width": "width_cells",
+                            "areas": {"index": "a", "set": "area"}, "shape": "shape",
+                            "step": s, "origin": [g["x0"], g["y0"]]}
+    if turns:
+        variables["turned"] = {"index": ["slot"], "domain": "binary"}
+        body["turn"] = {"var": "turned", "index": ["s"]}
+        body["can_turn"] = "can_turn"
+    if access_rows:
+        seed["entity_types"].append({"name": "access_point", "role": "location",
+                                     "attributes": [{"name": "shape", "data_type": "text"}]})
+        seed["entities_from_file"].append({"file": names["access"], "type": "access_point", "key": "feature",
+                                           "attrs": {"shape": "shape"}})
+        body["access"] = {"index": "e", "set": "access_point"}
+        body["access_shape"] = "shape"
+    if n_aisle:
+        variables["aisle_side"] = {"index": ["slot"], "domain": "integer", "lower": 0, "upper": 3}
+        body["side"] = {"var": "aisle_side", "index": ["s"]}
+        body["aisle"] = n_aisle
+        body["aisle_sides"] = side
+    values = {r[5] for r in slot_rows}
+    goal = ({"sum": {"var": "placed", "index": ["s"]}, "over": [s_ref]} if len(values) == 1 else
+            {"sum": {"mul": [{"attr": {"of": "s", "name": "value"}}, {"var": "placed", "index": ["s"]}]},
+             "over": [s_ref]})
+    ir = {"version": 2, "sets": ["slot", "area"] + (["access_point"] if access_rows else []), "parameters": {},
+          "variables": variables,
+          "constraints": [{"id": "c_layout", "severity": "hard",
+                           "note": "Items on the free area, no two on one cell, each aisle free", "place": body}],
+          "objective": {"sense": "maximize", "terms": [{"id": "o_items", "weight": 1, "expression": goal}]}}
+    free_area = float(g["free_all"].area)
+    return {
+        "form": "place",
+        "files": [names["areas"], names["slots"]] + ([names["access"]] if access_rows else []),
+        "grid_step_m": s,
+        "grid_cells": nx * ny, "free_cells": free_cells,
+        "aisle_m": {"asked": g["aisle"], "modelled": round(n_aisle * s, 4), "cells": n_aisle, "side": side},
+        "areas": len(area_rows), "zones": sorted(set(g["zones"])),
+        "free_area_m2": round(free_area, 1),
+        "slots_by_kind": slots,
+        "upper_bound": {"items": sum(slots.values()),
+                        "how": "free cells / (the item's cells + half its aisle), per kind"},
+        "spec": {"seed": seed, "ir": ir},
+        "access": ({"layers": list(access_layers or []), "features": len(access_rows),
+                    "areas_without_access": without} if access_rows else None),
+        "not_modelled": (("Nothing: every placed item's aisle joins a way of uncovered free cells to "
+                          f"{', '.join(access_layers or [])}." + (
+                              f" Areas with none of those features ({', '.join(without)}) can take no item."
+                              if without else "")) if access_rows else
+                         "Each placed item keeps its aisle free on one side; whether every aisle joins up with a "
+                         "door is not a rule here (give access_layers to make it one)." if n_aisle else
+                         "No aisle was asked for: items may be packed with no way between them."),
+    }
+
+
+def _exact_step(sizes: list[float], aisle: float) -> float:
+    """The coarsest step that divides every size and the aisle exactly (to 1 cm): the placement form has no
+    candidate list, so a fine grid costs it little."""
+    for s in (1.0, 0.5, 0.25, 0.2, 0.1, 0.05, 0.02, 0.01):
+        values = [v for v in sizes if v > 0] + ([aisle] if aisle > 0 else [])
+        if all(abs(v / s - round(v / s)) < 1e-6 for v in values):
+            return s
+    return 0.01

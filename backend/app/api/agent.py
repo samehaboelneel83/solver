@@ -174,9 +174,11 @@ def chat(
         names = list(stored) if body.keep_files is None else [n for n in body.keep_files if n in stored]
         new = {f.get("name"): f for f in body.files or [] if isinstance(f, dict)}
         files = [stored[n] for n in names if n not in new] + list(new.values())
+        replaced = [n for n in new if n in stored]
     else:
         messages = [m.model_dump(exclude_none=True) for m in body.messages]
         files = list(body.files or [])
+        replaced = []
         if len(json.dumps(messages)) > MAX_HISTORY_BYTES:
             raise HTTPException(status_code=413, detail="the conversation is too long; start a new one")
     pending = bool(messages) and messages[-1]["role"] == "assistant" and bool(messages[-1].get("tool_calls"))
@@ -191,7 +193,16 @@ def chat(
             for call in messages[-1]["tool_calls"]:
                 messages.append({"role": "tool", "tool_call_id": call["id"], "name": call["function"].get("name"),
                                  "content": "Not approved. The user replied instead; their message follows."})
-        messages.append({"role": "user", "content": body.text.strip()})
+        said = body.text.strip()
+        arrived = [str(f.get("name")) for f in body.files or [] if isinstance(f, dict) and f.get("name")]
+        if arrived:
+            # Which files came with this message, and which replace an earlier copy of the same name (the file
+            # refresh test, October 2026: next quarter's projects.csv, same name and size, was taken for the old
+            # one, and the person was asked to attach it again).
+            said += "\n\n[Attached with this message: " + ", ".join(
+                f"{n} (a NEW copy: it replaces the earlier {n} in this conversation)" if n in replaced else n
+                for n in arrived) + "]"
+        messages.append({"role": "user", "content": said})
 
     # The next streamed turn may take minutes and can be interrupted by a worker or API restart.
     # Save the incoming message and its attachments before starting the model so the browser can
@@ -327,7 +338,8 @@ def handover(conversation_id: str, db: Session = Depends(get_db),
     new_id = uuid.uuid4().hex
     files = list(kept.get("files") or [])
     agent_store.save(db, new_id, str(user.id), str(user.organization_id), "model", [], files, turned=False)
-    return {"conversation_id": new_id, "text": first or "", "files": [_light(f) for f in files]}
+    first = ATTACHED_NOTE.sub("", first or "")  # the files travel on their own
+    return {"conversation_id": new_id, "text": first, "files": [_light(f) for f in files]}
 
 
 @router.post("/conversations/{conversation_id}/stop", status_code=204, response_class=Response)
@@ -347,6 +359,10 @@ def forget(conversation_id: str, db: Session = Depends(get_db), user: UserAccoun
         turn["agent"].cancelled.set()
     agent_store.delete(db, conversation_id, str(user.id))
     return Response(status_code=204)
+
+
+#: The note a message gets naming the files attached with it (see the turn above).
+ATTACHED_NOTE = __import__("re").compile(r"\n\n\[Attached with this message: [^\n]*\]$")
 
 
 @router.post("/files")
@@ -462,7 +478,26 @@ def workspace(domain_id: int, db: Session = Depends(get_db), user: UserAccount =
                      for m in maps],
         "problems": [dict(p) for p in problems],
         "data_sources": _data_sources(db, user, domain_id),
+        # Files kept in the workspace (migration 0115): what a build loaded from an attached file, by version.
+        "files": [{"name": f["name"], "latest_version": f["latest"], "versions": f["versions"], "rows": f["rows"],
+                   "updated_at": f["updated_at"]} for f in _kept_files(db, domain_id)],
+        "refresh_schedule": _refresh_schedule(db, domain_id),
     }
+
+
+def _refresh_schedule(db: Session, domain_id: int) -> dict | None:
+    """The workspace's scheduled refresh (migration 0116): how often, what it does, and how its last run went."""
+    row = db.execute(text("SELECT every_hours, mode, solve, enabled, next_at, last_at, last_error,"
+                          " last_report->'changes' AS changes, last_report->'applied' AS applied,"
+                          " jsonb_array_length(coalesce(last_report->'runs', '[]'::jsonb)) AS runs"
+                          " FROM source_schedule WHERE domain_id = :d"), {"d": domain_id}).mappings().one_or_none()
+    return dict(row) if row else None
+
+
+def _kept_files(db: Session, domain_id: int) -> list[dict]:
+    from app.integrations.refresh import files
+
+    return files(db, domain_id)
 
 
 def _data_sources(db: Session, user: UserAccount, domain_id: int) -> list[dict]:
@@ -473,48 +508,39 @@ def _data_sources(db: Session, user: UserAccount, domain_id: int) -> list[dict]:
         return []
     rows = db.execute(text(
         "SELECT c.id, c.name, c.enabled, c.config->>'schema' AS schema_name, c.config->>'table' AS table_name,"
+        " c.config->>'kind' AS kind, c.config->>'url' AS url, coalesce(c.config->>'engine', 'postgres') AS engine,"
         " c.config->'columns' AS columns,"
         " (SELECT json_build_object('job_id', j.id, 'state', j.state, 'finished_at', j.finished_at,"
         "    'error_code', j.error_code) FROM ingestion_job j WHERE j.connection_id = c.id ORDER BY j.id DESC LIMIT 1)"
         "   AS last_extraction,"
-        " (SELECT json_agg(DISTINCT coalesce(e.name, rt.name, p.name)) FROM import_load l JOIN ingestion_job j"
+        " (SELECT json_agg(DISTINCT x.name) FROM ("
+        "    SELECT coalesce(e.name, rt.name, p.name) AS name FROM import_load l JOIN ingestion_job j"
         "    ON j.id = l.job_id LEFT JOIN entity_type e ON e.id = l.entity_type_id"
         "    LEFT JOIN relationship_type rt ON rt.id = l.relationship_type_id"
-        "    LEFT JOIN parameter_def p ON p.id = l.parameter_id WHERE j.connection_id = c.id) AS loaded_into"
+        "    LEFT JOIN parameter_def p ON p.id = l.parameter_id WHERE j.connection_id = c.id"
+        "    UNION SELECT b.target FROM source_binding b WHERE b.connection_id = c.id) x) AS loaded_into"
         " FROM integration_connection c WHERE c.domain_id = :d AND c.organization_id = :o ORDER BY c.id"),
         {"d": domain_id, "o": user.organization_id}).mappings().all()
     return [{"id": r["id"], "name": r["name"], "enabled": r["enabled"],
-             "table": f"{r['schema_name']}.{r['table_name']}", "columns": r["columns"] or [],
+             **({"web_address": r["url"]} if r["kind"] == "http" else {"table": f"{r['schema_name']}.{r['table_name']}",
+                                                                          "engine": r["engine"]}),
+             "columns": r["columns"] or [],
              "last_extraction": r["last_extraction"], "loaded_into": r["loaded_into"] or []} for r in rows]
-
-
-#: Rows a source brings into the conversation: one extraction's ceiling (app.integrations.contracts).
-SOURCE_ROWS = 100_000
 
 
 @router.get("/sources/{job_id}/file")
 def source_file(job_id: int, db: Session = Depends(get_db), user=Depends(requires("integration.run"))) -> dict:
     """An extracted source as an attached file (`use_source`): the same tables `read_file`, `query_file` and a
     plan's *_from_file read, its rows checked against the extraction's SHA-256, and where they came from."""
-    from app.api.imports import _artifact, _job
-    from app.integrations import artifacts
+    from app.integrations import artifacts, refresh
 
-    job = _job(db, job_id, user.organization_id)
-    path, manifest = _artifact(job, user.organization_id)
+    job = refresh.job_row(db, job_id, user.organization_id)
+    if job is None:
+        raise HTTPException(404, "Ingestion job not found")
     try:
-        records = artifacts.verified_rows(path, manifest.get("sha256", ""), SOURCE_ROWS)
-    except artifacts.ArtifactChanged as exc:
+        return refresh.job_sheet(job, user.organization_id)
+    except (artifacts.ArtifactUnavailable, artifacts.ArtifactChanged) as exc:
         raise HTTPException(409, str(exc)) from None
-    except artifacts.ArtifactUnavailable as exc:
-        raise HTTPException(409, str(exc)) from None
-    columns = list(manifest.get("columns") or (list(records[0]) if records else []))
-    rows = [[agent_files._cell(r.get(c)) for c in columns] for r in records]
-    total = int(manifest.get("rows") or len(rows))
-    return {"name": job["connection_name"],
-            "sheets": [{"name": str(manifest.get("source_object") or "rows"), "columns": columns, "rows": rows,
-                        "total_rows": total, "truncated": total > len(rows)}],
-            "source": {"connection_id": job["connection_id"], "job_id": job_id,
-                       "sha256": manifest.get("sha256"), "extracted_at": manifest.get("completed_at")}}
 
 
 @router.get("/result/{run_id}")
@@ -548,4 +574,4 @@ def result(run_id: int, db: Session = Depends(get_db), user: UserAccount = Depen
                         chosen[var] = keys
             rec["front"].append({"seq": seq, "first": first, "second": second, "status": status,
                                  "run_id": point_run, "chosen": chosen})
-    return {"text": agent_result.summary(rec)}
+    return {"text": agent_result.summary(rec), "facts": agent_result.facts(rec)}

@@ -204,7 +204,7 @@ def model_findings(db: Session, domain_id: int, problem_id: int, ir: dict[str, A
 
     findings: list[dict[str, Any]] = []
     unexpressed = [c.get("id") for c in ir.get("constraints", [])
-                   if not any(k in c for k in ("left", "no_overlap", "cumulative", "connected", "route"))]
+                   if not any(k in c for k in ("left", "no_overlap", "cumulative", "connected", "route", "place"))]
     if unexpressed:
         findings.append(_finding("blocker", "rule_not_expressed",
                                  f"{', '.join(map(str, unexpressed))} {'has' if len(unexpressed) == 1 else 'have'} a name but no arithmetic, "

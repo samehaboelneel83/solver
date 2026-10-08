@@ -55,7 +55,10 @@ def _record(db: Session, run_id: int) -> dict[str, Any]:
     results = [dict(r) for r in db.execute(
         text("SELECT constraint_id, label, hard, satisfied, total_violation, penalty_paid, slack, dual, violations"
              "  FROM constraint_result WHERE run_id = :r ORDER BY constraint_id"), {"r": run_id}).mappings()]
-    return {**dict(row), "results": results}
+    from app.solve.place_rule import with_positions
+
+    # A place rule's chosen slots carry their rectangle in metres, as any placed record does (plan phase 1C).
+    return with_positions({**dict(row), "results": results})
 
 
 def _labels(data: dict[str, Any]) -> dict[str, dict[str, str]]:

@@ -79,6 +79,9 @@ def test_use_source_names_unknown_sources_and_failures():
                 {"id": 7, "state": "extracted", "finished_at": "2026-10-06T08:00:00Z"}]}}
         if path.endswith("/jobs") and method == "POST":
             return {"ok": True, "status": 202, "body": {"id": 8, "state": "queued"}}
+        if path.startswith("/api/v1/domains/3/files"):
+            return ({"ok": True, "status": 200, "body": {"items": []}} if path.endswith("/files")
+                    else {"ok": False, "status": 404, "body": {"detail": "No such file"}})
         if path == "/api/v1/ingestion-jobs/8":
             return {"ok": True, "status": 200, "body": {"id": 8, "state": "failed", "error_code": "authentication_failed"}}
         raise AssertionError(path)

@@ -98,6 +98,8 @@ CONSTRAINT_KEYS: frozenset[str] = frozenset(
         "connected",
         # The routing rule (version 2, queue R15b), likewise.
         "route",
+        # Items placed on a drawing's free area (version 2, plan phase 1C), likewise.
+        "place",
     }
 )
 #: The two scheduling rules, and the keys each carries.
@@ -113,6 +115,16 @@ CONNECTED_KEYS: frozenset[str] = frozenset({"assign", "units", "groups", "via", 
 ROUTE_KEYS: frozenset[str] = frozenset({"visit", "vehicles", "stops", "depot", "depot_of", "depot_by", "demand", "capacity",
                                         # Time windows (queue R15c): a travel-time parameter and stop attributes.
                                         "travel", "earliest", "latest", "service"})
+#: What a `place` rule names (plan of 8 October 2026, phase 1C): the slots items may take, each slot's decisions
+#: (chosen, x and y in cells from the grid's origin, and optionally turned and aisle side), the slot fields with its
+#: size in cells (and whether it may turn), the areas (polygons in metres, one zone each), the grid, and the aisle.
+PLACE_KEYS: frozenset[str] = frozenset({"slots", "chosen", "x", "y", "turn", "side", "length", "width", "can_turn",
+                                        "areas", "shape", "step", "origin", "aisle", "aisle_sides",
+                                        # Access: every placed item's aisle joins, through cells no item covers, a
+                                        # free cell at one of these features (doors, exits, gates).
+                                        "access", "access_shape"})
+PLACE_REQUIRED: frozenset[str] = frozenset({"slots", "chosen", "x", "y", "length", "width", "areas", "shape", "step",
+                                            "origin"})
 #: What an interval declaration names beyond `index` and `domain`.
 INTERVAL_KEYS: frozenset[str] = frozenset({"start", "end", "size", "presence"})
 

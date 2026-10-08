@@ -396,11 +396,21 @@ def test_a_run_stopped_with_an_answer_keeps_it_and_says_it_was_stopped(db, monke
 
 def test_a_run_stopped_with_nothing_in_hand_is_cancelled(db, monkeypatch):
     _stop_during_solve(monkeypatch, Solution("unknown", False, None, {}, 0.0, "cp-sat"))
+    # No greedy start either (app.solve.greedy would have one in hand for this model).
+    monkeypatch.setattr("app.solve.greedy.applies", lambda compiled: "off for this test")
 
     row = _run(db, _scalar("binary", "maximize", X, []), "honesty-stop-empty")
 
     assert row["status"] == "cancelled"
     assert row["solutions"] == 0
+
+
+def test_a_run_stopped_with_only_its_greedy_start_keeps_the_start(db, monkeypatch):
+    _stop_during_solve(monkeypatch, Solution("unknown", False, None, {}, 0.0, "cp-sat"))
+
+    row = _run(db, _scalar("binary", "maximize", X, []), "honesty-stop-greedy")
+
+    assert row["status"] == "feasible" and row["objective"] == 1
 
 
 def test_a_gap_below_the_stored_six_places_is_rounding_even_for_a_small_goal():

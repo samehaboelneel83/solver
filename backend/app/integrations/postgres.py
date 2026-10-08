@@ -39,8 +39,12 @@ class PostgresSource:
     connect_timeout_seconds: int = 10
     statement_timeout_ms: int = 30_000
     extraction_timeout_seconds: int = 300
+    #: The database engine (app/integrations/databases.py): postgres, mysql, sqlserver or oracle.
+    engine: str = "postgres"
 
     def __post_init__(self):
+        if self.engine not in ("postgres", "mysql", "sqlserver", "oracle"):
+            raise ValueError("Unknown database engine")
         if not isinstance(self.organization_id, UUID) or type(self.connection_id) is not int or self.connection_id <= 0:
             raise ValueError("Invalid connection scope")
         if not self.host or any(character in self.host for character in (",", "/", "\\", "\x00")):

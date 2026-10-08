@@ -192,6 +192,37 @@ def test_a_repeated_refusal_is_flagged_as_the_same_one():
 # -- solving, sensitivity, what-ifs ------------------------------------------------------------------------
 
 
+def test_the_result_carries_facts_the_platform_renders(tenants, db):
+    """The facts card (plan of 8 October 2026, honest answers, step 1): status in words, goal, decision rows and
+    tight rules, from the run itself."""
+    client = TestClient(app)
+    built = _build(client, tenants["b"], "facts")
+    run = _solve(client, tenants["b"], db, built["scenario_id"])
+    facts = client.get(f"/api/v1/agent/result/{run['id']}", headers=tenants["b"]).json()["facts"]
+    assert facts["run_id"] == run["id"] and facts["status"] == "optimal"
+    assert facts["status_words"] == "Proven best answer" and abs(float(facts["goal"]) - REFERENCE) < 0.01
+    assert facts["bound"] is None and facts["decisions"]
+    table = facts["decisions"][0]
+    assert table["header"][-1] == "value" and any("Yellow corn" in " ".join(r) for r in table["rows"])
+    assert {"c_protein_min", "c_fat_min", "c_fiber_max"} <= {r["id"] for r in facts["rules"] if r["state"] == "tight"}
+
+
+def test_an_answer_shows_the_facts_of_the_runs_it_read(monkeypatch):
+    from tests.test_agent import ScriptedLLM
+
+    facts = {"run_id": 9, "status": "optimal"}
+
+    def call(method, path, query=None, body=None, *a, **k):
+        return {"ok": True, "status": 200, "body": {"text": "RUN 9: optimal; goal (minimize) = 5.", "facts": facts}}
+
+    monkeypatch.setattr(core, "llm_chat", ScriptedLLM([("read_result", {"run_id": 9}),
+                                                        "The cheapest blend is in the card above."]))
+    agent = core.Agent(core.Settings(), core.ApiIndex(app.openapi()), call, core.Context("x"))
+    events = list(agent.run([{"role": "user", "content": "what did run 9 find?"}], None))
+    answer = next(e for e in events if e["type"] == "answer")
+    assert answer["facts"] == [facts]
+
+
 def test_the_blend_solves_to_the_reference_and_read_result_explains_the_limits(tenants, db):
     client = TestClient(app)
     built = _build(client, tenants["b"], "solve")
@@ -443,6 +474,7 @@ def test_a_problem_asked_in_the_ask_tab_is_handed_to_describe_with_its_files(ten
                    files=files, conversation_id="ask1", server_history=True)
     kinds = [e["type"] for e in events]
     assert "handover" in kinds and kinds[-1] == "state"
+    assert model.requests[0]["messages"][-1]["content"].endswith("[Attached with this message: ingredients.csv]")
     answer = next(e["text"] for e in events if e["type"] == "answer")
     assert answer.startswith("A feed blend to optimise.") and "Describe a problem" in answer
     assert len(model.requests) == 1  # nothing else was tried
@@ -482,7 +514,7 @@ def test_a_layout_step_the_model_chose_that_is_too_fine_points_to_the_one_that_f
     monkeypatch.setattr(layout, "make", fake)
     agent = core.Agent(core.Settings(), agent_api._index, lambda *a, **k: {"ok": True}, core.Context("x", mode="model"))
     said = agent._make_layout({"area_layers": ["BOUNDARY"], "items": [{"name": "bed", "length": 2, "width": 1}],
-                               "aisle": 1, "step": 0.5})
+                               "aisle": 1, "step": 0.5, "form": "candidates"})
     assert said.startswith("Could not lay it out: this layout needs 383,808")
     assert "LEAVING step OUT works: the platform's exact step is 1 m, giving 12,008 candidate positions" in said
     assert calls == [0.5, None]
@@ -1470,3 +1502,58 @@ def test_check_spec_runs_a_trial_solve_and_says_it(tenants, db):
            "makes nothing" in core.trial_for_person(trial)
     # Nothing was kept.
     assert client.post("/api/v1/problems/from-spec", json=spec, headers=tenants["b"]).status_code == 200
+
+
+def test_a_new_copy_of_an_attached_file_is_said_to_be_new(tenants, monkeypatch):
+    """The file refresh test (October 2026): next quarter's projects.csv, the same name and size as the first, was
+    taken for the old one, and the person was asked to attach it again."""
+    client = TestClient(app)
+    files = _file(client, tenants["b"])
+    model = _install(monkeypatch, [("text", "Got it."), ("text", "Got the new one.")])
+    _chat(tenants["b"], text="here is the data", mode="model", files=files, conversation_id="copy1", server_history=True)
+    _chat(tenants["b"], text="and this week's", mode="model", files=files, conversation_id="copy1", server_history=True)
+    said = model.requests[-1]["messages"][-1]["content"]
+    assert said == ("and this week's\n\n[Attached with this message: ingredients.csv (a NEW copy: it replaces the "
+                    "earlier ingredients.csv in this conversation)]")
+
+
+def test_describe_mode_solves_a_scenario_the_workspace_already_has():
+    """The live test of 7 October 2026: "solve the Base scenario again" in Describe a problem mode was refused."""
+    seen = []
+
+    def call(method, path, query=None, body=None, *a, **k):
+        seen.append((method, path))
+        if path == "/api/v1/scenarios/53":
+            return {"ok": True, "status": 200, "body": {"id": 53}}
+        if path == "/api/v1/scenarios/54":
+            return {"ok": False, "status": 404, "body": {"detail": "Scenario not found"}}
+        return {"ok": True, "status": 201, "body": {"id": 7, "status": "queued"}}
+
+    agent = core.Agent(core.Settings(), core.ApiIndex(app.openapi()), call, core.Context("x", mode="model"))
+    said = agent.run_tool("call_api", {"method": "POST", "path": "/api/v1/scenarios/53/runs", "body": {}})
+    assert "Refused" not in said and ("POST", "/api/v1/scenarios/53/runs") in seen
+    said = agent.run_tool("call_api", {"method": "POST", "path": "/api/v1/scenarios/54/runs", "body": {}})
+    assert said.startswith("Refused: in problem-description mode")
+
+
+def test_a_solve_that_settles_at_once_comes_back_as_read_result():
+    """The live test of 7 October 2026: the run was answered at once, and the reply was written from the raw run
+    (each lane's cost read as its units)."""
+    def call(method, path, query=None, body=None, *a, **k):
+        if path.startswith("/api/v1/agent/result/"):
+            return {"ok": True, "status": 200, "body": {"text": "RUN 7: optimal; goal (minimize) = 3,020.",
+                                                        "facts": {"run_id": 7}}}
+        if path == "/api/v1/scenarios/53":
+            return {"ok": True, "status": 200, "body": {"id": 53}}
+        return {"ok": True, "status": 201, "body": {"id": 7, "status": "optimal", "objective": 3020}}
+
+    agent = core.Agent(core.Settings(), core.ApiIndex(app.openapi()), call, core.Context("x", mode="model"))
+    said = agent.run_tool("call_api", {"method": "POST", "path": "/api/v1/scenarios/53/runs", "body": {}})
+    assert "This is read_result for it" in said and "RUN 7: optimal" in said
+    assert agent.facts == {7: {"run_id": 7}}
+
+
+def test_runs_with_the_same_answer_show_one_facts_card():
+    agent = core.Agent(core.Settings(), core.ApiIndex(app.openapi()), lambda *a, **k: {}, core.Context("x"))
+    agent.facts = {1: {"run_id": 1, "goal": 5}, 2: {"run_id": 2, "goal": 7}, 3: {"run_id": 3, "goal": 7}}
+    assert agent._facts_shown() == [{"run_id": 1, "goal": 5}, {"run_id": 3, "goal": 7}]

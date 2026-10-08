@@ -80,17 +80,18 @@ def test_map_candidate_api_generates_records_and_occupancy_links(auth_headers, d
         "area_layers": ["BOUNDARY"],
         "blocked_layers": ["OBSTACLES", "DOORS_OBSTACLE"],
         "label_layer": "LABELS",
-        "items": [{"name": "bed", "length": 1.75, "width": 0.5, "rotations": [0, 90]}],
+        # Within the API's own limits (150,000 records, 200,000 links): 1.5 m beds on the exact 0.5 m grid.
+        "items": [{"name": "bed", "length": 1.5, "width": 0.5, "rotations": [0, 90]}],
         "aisle": 0.35,
         "aisle_side": "short",
-        "step": 0.25,
+        "step": 0.5,
         "area_indices": [0],
     })
     assert generated.status_code == 201, generated.text
     body = generated.json()
     assert body["counts"]["candidates"] > 0
     assert body["counts"]["occupies"] > 0
-    assert body["grid_step_m"] == 0.25
+    assert body["grid_step_m"] == 0.5
     assert body["ir"]["sets"][0] == body["candidate_type"]
     assert body["ir"]["sets"][1] == body["cell_type"]
 

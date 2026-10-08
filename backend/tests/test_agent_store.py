@@ -65,7 +65,8 @@ def test_incoming_files_are_saved_before_a_turn_can_be_interrupted(tenants, monk
     assert saved and len(saved) == 1  # no terminal state was yielded to trigger the old save path
     conversation_id, messages, kept_files, turned = saved[0]
     assert conversation_id == "conv_store_interrupted" and not turned
-    assert messages[-1]["content"] == "continue using the attached file"
+    assert messages[-1]["content"] == ("continue using the attached file\n\n"
+                                       "[Attached with this message: warehouses.csv, customers.csv, lanes.csv]")
     assert kept_files[0]["name"] == files[0]["name"]
 
 

@@ -374,6 +374,30 @@ class RouteBody(_Model):
         return self
 
 
+class PlaceBody(_Model):
+    """Items placed on a drawing's free area (version 2, plan phase 1C): each slot is chosen or not, and when
+    chosen lies at (x, y) cells from the grid's origin, wholly on free cells of one area, turned or not, with its
+    aisle (when asked) free along one allowed side. No two chosen items share a cell; aisles may be shared."""
+
+    slots: Binding
+    chosen: VarRef
+    x: VarRef
+    y: VarRef
+    turn: Optional[VarRef] = None
+    side: Optional[VarRef] = None
+    length: Name
+    width: Name
+    can_turn: Optional[Name] = None
+    areas: Binding
+    shape: Name
+    step: Annotated[Number, Field(gt=0)]
+    origin: Annotated[list[Number], Field(min_length=2, max_length=2)]
+    aisle: Optional[Annotated[StrictInt, Field(ge=0)]] = None
+    aisle_sides: Optional[Literal["long", "short", "any"]] = None
+    access: Optional[Binding] = None
+    access_shape: Optional[Name] = None
+
+
 class Constraint(_Model):
     """An expression -- `left relation right` -- or, in version 2, one
     scheduling rule or one connected rule in its place."""
@@ -388,6 +412,7 @@ class Constraint(_Model):
     cumulative: Optional[Cumulative] = None
     connected: Optional[ConnectedBody] = None
     route: Optional[RouteBody] = None
+    place: Optional[PlaceBody] = None
     severity: Severity
     weight: Optional[StrictInt] = None
     when: Optional[When] = None
@@ -397,12 +422,13 @@ class Constraint(_Model):
     def _one_kind(self) -> "Constraint":
         expression = [self.left, self.relation, self.right]
         scheduling = [k for k in (self.no_overlap, self.cumulative) if k is not None]
-        if self.connected is not None and self.route is not None:
-            raise ValueError("a constraint is one connected rule or one route rule")
-        whole = self.connected if self.connected is not None else self.route
+        wholes = [k for k in (self.connected, self.route, self.place) if k is not None]
+        if len(wholes) > 1:
+            raise ValueError("a constraint is one connected, route or place rule")
+        whole = wholes[0] if wholes else None
         if whole is not None:
             if scheduling or self.forall is not None or any(part is not None for part in expression):
-                raise ValueError("a connected or route rule is neither an expression nor inside a forall")
+                raise ValueError("a connected, route or place rule is neither an expression nor inside a forall")
         elif scheduling:
             if len(scheduling) > 1 or any(part is not None for part in expression):
                 raise ValueError("a constraint is one expression or one scheduling rule")

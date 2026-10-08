@@ -28,6 +28,8 @@ import {
   SCHEDULING_KEYS,
   CONNECTED_KEYS,
   ROUTE_KEYS,
+  PLACE_KEYS,
+  PLACE_REQUIRED,
   FILTER_OPERATORS,
   FUNCTIONS,
   ACCEPTED_VERSIONS,
@@ -680,7 +682,7 @@ class ShapeChecker {
         scope = bound as Map<string, string>;
       }
 
-      if ("chance" in constraint && ("connected" in constraint || "route" in constraint || "no_overlap" in constraint || "cumulative" in constraint)) {
+      if ("chance" in constraint && ("connected" in constraint || "route" in constraint || "place" in constraint || "no_overlap" in constraint || "cumulative" in constraint)) {
         const problem = this.checkChance(constraint, at, identifier);
         if (problem) return problem;
       }
@@ -696,6 +698,11 @@ class ShapeChecker {
       }
       if ("route" in constraint) {
         const problem = this.checkRoute(constraint, at, identifier);
+        if (problem) return problem;
+        continue;
+      }
+      if ("place" in constraint) {
+        const problem = this.checkPlace(constraint, at, identifier);
         if (problem) return problem;
         continue;
       }
@@ -765,7 +772,7 @@ class ShapeChecker {
         'a chance is the share of futures the rule may fail in, strictly between 0 and 1: {"epsilon": 0.1} holds it in 90% of them'
       );
     }
-    if ("connected" in constraint || "route" in constraint || "no_overlap" in constraint || "cumulative" in constraint) {
+    if ("connected" in constraint || "route" in constraint || "place" in constraint || "no_overlap" in constraint || "cumulative" in constraint) {
       return refusal("chance_misplaced", loc, `the constraint ${show(identifier)} is a scheduling, connected or route rule; a chance is on an expression rule`);
     }
     if (constraint.severity === "soft") {
@@ -899,6 +906,93 @@ class ShapeChecker {
 
   /** `route` (version 2, queue R15b): the same checks, in the same order and
    * with the same locs, as `_check_route` in `app/ir/validate.py`. */
+  /** `place` (version 2, plan phase 1C): items on a drawing's free area, without a list of positions (as
+   * `_check_place` in `app/ir/validate.py`). */
+  private checkPlace(constraint: Json, at: IrLoc, identifier: string): IrRefusal | null {
+    const loc: IrLoc = [...at, "place"];
+    if (this.ir.version === 1) {
+      return refusal("place_needs_version_2", at,
+        `the constraint '${identifier}' is a place rule, which version 1 does not have; publish it as version 2`);
+    }
+    const beside = ["left", "relation", "right", "forall", "connected", "route", "no_overlap", "cumulative"].filter((key) => key in constraint);
+    if (beside.length > 0) {
+      return refusal("place_malformed", [...at, beside[0]], `the constraint '${identifier}' is a place rule and also carries ${beside[0]}`);
+    }
+    const body = constraint.place;
+    if (!isObject(body)) {
+      return refusal("place_malformed", loc, `a place rule is an object: ${[...PLACE_REQUIRED].sort().join(", ")}`);
+    }
+    let odd = [...PLACE_REQUIRED].sort().find((key) => !(key in body));
+    let what = "missing";
+    if (odd === undefined) {
+      odd = Object.keys(body).find((key) => !PLACE_KEYS.includes(key));
+      what = "not one of its keys";
+    }
+    if (odd !== undefined) {
+      return refusal("place_malformed", [...loc, odd],
+        `a place rule names ${[...PLACE_REQUIRED].sort().join(", ")} and optionally turn, side, can_turn, aisle and aisle_sides; '${odd}' is ${what}`);
+    }
+    for (const key of ["severity", "weight", "when", "chance"]) {
+      if (key in constraint && (key !== "severity" || constraint[key] !== "hard")) {
+        return refusal("place_on_soft", [...at, key], `the place rule '${identifier}' is hard and unconditional`);
+      }
+    }
+    if (constraint.severity !== "hard") {
+      return refusal("constraint_severity_unsupported", [...at, "severity"], 'a place rule is hard: write "severity": "hard"');
+    }
+    if (!isFiniteNumber(body.step) || (body.step as number) <= 0) {
+      return refusal("place_malformed", [...loc, "step"], "the grid step is a positive number of metres");
+    }
+    const origin = body.origin;
+    if (!Array.isArray(origin) || origin.length !== 2 || !origin.every((v) => isFiniteNumber(v))) {
+      return refusal("place_malformed", [...loc, "origin"], "the grid's origin is [x, y] in metres");
+    }
+    if ("aisle" in body && (!Number.isInteger(body.aisle) || (body.aisle as number) < 0)) {
+      return refusal("place_malformed", [...loc, "aisle"], "the aisle is a whole number of cells, 0 or more");
+    }
+    if (body.aisle && !["long", "short", "any"].includes(body.aisle_sides as string)) {
+      return refusal("place_malformed", [...loc, "aisle_sides"], 'an aisle names its sides: "long", "short" or "any"');
+    }
+    if (body.aisle && !("side" in body)) {
+      return refusal("place_malformed", [...loc, "side"], "an aisle needs the side variable that says where it is");
+    }
+    for (const key of ["length", "width", "can_turn", "shape", "access_shape"]) {
+      if (key in body && !(typeof body[key] === "string" && body[key])) {
+        return refusal("place_malformed", [...loc, key], `${key} names a field`);
+      }
+    }
+    if (("access" in body) !== ("access_shape" in body)) {
+      return refusal("place_malformed", [...loc, "access" in body ? "access_shape" : "access"],
+        "access names the features (a set) and access_shape the field holding their shape");
+    }
+    let scope = new Map<string, string>();
+    for (const part of ["slots", "areas", "access"] as const) {
+      if (!(part in body)) continue;
+      const inner = this.checkBindings([body[part]], [...loc, part], new Map());
+      if ("code" in inner) {
+        const problem = inner as IrRefusal;
+        return { ...problem, loc: [...loc, part, ...problem.loc.slice(loc.length + 2)] };
+      }
+      if (part === "slots") scope = inner as Map<string, string>;
+    }
+    const slot = (body.slots as Json).index;
+    const domains: Record<string, string> = { chosen: "binary", x: "integer", y: "integer", turn: "binary", side: "integer" };
+    for (const [key, domain] of Object.entries(domains)) {
+      if (!(key in body)) continue;
+      const ref = body[key];
+      if (!isObject(ref) || Object.keys(ref).length !== 2 || !Array.isArray(ref.index) || ref.index.length !== 1 || ref.index[0] !== slot) {
+        return refusal("place_index_mismatch", [...loc, key], `${key} is a variable read per slot: {"var": "...", "index": ["${String(slot)}"]}`);
+      }
+      const reference = this.reference(ref, [...loc, key], scope, "var", this.variables);
+      if (reference) return reference;
+      const declared = (this.ir.variables as Record<string, Json>)[ref.var as string];
+      if (declared.domain !== domain) {
+        return refusal("place_domain", [...loc, key, "var"], `'${String(ref.var)}' must be ${domain} for a place rule's ${key}`);
+      }
+    }
+    return null;
+  }
+
   private checkRoute(constraint: Json, at: IrLoc, identifier: string): IrRefusal | null {
     if (this.ir.version === 1) {
       return refusal(

@@ -71,6 +71,8 @@ def _row_keys(compiled: Compiled, i: int) -> list[VarKey]:
     keys = [*c.left.coeffs, *c.right.coeffs, *(k for pair in c.quadratic for k in pair)]
     if c.when is not None:
         keys.append(c.when[0])
+    if c.schedule is not None and c.schedule.kind == "place":
+        return [k for p in compiled.placements if p.rule == c.id for k in p.keys()]
     if c.schedule is not None:
         for interval, _ in c.schedule.members:
             spec = compiled.intervals[interval]
@@ -115,6 +117,8 @@ def refusal(compiled: Compiled, *, symmetry: bool = False, pareto: bool = False,
     """Why this model may not be solved block by block, or None."""
     if compiled.objective_mode == "lex":
         return "a lexicographic goal is solved one term at a time across the whole model"
+    if compiled.placements:
+        return "a place rule lays every item out on one shared grid"
     if compiled.penalty_of or compiled.violations:
         return "soft rules' penalties are settled against the whole goal"
     if symmetry and compiled.symmetry:

@@ -31,8 +31,19 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 PROBE_MAX, PROBE_MIN, PROBE_SHARE = 5.0, 1.0, 0.1
+#: Above this many nonzeros, every racer must first receive and build the model -- longer than the race saves
+#: (the camp layout, October 2026: 2.7 M nonzeros, a "5 s" race of 7 solvers took 94 s). The rules' choice solves it.
+RACE_MAX_NNZ = int(__import__("os").environ.get("SOLVE_RACE_MAX_NNZ", "500000"))
 #: Below both, the rules' choice is faster than starting a race.
 FLOOR_DECISIONS, FLOOR_ROWS = 200, 100
+
+
+def too_big_to_race(fingerprint: dict[str, Any] | None) -> str | None:
+    nnz = int((fingerprint or {}).get("nnz") or 0)
+    if nnz > RACE_MAX_NNZ:
+        return (f"the model is large ({nnz:,} nonzeros): sending it to every solver would take longer than racing "
+                "saves, so the rules' choice solves it")
+    return None
 
 
 def probe_seconds(time_limit: float) -> float:
@@ -50,7 +61,7 @@ def should_race(fingerprint: dict[str, Any] | None, candidates: list[str], time_
         return "the time allowed is too short to share with probes"
     if fingerprint and fingerprint.get("variables", 0) < FLOOR_DECISIONS and fingerprint.get("rows", 0) < FLOOR_ROWS:
         return "the model is small enough for the rules' choice to settle it at once"
-    return None
+    return too_big_to_race(fingerprint)
 
 
 #: What a portfolio races: models whose solvers differ most in how they search.
@@ -67,7 +78,7 @@ def should_portfolio(model_class: str, fingerprint: dict[str, Any] | None, candi
         return "only one solver that proves its answer takes this model"
     if fingerprint and fingerprint.get("variables", 0) < FLOOR_DECISIONS and fingerprint.get("rows", 0) < FLOOR_ROWS:
         return "the model is small enough for the rules' choice to settle it at once"
-    return None
+    return too_big_to_race(fingerprint)
 
 
 @dataclass(frozen=True)

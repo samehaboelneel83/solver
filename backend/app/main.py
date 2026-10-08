@@ -2,6 +2,8 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError
@@ -52,6 +54,7 @@ from app.api.drafts import router as drafts_router
 from app.api.layouts import router as layouts_router
 from app.api.integrations import router as integrations_router
 from app.api.imports import router as imports_router
+from app.api.source_refresh import router as source_refresh_router
 from app.api.preflight import router as preflight_router
 from app.api.workflow import router as workflow_router
 from app.api.predictors import router as predictors_router
@@ -169,6 +172,32 @@ def _log_request(request: Request, status: int, started: float) -> None:
 app.add_middleware(NulByteGuard)
 
 
+_SECRET_KEY = __import__("re").compile(r"pass(word|wd)?|secret|token|credential|api_?key|private_?key", __import__("re").I)
+
+
+def _redacted(value):
+    """A request body as a validation error may echo it, with every secret-named value hidden."""
+    if isinstance(value, dict):
+        return {k: ("***" if isinstance(k, str) and _SECRET_KEY.search(k) else _redacted(v)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redacted(v) for v in value]
+    return value
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_errors(_request: Request, exc: RequestValidationError):
+    """FastAPI's 422, without echoing a password, token or key that came with the request (the source test of
+    7 October 2026: a connection body missing one field came back with its database password in "input")."""
+    errors = []
+    for error in exc.errors():
+        error = dict(error)
+        if "input" in error:
+            last = next((str(x) for x in reversed(error.get("loc") or ()) if isinstance(x, str)), "")
+            error["input"] = "***" if _SECRET_KEY.search(last) else _redacted(error["input"])
+        errors.append(error)
+    return JSONResponse(status_code=422, content=jsonable_encoder({"detail": errors}))
+
+
 @app.exception_handler(PoolTimeout)
 async def pool_exhausted(_request: Request, _exc: PoolTimeout):
     """Every database connection is busy and none came back in time: the
@@ -234,6 +263,7 @@ app.include_router(drafts_router)
 app.include_router(layouts_router)
 app.include_router(integrations_router)
 app.include_router(imports_router)
+app.include_router(source_refresh_router)
 app.include_router(preflight_router)
 app.include_router(workflow_router)
 app.include_router(run_events_router)

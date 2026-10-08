@@ -206,6 +206,10 @@ def _interval(model: cp_model.CpModel, cp_vars: dict, spec):
 
 def _add_schedule(model: cp_model.CpModel, intervals: dict, c: Constraint) -> None:
     schedule = c.schedule
+    if schedule.kind == "place":
+        from app.solve.compile import Unsupported
+
+        raise Unsupported("a place rule is solved by the placement solver, not CP-SAT")
     members = [intervals[key] for key, _ in schedule.members]
     if schedule.kind == "no_overlap":
         model.AddNoOverlap(members)

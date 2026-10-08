@@ -7,8 +7,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 from app import audit
 from app.integrations.contracts import FAILURE_CODES, ExtractionError, ExtractionLimits, ExtractionRequest
-from app.integrations.policy import source_for
-from app.integrations.postgres import PostgresConnector
+from app.integrations.policy import connector_for, source_for
 from app.integrations.secrets import decrypt
 from app.integrations.snapshots import stage_snapshot
 
@@ -22,11 +21,14 @@ def _extract(row, output, cancelled, result):
             memory = 1024 * 1024 * 1024
             resource.setrlimit(resource.RLIMIT_AS, (memory, memory))
         source = source_for(row)
-        try:
-            password = decrypt(row["credential"], row["organization_id"], row["id"])
-        except Exception:
-            raise ExtractionError("The stored credential cannot be read with this server's keys", "credential_unreadable") from None
-        adapter = PostgresConnector(source, lambda _: password)
+        password = ""
+        if getattr(source, "secret_ref", ""):  # a web source without a login has no credential
+            try:
+                password = decrypt(row["credential"], row["organization_id"], row["id"])
+            except Exception:
+                raise ExtractionError("The stored credential cannot be read with this server's keys",
+                                      "credential_unreadable") from None
+        adapter = connector_for(source, lambda _: password)
         request = ExtractionRequest(row["organization_id"], row["id"], source.table, tuple(source.columns), ExtractionLimits())
         artifact = stage_snapshot(Path(output), adapter, request, cancelled)
         result.send(("extracted", artifact.name))
@@ -122,8 +124,20 @@ def main():
     output = os.environ.get("OAAS_INTEGRATION_OUTPUT")
     if not output:
         raise SystemExit("OAAS_INTEGRATION_OUTPUT must name a private artifact directory")
+    from app.integrations import schedule
+
+    last_tick = 0.0
     while True:
-        if not process_one(SessionLocal, output):
+        busy = process_one(SessionLocal, output)
+        if time.monotonic() - last_tick >= 15:  # scheduled refreshes (migration 0116)
+            last_tick = time.monotonic()
+            try:
+                schedule.tick()
+            except Exception:  # noqa: BLE001 -- the extraction queue keeps going
+                import logging
+
+                logging.getLogger(__name__).exception("scheduled refresh tick failed")
+        if not busy:
             time.sleep(2)
 
 

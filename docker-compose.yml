@@ -149,6 +149,12 @@ services:
       SOLVE_WORKER_CPUS: ${SOLVE_WORKER_CPUS:-8}
       SOLVE_HOST_WORKERS: ${SOLVE_HOST_WORKERS:-8}
       SOLVE_HOST_MEMORY_MB: ${SOLVE_HOST_MEMORY_MB:-10240}
+      # Threads and memory long runs leave free so short runs (what-ifs, trials, quick plans) start at once;
+      # 0 = no reserve. A run is short when its time limit is at most SOLVE_SHORT_SECONDS (app.solve.reserve).
+      SOLVE_SHORT_SHARE: ${SOLVE_SHORT_SHARE:-0}
+      SOLVE_SHORT_SECONDS: ${SOLVE_SHORT_SECONDS:-60}
+      # A long run that waited this long for room is not passed by other long runs.
+      SOLVE_STARVE_SECONDS: ${SOLVE_STARVE_SECONDS:-900}
       # As the api's: the same added solvers (queue R41).
       SOLVER_ADAPTERS_DIR: ${SOLVER_ADAPTERS_DIR:-/app/adapters/reference:/opt/solver/adapters}
     command: ["python", "-m", "app.worker"]
@@ -159,8 +165,12 @@ services:
     # its own: SOLVE_MEMORY_MB of address space (default 4096) and CPU time
     # of its time limit x workers + 30 s (app.solve.sandbox). The worker
     # itself stays small, so a solve that hits either fails alone.
-    mem_limit: 12g
+    mem_limit: ${SOLVE_WORKER_MEMORY:-12g}
     cpus: "${SOLVE_WORKER_CPUS:-8}"
+    # How many solve workers run side by side: the queue hands each run to exactly one, and the host
+    # reservation (SOLVE_HOST_WORKERS / SOLVE_HOST_MEMORY_MB) keeps their sum within the machine.
+    deploy:
+      replicas: ${SOLVE_WORKERS:-1}
     depends_on:
       postgres:
         condition: service_healthy

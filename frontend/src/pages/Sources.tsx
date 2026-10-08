@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../api/client";
 import { formatApiError } from "../api/errors";
 import { useEntityTypes, useParameters, useRelationshipTypes, type EntityType, type ParameterDef, type RelationshipType } from "../api/v1";
+import { uploadAgentFile } from "../api/agent";
 import LoadFailure from "../components/LoadFailure";
 import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
@@ -15,7 +16,7 @@ import { useDocumentTitle } from "../hooks/useDocumentTitle";
  * with their lineage recorded.
  */
 
-type Connection = { id: number; name: string; enabled: boolean; config?: { schema?: string; table?: string; columns?: string[]; host?: string } };
+type Connection = { id: number; name: string; enabled: boolean; config?: { schema?: string; table?: string; columns?: string[]; host?: string; url?: string; kind?: string; engine?: string } };
 type TargetKind = "entity_type" | "relationship_type" | "parameter";
 type Target = { kind: TargetKind; id: number; name: string };
 type Load = {
@@ -51,6 +52,7 @@ export const ERROR_TEXT: Record<string, string> = {
   not_permitted: "The database user may not read this table or one of its columns. Grant it SELECT on them.",
   trust_unavailable: "This server has no trusted certificate for database connections. An administrator needs to install the CA file.",
   credential_unreadable: "The stored password cannot be decrypted with this server's keys (the keys changed). Replace the credential.",
+  format_invalid: "The answer could not be read as the format chosen (JSON list, CSV or Excel), or the list is not where it was said to be.",
   limit_exceeded: "The table is larger than one extraction allows (100,000 rows or 20 MB). Extract fewer columns, or a smaller table or view.",
 };
 
@@ -62,10 +64,217 @@ const STATE_TEXT: Record<Job["state"], string> = {
   cancelled: "Cancelled",
 };
 
+type Binding = {
+  id: number; connection_id: number | null; connection: string; file_name: string | null; file_version: number | null;
+  kind: string; target: string; job_id: number | null; refreshed_at: string | null;
+};
+type KeptFile = { name: string; latest: number; versions: number; rows: number; updated_at: string };
+type FieldChange = { field: string; before: unknown; after: unknown };
+type BindingChange = {
+  binding_id: number; connection_id: number | null; file_name?: string | null; source: string; kind: string; target: string;
+  job_id: number | null; version?: number | null; from_version?: number | null; same_extraction: boolean;
+  counts: { added: number; changed: number; removed: number; unchanged: number };
+  added: { key?: string; label?: string; from?: string[]; to?: string[]; index?: string[]; value?: number; returning?: boolean }[];
+  changed: { key?: string; fields?: FieldChange[]; index?: string[]; before?: number; after?: number }[];
+  removed: { key?: string; from?: string; to?: string; index?: string[] }[];
+};
+type RunQueued = { scenario_id: number; scenario: string; problem_id: number; problem: string; run_id?: number;
+  previous_objective?: number; error?: string };
+type RefreshReport = { applied: boolean; changes: number; bindings: BindingChange[]; runs?: RunQueued[] };
+const KIND_TEXT: Record<string, string> = { entities: "records", relationships: "links", parameter_values: "values" };
+
+/** One change in words: "P1: profit 45 → 50", "+ n4 (Dee)", "− [n3]". */
+export function changeLines(b: BindingChange): string[] {
+  const name = (x: { key?: string; index?: string[]; from?: string | string[]; to?: string | string[] }) =>
+    x.key ?? (x.index ? x.index.join(" · ") : `${[x.from].flat().join(":")} → ${[x.to].flat().join(":")}`);
+  return [
+    ...b.added.map(a => `+ ${name(a)}${a.label && a.label !== a.key ? ` (${a.label})` : ""}${a.value !== undefined ? ` = ${a.value}` : ""}${a.returning ? " (back again)" : ""}`),
+    ...b.changed.map(c => c.fields
+      ? `${name(c)}: ${c.fields.map(f => `${f.field} ${String(f.before ?? "—")} → ${String(f.after ?? "—")}`).join(", ")}`
+      : `${name(c)}: ${String(c.before)} → ${String(c.after)}`),
+    ...b.removed.map(r => `− ${name(r)}`),
+  ];
+}
+
+/** Files kept in this workspace (by version): add next week's file as a new version, then check for changes. */
+function KeptFiles({ domainId }: { domainId: string }) {
+  const { can } = useCapabilities();
+  const client = useQueryClient();
+  const input = useId();
+  const kept = useQuery({ queryKey: ["workspace-files", domainId],
+    queryFn: () => apiFetch<{ items: KeptFile[] }>(`/api/v1/domains/${domainId}/files`) });
+  const add = useMutation({
+    mutationFn: async (file: File) => {
+      const read = await uploadAgentFile(file, Number(domainId));
+      return post<{ name: string; version: number; new: boolean }>(`/api/v1/domains/${domainId}/files`, { file: read });
+    },
+    onSuccess: () => void client.invalidateQueries({ queryKey: ["workspace-files", domainId] }),
+  });
+  if (!kept.data?.items.length) return null;
+  return <section aria-labelledby="kept-files" className="rounded-xl border border-slate-200 bg-white p-4">
+    <h2 id="kept-files" className="text-lg font-semibold">Files kept in this workspace</h2>
+    <p className="text-sm text-slate-600">Files a problem was built from, every version kept. Add a newer copy under the same
+      file name, then use <em>Check for changes</em> below to see and apply what it changes.</p>
+    <ul className="my-2 text-sm">{kept.data.items.map(f => <li key={f.name}>
+      <span className="font-medium">{f.name}</span> <span className="text-slate-500">· version {f.latest} of {f.versions} · {f.rows} rows · {new Date(f.updated_at).toLocaleString()}</span>
+    </li>)}</ul>
+    {can("domain.edit") && <>
+      <label htmlFor={input} className="text-sm">Add a new version (same file name): </label>
+      <input id={input} type="file" accept=".csv,.tsv,.xlsx,.xls,.json" className="text-sm" disabled={add.isPending}
+        onChange={e => { const f = e.target.files?.[0]; if (f) add.mutate(f); e.target.value = ""; }} />
+    </>}
+    {add.isError && <p role="alert" className="mt-1 text-red-800">{formatApiError(add.error)}</p>}
+    {add.data && <p role="status" className="mt-1 text-sm">{add.data.new ? `Kept as version ${add.data.version} of ${add.data.name}.`
+      : `${add.data.name} is unchanged (same as version ${add.data.version}).`}</p>}
+  </section>;
+}
+
+/** Its children only once something in the domain is bound to a source (shares the bindings query). */
+function BoundOnly({ domainId, children }: { domainId: string; children: React.ReactNode }) {
+  const bound = useQuery({ queryKey: ["source-bindings", domainId],
+    queryFn: () => apiFetch<{ items: Binding[] }>(`/api/v1/domains/${domainId}/source-bindings`) });
+  return bound.data?.items.length ? <>{children}</> : null;
+}
+
+const SETTLED = ["optimal", "feasible", "infeasible", "unbounded", "error", "cancelled", "timeout", "unknown"];
+
+/** A queued run's state, followed until it settles: its answer beside the scenario's last one. */
+function RunAnswer({ runId, previous }: { runId: number; previous?: number }) {
+  const run = useQuery({ queryKey: ["run", runId], queryFn: () => apiFetch<{ status: string; objective: number | null }>(`/api/v1/runs/${runId}`),
+    refetchInterval: (q) => (q.state.data && SETTLED.includes(q.state.data.status) ? false : 3000) });
+  const before = previous !== undefined ? ` (was ${previous.toLocaleString()})` : "";
+  if (!run.data || !SETTLED.includes(run.data.status)) return <span>solving…{before}</span>;
+  return <span>{run.data.status}{run.data.objective != null ? `, ${run.data.objective.toLocaleString()}` : ""}{before}</span>;
+}
+
+/** The runs a refresh queued, each beside its scenario's last answer; or what to do when it queued none. */
+function RunsQueued({ domainId, runs }: { domainId: string; runs?: RunQueued[] }) {
+  if (!runs) return <p className="text-sm">Solve the problem&rsquo;s scenarios again to see what the new data changes.</p>;
+  if (!runs.length) return <p className="text-sm">No scenario reads the data that changed.</p>;
+  return <ul className="text-sm">{runs.map(r => <li key={r.scenario_id}>
+    {r.problem} · {r.scenario}: {r.run_id
+      ? <><Link className="text-blue-700 underline" to={`/domains/${domainId}/problems/${r.problem_id}/runs/${r.run_id}`}>run #{r.run_id}</Link>{" "}
+        <RunAnswer runId={r.run_id} previous={r.previous_objective} /></>
+      : <span className="text-red-800">not solved: {r.error}</span>}
+  </li>)}</ul>;
+}
+
+type Schedule = { every_hours: number; mode: "report" | "apply"; solve: boolean; enabled: boolean; next_at: string; state: string;
+  last_at: string | null; last_error: string | null; owner: string | null;
+  last_report: (RefreshReport & { failed?: { connection_id: number; error_code: string }[] }) | null };
+
+const EVERY: [number, string][] = [[1, "hour"], [6, "6 hours"], [24, "day"], [168, "week"], [720, "30 days"]];
+/** The choices of how often, with a schedule's own interval when it is not one of them (set by the Assistant). */
+export function everyOptions(current: number): [number, string][] {
+  return EVERY.some(([h]) => h === current) ? EVERY : [...EVERY, [current, `${current} hours`]];
+}
+
+/** Refresh this domain from its sources on a schedule, and the last scheduled run's report. */
+function ScheduledRefresh({ domainId }: { domainId: string }) {
+  const { can } = useCapabilities();
+  const client = useQueryClient();
+  const key = ["refresh-schedule", domainId];
+  const got = useQuery({ queryKey: key, queryFn: () => apiFetch<{ schedule: Schedule | null }>(`/api/v1/domains/${domainId}/refresh-schedule`) });
+  const current = got.data?.schedule ?? null;
+  const [form, setForm] = useState<{ every_hours: number; mode: "report" | "apply"; solve: boolean } | null>(null);
+  const shown = form ?? { every_hours: current?.every_hours ?? 168, mode: current?.mode ?? "report", solve: current?.solve ?? false };
+  const done = () => { setForm(null); void client.invalidateQueries({ queryKey: key }); };
+  const save = useMutation({ mutationFn: (enabled: boolean) => apiFetch(`/api/v1/domains/${domainId}/refresh-schedule`,
+    { method: "PUT", body: JSON.stringify({ ...shown, solve: shown.mode === "apply" && shown.solve, enabled }) }), onSuccess: done });
+  const now = useMutation({ mutationFn: () => post(`/api/v1/domains/${domainId}/refresh-schedule/run-now`), onSuccess: done });
+  const remove = useMutation({ mutationFn: () => apiFetch(`/api/v1/domains/${domainId}/refresh-schedule`, { method: "DELETE" }), onSuccess: done });
+  const failed = save.error ?? now.error ?? remove.error;
+  const report = current?.last_report;
+  return <section aria-labelledby="scheduled-refresh" className="rounded-xl border border-slate-200 bg-white p-4">
+    <h2 id="scheduled-refresh" className="text-lg font-semibold">Scheduled refresh</h2>
+    {current
+      ? <p className="text-sm">{current.enabled ? "On" : "Paused"}: every {current.every_hours === 24 ? "day" : current.every_hours === 168 ? "week" : `${current.every_hours} hours`},
+          {current.mode === "apply" ? ` applying the changes${current.solve ? " and solving again" : ""}` : " keeping a report to apply"}; as {current.owner ?? "its owner"}.
+          {current.enabled && ` Next: ${new Date(current.next_at).toLocaleString()}.`}{current.state === "extracting" ? " Reading the sources now…" : ""}</p>
+      : <p className="text-sm text-slate-600">Not scheduled. The domain can read its sources again by itself, report what changed, or apply it and solve again.</p>}
+    {current?.last_at && <div className="mt-2 text-sm" aria-live="polite">
+      <p className="font-medium">Last run {new Date(current.last_at).toLocaleString()}: {current.last_error
+        ? <span className="text-red-800">{current.last_error}</span>
+        : report ? (report.applied ? `applied ${report.changes} change${report.changes === 1 ? "" : "s"}` : report.changes ? `${report.changes} change${report.changes === 1 ? "" : "s"} found, not applied — use Check for changes to apply` : "no changes") : "nothing to report"}</p>
+      {report?.bindings?.filter(b => b.counts.added + b.counts.changed + b.counts.removed).map((b, i) => <div key={i}>
+        <p>{b.source} → {KIND_TEXT[b.kind] ?? b.kind} {b.target}: {b.counts.added} added, {b.counts.changed} changed, {b.counts.removed} gone</p>
+        <ul className="ml-4 list-none font-mono text-xs">{changeLines(b).map((line, j) => <li key={j}>{line}</li>)}</ul>
+      </div>)}
+      {report?.applied && <RunsQueued domainId={domainId} runs={report.runs ?? []} />}
+    </div>}
+    {can("domain.edit") && <div className="mt-3 flex flex-wrap items-end gap-3 text-sm">
+      <label>Every <select className="ml-1 rounded border px-1 py-0.5" value={shown.every_hours}
+        onChange={e => setForm({ ...shown, every_hours: Number(e.target.value) })}>
+        {everyOptions(shown.every_hours).map(([h, t]) => <option key={h} value={h}>{t}</option>)}
+      </select></label>
+      <label><input type="radio" checked={shown.mode === "report"} onChange={() => setForm({ ...shown, mode: "report" })} /> Report what changed</label>
+      <label><input type="radio" checked={shown.mode === "apply"} onChange={() => setForm({ ...shown, mode: "apply" })} /> Apply it</label>
+      {shown.mode === "apply" && can("run.submit") && <label><input type="checkbox" checked={shown.solve}
+        onChange={e => setForm({ ...shown, solve: e.target.checked })} /> and solve again</label>}
+      <button type="button" className="rounded bg-blue-700 px-3 py-1.5 text-white" disabled={save.isPending}
+        onClick={() => save.mutate(true)}>{current ? "Save schedule" : "Schedule"}</button>
+      {current && <>
+        {current.enabled && <button type="button" className="rounded border px-3 py-1.5" onClick={() => save.mutate(false)}>Pause</button>}
+        <button type="button" className="rounded border px-3 py-1.5" disabled={now.isPending || current.state !== "idle"} onClick={() => now.mutate()}>Run now</button>
+        <button type="button" className="rounded border px-3 py-1.5" onClick={() => remove.mutate()}>Remove</button>
+      </>}
+    </div>}
+    {failed && <p role="alert" className="mt-2 text-red-800">{formatApiError(failed)}</p>}
+  </section>;
+}
+
+/** What this domain was built from, and a refresh: what each source's latest extraction would change, then written on request. */
+function BuiltFromSources({ domainId }: { domainId: string }) {
+  const { can } = useCapabilities();
+  const client = useQueryClient();
+  const bound = useQuery({ queryKey: ["source-bindings", domainId],
+    queryFn: () => apiFetch<{ items: Binding[] }>(`/api/v1/domains/${domainId}/source-bindings`) });
+  const [report, setReport] = useState<RefreshReport | null>(null);
+  const check = useMutation({ mutationFn: () => post<RefreshReport>(`/api/v1/domains/${domainId}/sources/refresh`, {}), onSuccess: setReport });
+  const apply = useMutation({
+    mutationFn: ({ r, solve }: { r: RefreshReport; solve: boolean }) => post<RefreshReport>(`/api/v1/domains/${domainId}/sources/refresh`, {
+      apply: true, solve,
+      jobs: Object.fromEntries(r.bindings.filter(b => b.connection_id != null).map(b => [b.connection_id, b.job_id])),
+      files: Object.fromEntries(r.bindings.filter(b => b.file_name).map(b => [b.file_name, b.version])),
+    }),
+    onSuccess: (r) => { setReport(r); void client.invalidateQueries({ queryKey: ["source-bindings", domainId] }); },
+  });
+  if (!bound.data?.items.length) return null;
+  return <section aria-labelledby="built-from" className="rounded-xl border border-slate-200 bg-white p-4">
+    <h2 id="built-from" className="text-lg font-semibold">Built from these sources</h2>
+    <p className="text-sm text-slate-600">Data loaded from a source when a problem was built. Check compares each source&rsquo;s latest
+      extraction with what the domain holds; run an extraction first for today&rsquo;s data. Records a source no longer has are set inactive, not deleted.</p>
+    <ul className="my-2 text-sm">{bound.data.items.map(b => <li key={b.id}>
+      {b.file_name ? `File ${b.file_name}` : b.connection} → {KIND_TEXT[b.kind] ?? b.kind} <span className="font-medium">{b.target}</span>
+      <span className="text-slate-500">{b.job_id ? ` · from extraction #${b.job_id}` : b.file_version ? ` · from version ${b.file_version}` : ""}{b.refreshed_at ? `, ${new Date(b.refreshed_at).toLocaleString()}` : ""}</span>
+    </li>)}</ul>
+    <button type="button" className="rounded border px-3 py-1.5 text-sm" disabled={check.isPending} onClick={() => check.mutate()}>
+      {check.isPending ? "Checking…" : "Check for changes"}</button>
+    {(check.error || apply.error) && <p role="alert" className="mt-2 text-red-800">{formatApiError(check.error ?? apply.error)}</p>}
+    {report && <div className="mt-3 space-y-2" aria-live="polite">
+      <p className="font-medium">{report.applied ? `Applied ${report.changes} change${report.changes === 1 ? "" : "s"}.`
+        : report.changes ? `${report.changes} change${report.changes === 1 ? "" : "s"} found (nothing written yet).` : "No changes: the domain holds the sources' data."}</p>
+      {report.bindings.filter(b => b.counts.added + b.counts.changed + b.counts.removed).map(b => <div key={b.binding_id}>
+        <p className="text-sm">{b.source}{b.file_name ? ` (version ${b.from_version ?? "?"} → ${b.version ?? "?"})` : ""} → {KIND_TEXT[b.kind] ?? b.kind} {b.target}: {b.counts.added} added, {b.counts.changed} changed, {b.counts.removed} gone, {b.counts.unchanged} unchanged</p>
+        <ul className="ml-4 list-none font-mono text-xs">{changeLines(b).map((line, i) => <li key={i}>{line}</li>)}</ul>
+      </div>)}
+      {!report.applied && report.changes > 0 && (can("domain.edit")
+        ? <div className="flex flex-wrap gap-2">
+            {can("run.submit") && <button type="button" className="rounded bg-blue-700 px-3 py-1.5 text-sm text-white" disabled={apply.isPending}
+              onClick={() => apply.mutate({ r: report, solve: true })}>{apply.isPending ? "Applying…" : "Apply and solve again"}</button>}
+            <button type="button" className="rounded border px-3 py-1.5 text-sm" disabled={apply.isPending}
+              onClick={() => apply.mutate({ r: report, solve: false })}>Apply only</button>
+          </div>
+        : <p className="text-sm">Applying needs permission to edit this domain.</p>)}
+      {report.applied && <RunsQueued domainId={domainId} runs={report.runs} />}
+    </div>}
+  </section>;
+}
+
 export function SourcesPage() {
   const { domainId } = useParams();
   const { can, known } = useCapabilities();
-  useDocumentTitle("Database connections");
+  useDocumentTitle("Sources");
   if (!known) return <p role="status">Checking access…</p>;
   if (!can("integration.run")) return <p role="alert">Your account does not have access to sources and imports.</p>;
   return <SourceList key={domainId} domainId={domainId!} canManage={can("integration.manage")} />;
@@ -82,9 +291,9 @@ function SourceList({ domainId, canManage }: { domainId: string; canManage: bool
   });
   const refresh = () => client.invalidateQueries({ queryKey: ["connections", domainId] });
   return <div className="max-w-5xl space-y-5">
-    <h1 className="text-2xl font-semibold">Database connections</h1>
+    <h1 className="text-2xl font-semibold">Sources</h1>
     <p className="text-sm text-slate-600">
-      Database sources for this domain. Run an extraction to copy a table&rsquo;s rows here, then import them: preview, map the columns
+      Where this domain&rsquo;s data comes from: database tables, web addresses and kept files. Run an extraction to copy a source&rsquo;s rows here, then import them: preview, map the columns
       onto a record type, check every row, and load.
     </p>
     {canManage && (adding
@@ -98,7 +307,9 @@ function SourceList({ domainId, canManage }: { domainId: string; canManage: bool
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span>
               <span className="font-medium">{source.name}</span>
-              {source.config?.table && <span className="ml-2 text-xs text-slate-500">{source.config.schema}.{source.config.table}</span>}
+              {source.config?.table && <span className="ml-2 text-xs text-slate-500">
+                {ENGINES.find(([value]) => value === (source.config?.engine ?? "postgres"))?.[1]} · {source.config.schema}.{source.config.table}</span>}
+              {source.config?.url && <span className="ml-2 text-xs text-slate-500">{source.config.url}</span>}
             </span>
             <span className="flex items-center gap-3">
               <span>{source.enabled ? "Enabled" : "Disabled"}</span>
@@ -109,6 +320,9 @@ function SourceList({ domainId, canManage }: { domainId: string; canManage: bool
           {open === source.id && <JobHistory domainId={domainId} source={source} canManage={canManage} onChanged={() => void refresh()} />}
         </li>)}</ul>
       : <p>No configured sources on this page.</p>}
+    <KeptFiles domainId={domainId} />
+    <BuiltFromSources domainId={domainId} />
+    <BoundOnly domainId={domainId}><ScheduledRefresh domainId={domainId} /></BoundOnly>
     <nav aria-label="Source pages" className="flex items-center gap-4">
       <button className="p-2 disabled:opacity-50" disabled={page === 0 || sources.isLoading} onClick={() => setPage(page - 1)}>Previous</button>
       <span>Page {page + 1}</span>
@@ -118,14 +332,39 @@ function SourceList({ domainId, canManage }: { domainId: string; canManage: bool
   </div>;
 }
 
+/** The database engines a source may be (app/integrations/databases.py), each with its usual port and schema. */
+const ENGINES: [string, string, string, string][] = [
+  ["postgres", "PostgreSQL", "5432", "public"], ["mysql", "MySQL / MariaDB", "3306", ""],
+  ["sqlserver", "SQL Server", "1433", "dbo"], ["oracle", "Oracle", "1521", ""],
+];
+
+export function engineDefaults(fields: { engine: string; port: string; schema: string }, engine: string) {
+  const was = ENGINES.find(([value]) => value === fields.engine);
+  const now = ENGINES.find(([value]) => value === engine);
+  if (!now) return {};
+  return {
+    ...(!fields.port || fields.port === was?.[2] ? { port: now[2] } : {}),
+    ...(!fields.schema || fields.schema === was?.[3] ? { schema: now[3] } : {}),
+  };
+}
+
 function SourceForm({ domainId, onDone }: { domainId: string; onDone: (created: boolean) => void }) {
   const id = useId();
-  const [fields, setFields] = useState({ name: "", host: "", port: "5432", database: "", username: "", schema: "public", table: "", columns: "", password: "" });
+  const [kind, setKind] = useState<"postgres" | "http">("postgres");
+  const [fields, setFields] = useState({ name: "", engine: "postgres", host: "", port: "5432", database: "", username: "", schema: "public", table: "", columns: "", password: "",
+    url: "", format: "json", auth: "none", sheet: "", records_at: "" });
+  const columns = fields.columns.split(",").map((c) => c.trim()).filter(Boolean);
   const create = useMutation({
-    mutationFn: () => post<{ id: number }>("/api/v1/connections", {
+    mutationFn: () => post<{ id: number }>("/api/v1/connections", kind === "postgres" ? {
       domain_id: Number(domainId), name: fields.name.trim(), password: fields.password,
-      source: { host: fields.host.trim(), port: Number(fields.port), database: fields.database.trim(), username: fields.username.trim(),
-        schema: fields.schema.trim(), table: fields.table.trim(), columns: fields.columns.split(",").map((c) => c.trim()).filter(Boolean) },
+      source: { engine: fields.engine, host: fields.host.trim(), port: Number(fields.port), database: fields.database.trim(), username: fields.username.trim(),
+        schema: fields.schema.trim() || (fields.engine === "mysql" ? fields.database.trim() : ""), table: fields.table.trim(), columns },
+    } : {
+      domain_id: Number(domainId), name: fields.name.trim(), ...(fields.auth === "none" ? {} : { password: fields.password }),
+      source: { kind: "http", url: fields.url.trim(), format: fields.format, auth: fields.auth, columns,
+        ...(fields.auth === "basic" ? { username: fields.username.trim() } : {}),
+        ...(fields.format === "xlsx" && fields.sheet.trim() ? { sheet: fields.sheet.trim() } : {}),
+        ...(fields.format === "json" && fields.records_at.trim() ? { records_at: fields.records_at.trim() } : {}) },
     }),
     onSuccess: () => onDone(true),
   });
@@ -135,20 +374,48 @@ function SourceForm({ domainId, onDone }: { domainId: string; onDone: (created: 
         onChange={(event) => setFields({ ...fields, [key]: event.target.value })} className="mt-1 w-full rounded border border-slate-300 px-2 py-1" />
     </label>
   );
-  const missing = (["name", "host", "database", "username", "table", "columns", "password"] as const).filter((k) => !fields[k].trim());
+  const choice = (key: "format" | "auth" | "engine", label: string, options: [string, string][]) => (
+    <label className="block text-sm" htmlFor={`${id}-${key}`}>{label}
+      <select id={`${id}-${key}`} value={fields[key]} onChange={(event) => setFields({ ...fields, [key]: event.target.value,
+        // A new engine brings its usual port and schema, unless the person typed their own.
+        ...(key === "engine" ? engineDefaults(fields, event.target.value) : {}) })}
+        className="mt-1 w-full rounded border border-slate-300 px-2 py-1">
+        {options.map(([value, text]) => <option key={value} value={value}>{text}</option>)}
+      </select>
+    </label>
+  );
+  const needed: (keyof typeof fields)[] = kind === "postgres"
+    ? ["name", "host", "database", "username", "table", "columns", "password", ...(fields.engine === "mysql" ? [] : ["schema" as const])]
+    : ["name", "url", "columns", ...(fields.auth === "none" ? [] : ["password" as const]), ...(fields.auth === "basic" ? ["username" as const] : [])];
+  const missing = needed.filter((k) => !fields[k].trim());
   return <form aria-label="Add a source" className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-2"
     onSubmit={(event) => { event.preventDefault(); create.mutate(); }}>
+    <fieldset className="flex gap-4 text-sm sm:col-span-2"><legend className="sr-only">Kind of source</legend>
+      <label><input type="radio" name={`${id}-kind`} checked={kind === "postgres"} onChange={() => setKind("postgres")} /> Database table or view</label>
+      <label><input type="radio" name={`${id}-kind`} checked={kind === "http"} onChange={() => setKind("http")} /> Web address (REST API, CSV or Excel over HTTPS)</label>
+    </fieldset>
     {field("name", "Name")}
-    {field("host", "Host")}
-    {field("port", "Port")}
-    {field("database", "Database")}
-    {field("username", "User name")}
-    {field("password", "Password", "password")}
-    {field("schema", "Schema")}
-    {field("table", "Table or view")}
+    {kind === "postgres" ? <>
+      {choice("engine", "Database engine", ENGINES.map(([value, text]) => [value, text]))}
+      {field("host", "Host")}
+      {field("port", "Port")}
+      {field("database", fields.engine === "oracle" ? "Service name" : "Database")}
+      {field("username", "User name")}
+      {field("password", "Password", "password")}
+      {field("schema", fields.engine === "oracle" ? "Owner (schema)" : fields.engine === "mysql" ? "Database the table is in" : "Schema")}
+      {field("table", "Table or view")}
+    </> : <>
+      <div className="sm:col-span-2">{field("url", "Address (https://…)")}</div>
+      {choice("format", "What it answers", [["json", "JSON list of records"], ["csv", "CSV file"], ["xlsx", "Excel workbook"]])}
+      {fields.format === "json" && field("records_at", "Where the list is (e.g. data.items; empty if the answer is the list)")}
+      {fields.format === "xlsx" && field("sheet", "Sheet (empty for the first)")}
+      {choice("auth", "Login", [["none", "None"], ["bearer", "Token (bearer)"], ["basic", "User name and password"]])}
+      {fields.auth === "basic" && field("username", "User name")}
+      {fields.auth !== "none" && field("password", fields.auth === "bearer" ? "Token" : "Password", "password")}
+    </>}
     <div className="sm:col-span-2">{field("columns", "Columns to extract, separated by commas")}</div>
     <p className="text-xs text-slate-600 sm:col-span-2">
-      The password is encrypted on the server and never shown again. Which networks a source may be on is set by the operator.
+      A password or token is encrypted on the server and never shown again. Which networks a source may be on is set by the operator.
     </p>
     {create.isError && <p role="alert" className="text-sm text-red-700 sm:col-span-2">{formatApiError(create.error)}</p>}
     <div className="flex gap-2 sm:col-span-2">

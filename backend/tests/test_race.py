@@ -228,3 +228,37 @@ def test_a_run_by_portfolio_keeps_the_winners_answer_and_records_every_entrant(d
     assert "probes" not in row["params"]
     assert row["params"]["portfolio"] is True  # the setting as asked, beside what the race did
     assert row["params"]["chosen_solver"] in {e["solver"] for e in entrants if e["status"] == "optimal"}
+
+
+BIG = {"variables": 900_000, "rows": 50_000, "nnz": 2_700_000}
+
+
+def test_a_model_too_large_to_hand_to_every_solver_is_not_raced():
+    why = should_race(BIG, ["cp-sat", "highs"], 120.0)
+    assert why and why.startswith("the model is large (2,700,000 nonzeros)")
+    assert should_portfolio("MILP", BIG, ["cp-sat", "highs"]) == why
+    assert should_race({**BIG, "nnz": race.RACE_MAX_NNZ}, ["cp-sat", "highs"], 120.0) is None
+
+
+def test_preparing_a_run_comes_off_its_solve_time(db, empty_queue, monkeypatch):  # noqa: F811
+    import time as clock
+
+    from app.solve import service
+
+    slow = service.adapters_rows.refresh_verified
+    monkeypatch.setattr(service.adapters_rows, "refresh_verified", lambda d: (clock.sleep(2.5), slow(d))[1])
+    seen = {}
+    real_stage = service.RunEvents.stage
+    monkeypatch.setattr(service.RunEvents, "stage",
+                        lambda self, name, **kw: (seen.setdefault(name, kw), real_stage(self, name, **kw))[1])
+    problem = make_problem(db, make_domain(db, "race-clock"))
+    version = make_model_version(db, problem, IR)
+    scenario = db.execute(text("INSERT INTO scenario (problem_id, model_version_id, name) VALUES (:p, :v, 's') RETURNING id"),
+                          {"p": problem, "v": version}).scalar_one()
+    db.commit()
+    run_id = enqueue_run(db, scenario, time_limit=10.0, reuse=False)
+    claim_next(db)
+    execute_run(db, run_id)
+    phases = db.execute(text("SELECT params->'phases' FROM run WHERE id = :r"), {"r": run_id}).scalar_one()
+    assert phases["before_solve_s"] >= 2.5
+    assert seen["solving"]["time_limit_s"] <= 10.0 - 2.5 + 0.01

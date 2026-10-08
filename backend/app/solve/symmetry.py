@@ -57,9 +57,25 @@ def classes(ir: dict[str, Any], data: dict[str, Any]) -> list[tuple[str, tuple[s
         groups: dict[Any, list[str]] = {}
         for row in rows:
             groups.setdefault(signature[row["id"]], []).append(row["id"])
-        for members in groups.values():
-            if len(members) > 1 and not _linked(members, ir, data):
+        linked = _linked_groups(groups, ir, data)
+        for key, members in groups.items():
+            if len(members) > 1 and key not in linked:
                 found.append((set_name, tuple(members)))
+    return found
+
+
+def _linked_groups(groups: dict[Any, list[str]], ir: dict[str, Any], data: dict[str, Any]) -> set:
+    """The groups an edge joins two members of (what `_linked` says of one group), for all groups in one pass
+    over the edges -- not one pass per group (a model of 20,000 alike records took minutes: groups x edges)."""
+    group_of = {m: key for key, members in groups.items() if len(members) > 1 for m in members}
+    found: set = set()
+    if not group_of:
+        return found
+    for rel in ir.get("relationships") or []:
+        for edge in data.get("relationships", {}).get(rel, []):
+            a = group_of.get(edge["from"])
+            if a is not None and a == group_of.get(edge["to"]):
+                found.add(a)
     return found
 
 

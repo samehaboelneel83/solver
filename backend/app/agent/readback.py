@@ -171,6 +171,19 @@ def readback(spec: dict[str, Any]) -> str:
                          f"other {stops} visited exactly once (no loops away from the depot)"
                          + ("; " + "; ".join(extra) if extra else "") + " (hard)")
             continue
+        if isinstance(c.get("place"), dict):
+            body = c["place"]
+            slots, areas = (body.get("slots") or {}).get("set"), (body.get("areas") or {}).get("set")
+            aisle = body.get("aisle") or 0
+            lines.append(f"- rule {c.get('id')}: each chosen {slots} lies wholly on the free cells of one {areas} "
+                         f"(a {body.get('step')} m grid), no two on the same cell"
+                         + (f", each with an aisle of {aisle} cells ({float(aisle) * float(body.get('step') or 0):g} m) "
+                            f"free along a {body.get('aisle_sides')} side; aisles may be shared, never covered"
+                            if aisle else "")
+                         + (f"; every one's aisle joins, through uncovered free cells, a {(body.get('access') or {}).get('set')}"
+                            if body.get("access") else "")
+                         + " (hard; laid out by the placement solver, no position list)")
+            continue
         for kind in ("no_overlap", "cumulative"):
             if isinstance(c.get(kind), dict):
                 body = c[kind]

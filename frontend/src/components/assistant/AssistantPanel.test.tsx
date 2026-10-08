@@ -471,3 +471,23 @@ describe("AssistantPanel, a problem asked in the Ask tab", () => {
                                    keep_files: ["camp.dxf"] });
   });
 });
+
+describe("FactsCard", () => {
+  it("shows the run's facts as the platform wrote them", async () => {
+    const { FactsCard } = await import("./AssistantPanel");
+    render(
+      <FactsCard facts={{
+        run_id: 7, status: "feasible", status_words: "A good answer, not proven best (within 20.4% of the best possible)",
+        sense: "maximize", goal: 1939, bound: 2435, gap_pct: 20.4, parts: [{ id: "beds", value: 1939 }, { id: "aisles", value: 0 }],
+        decisions: [{ var: "place", header: ["position"], rows: [["p1"], ["p2"]], count: 1939, chosen: true }],
+        rules: [{ id: "one_per_cell", state: "tight", short_by: null, hard: true }],
+      }} />,
+    );
+    expect(screen.getByText(/written by the platform/)).toBeTruthy();
+    expect(screen.getByText(/not proven best/)).toBeTruthy();
+    expect(screen.getByText("1,939")).toBeTruthy();
+    expect(screen.getByText(/at most 2,435/)).toBeTruthy();
+    expect(screen.getByText(/1,939 chosen \(first 2 shown\)/)).toBeTruthy();
+    expect(screen.getByText("one_per_cell tight")).toBeTruthy();
+  });
+});

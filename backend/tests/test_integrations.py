@@ -27,6 +27,7 @@ def setup(tenants, monkeypatch, tmp_path):
             "source": {"host": "127.0.0.1", "database": "source", "username": "reader", "schema": "planning", "table": "staff", "columns": ["id"]}}
     yield client, body, tenants
     with SessionLocal() as session:
+        session.execute(text("DELETE FROM source_binding"))
         session.execute(text("DELETE FROM ingestion_job"))
         session.execute(text("DELETE FROM integration_connection"))
         session.commit()
@@ -216,3 +217,13 @@ def test_address_outside_networks_and_unknown_host_are_named(tmp_path):
     with pytest.raises(ExtractionError) as unknown:
         resolve_address(source("no-such-host.invalid", ("10.0.0.0/8",)))
     assert unknown.value.code == "source_unreachable"
+
+
+def test_a_refused_body_never_echoes_its_password(setup):
+    """The source test of 7 October 2026: a body missing one field came back with its password in the 422."""
+    client, body, tenants = setup
+    wrong = {k: v for k, v in body.items() if k != "domain_id"}
+    response = client.post("/api/v1/connections", json=wrong, headers=tenants["a"])
+    assert response.status_code == 422
+    assert "never-return-me" not in response.text and '"***"' in response.text
+    assert response.json()["detail"][0]["loc"] == ["body", "domain_id"]

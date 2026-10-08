@@ -64,6 +64,7 @@ from app.solve import symmetry as symmetry_rows
 from app.solve import warm
 from app.solve import locks as lock_rows
 from app.solve import adapters as adapters_rows
+from app.solve import greedy as greedy_rows
 from app.solve import verify as verify_rows
 from app.solve import answers as answer_rows
 from app.solve.cache import key_of
@@ -421,6 +422,7 @@ def claim_next(db: Session) -> int | None:
 
     db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _CLAIM_LOCK})
     deferred: list[int] = []
+    starving: int | None = None
     for _ in range(8):
         run_id = db.execute(
             text(
@@ -454,15 +456,26 @@ def claim_next(db: Session) -> int | None:
         org_memory = quota_of(db, row["organization_id"]).get("max_memory_mb")
         capacity = reserve_rows.host_capacity()
         requested_workers = int(params.get("requested_workers") or params.get("workers") or 8)
+        short = float(params.get("time_limit_s") or 10.0) <= capacity.short_seconds
         need = reserve_rows.need_for(
             purpose=purpose,
-            workers=reserve_rows.allocated_workers(requested_workers, purpose, capacity),
+            workers=reserve_rows.allocated_workers(requested_workers, purpose, capacity, short=short),
             memory_mb=org_memory,
+            short=short,
         )
         why = reserve_rows.can_admit(
             reserve_rows.held_running(db), need, capacity
         )
+        if why is None and starving is not None and not need.short:
+            # A run that has waited too long for room keeps its place: other long runs do not start ahead of it
+            # (short runs still may -- they fit in the reserve and end soon).
+            why = f"waiting behind run {starving}, which has waited longest for room"
         if why is not None:
+            if starving is None and not need.short:
+                waited = db.execute(text("SELECT extract(epoch FROM now() - queued_at) FROM run WHERE id = :r"),
+                                    {"r": run_id}).scalar()
+                if waited is not None and float(waited) > STARVE_SECONDS:
+                    starving = int(run_id)
             db.execute(text("UPDATE run SET params = coalesce(params, '{}'::jsonb) || CAST(:p AS jsonb) WHERE id = :r"),
                        {"r": run_id, "p": _json({"queue_reason": why})})
             deferred.append(int(run_id))
@@ -501,6 +514,12 @@ def _owns_attempt(db: Session, run_id: int, attempt: int) -> bool:
         is not None
     )
 
+
+#: However long preparing a run took, its solver keeps at least this share of the time limit.
+MIN_SOLVE_SHARE = 0.5
+
+#: A long run that has waited this long for host room stops other long runs starting ahead of it.
+STARVE_SECONDS = float(os.environ.get("SOLVE_STARVE_SECONDS", "900"))
 
 # Any fixed number, shared by every worker: the key of the claim lock.
 _CLAIM_LOCK = 7_140_001
@@ -735,6 +754,7 @@ def _heartbeat(run_id: int, stop: threading.Event) -> Iterator[None]:
 
 def execute_run(db: Session, run_id: int) -> RunOutcome:
     """Solve a claimed run and record what happened."""
+    run_clock = time.monotonic()  # the time limit counts from here: preparation is part of the run
     if _honour_cancel(db, run_id):
         return _cancelled_outcome(db, run_id)
 
@@ -799,7 +819,7 @@ def execute_run(db: Session, run_id: int) -> RunOutcome:
             try:
                 outcome = _execute(
                     db, run_id, events, ir, data, params, time_limit, seed, workers, gap_rel,
-                    dataset_id, stop, attempt=attempt,
+                    dataset_id, stop, attempt=attempt, run_clock=run_clock,
                 )
             except adapters_rows.AdapterFailed as exc:
                 # An added solver failed (queue R42): its reason, licence scrubbed, is the run's error.
@@ -858,8 +878,11 @@ def _execute(
     stop: threading.Event,
     *,
     attempt: int,
+    run_clock: float | None = None,
 ) -> RunOutcome:
     phases: dict[str, float] = {}
+    asked_limit = time_limit
+    run_clock = time.monotonic() if run_clock is None else run_clock
     with _heartbeat(run_id, stop):
         # Each step as it starts, for whoever watches (the GenUI stream,
         # app.genui.translate): the pipeline is the agent.
@@ -1130,6 +1153,15 @@ def _execute(
                 hint = hint or None
                 # The start's time is the run's: the solver gets what is left, so the run keeps its limit.
                 time_limit = max(1.0, time_limit - float(start_record.get("seconds", 0)))
+        if (starter is None and not hint and params.get("greedy_start", True) and not params.get("pareto_steps")
+                and greedy_rows.applies(solving_model) is None):
+            # A packing-shaped model (app.solve.greedy): a greedy answer in a moment, so the run is never left
+            # with less, or with nothing, when the solver runs out of time.
+            hint, start_record = greedy_rows.start(solving_model)
+            start_record = {"used": True, **start_record}
+            hint = hint if start_record["feasible"] else None
+            start_key = "greedy_start_run"
+            time_limit = max(1.0, time_limit - float(start_record.get("seconds", 0)))
 
         points: list = []
         parts, blocks_record = None, None
@@ -1219,8 +1251,10 @@ def _execute(
                         return Solution("unknown", False, None, {}, seconds, name)
 
                 events.stage("probing", solvers=race_candidates, seconds=race_rows.probe_seconds(time_limit))
+                race_started = time.monotonic()
                 raced = race_rows.run_race(race_candidates, probe_one, workers=workers, time_limit=time_limit,
                                            sense=compiled.sense, rule=backend.name)
+                race_wall = time.monotonic() - race_started
                 backend, why, race_record = by_name(raced.winner), raced.evidence, raced.record
                 bind_log(solver=backend.name)
                 events.stage("chosen", solver=backend.name, why=why, model_class=found.model_class)
@@ -1228,7 +1262,14 @@ def _execute(
                     # A probe proved it: that is the answer, solved once.
                     result, reason = raced.answer, None
                     raise _Answered
-                time_limit = max(1.0, time_limit - raced.probe_s)
+                # The race's real time, not its nominal probe time: a large model takes longer to hand out.
+                time_limit = max(1.0, time_limit - max(raced.probe_s, race_wall))
+            # The time limit is the whole run's: what preparing it took (compile, checks, a race) comes off the
+            # solve, which keeps at least half (the camp test: a 120 s run took 11 minutes, most of it before solving).
+            spent = time.monotonic() - run_clock
+            if spent > 1.0:
+                time_limit = min(time_limit, max(asked_limit - spent, MIN_SOLVE_SHARE * asked_limit, 1.0))
+                phases["before_solve_s"] = round(spent, 2)
             events.stage("solving", solver=backend.name, time_limit_s=time_limit)
             compiled.gpu_options = params.get("gpu") or {}
             solving_model.gpu_options = compiled.gpu_options
@@ -2268,12 +2309,13 @@ def solve_compiled(
         # Interchangeable entities ordered, for a backend that does not
         # detect symmetry itself (setting `solve.symmetry`).
         compiled, _ = symmetry_rows.order_rows(compiled)
-    if (compiled.intervals or any(c.schedule for c in compiled.constraints)) and "scheduling" not in getattr(
-        backend, "provides", ()
-    ):
+    if (compiled.intervals or any(c.schedule and c.schedule.kind != "place" for c in compiled.constraints)) \
+            and "scheduling" not in getattr(backend, "provides", ()):
         # `choose` never routes one here; an empty row would be an answer
         # that ignores the rule.
         raise Unsupported(f"{backend.name} holds no scheduling rule or interval")
+    if compiled.placements and "placement" not in getattr(backend, "provides", ()):
+        raise Unsupported(f"{backend.name} holds no place rule; the placement solver does")
     knobs = {"seed": seed, "workers": workers, "gap_rel": gap_rel}
     if hint and backend.name in warm.HINTED:
         # Only when there is one, and only to a backend that takes one (a start computed for its floor --

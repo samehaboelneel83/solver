@@ -8,6 +8,7 @@ import {
 import {
   ATTACHABLE, getTurn, handOver, stopTurn, streamChat, uploadAgentFile, useAgentStatus,
   type AgentContext, type AgentEvent, type AgentMessage, type AgentMode, type AttachedFile, type PlanCounts,
+  type RunFacts,
 } from "../../api/agent";
 import { apiFetch } from "../../api/client";
 import Markdown from "./Markdown";
@@ -28,9 +29,9 @@ type Step = { name: string; label: string; ok?: boolean; preview?: string };
 type Item =
   | { kind: "user"; text: string }
   | { kind: "steps"; steps: Step[]; notes: string[] }
-  | { kind: "answer"; text: string }
+  | { kind: "answer"; text: string; facts?: RunFacts[] }
   | { kind: "plan"; summary: string; counts: PlanCounts; spec: Record<string, unknown>; status: "waiting" | "approved" | "changes" }
-  | { kind: "confirm"; calls: { method?: string; path?: string; body?: unknown }[]; status: "waiting" | "allowed" | "denied" }
+  | { kind: "confirm"; calls: { method?: string; path?: string; body?: unknown; text?: string }[]; status: "waiting" | "allowed" | "denied" }
   | { kind: "built"; domainId: number; problemId: number; scenarioId: number; versionId: number; domainCreated: boolean }
   | { kind: "error"; text: string }
   | { kind: "handover"; used?: boolean };
@@ -381,7 +382,7 @@ export default function AssistantPanel({ open, onClose, context }: { open: boole
                        versionId: event.model_version_id, domainCreated: event.domain_created });
           break;
         case "answer":
-          if (event.text) items.push({ kind: "answer", text: event.text });
+          if (event.text) items.push({ kind: "answer", text: event.text, ...(event.facts?.length ? { facts: event.facts } : {}) });
           break;
         case "error":
           items.push({ kind: "error", text: event.text });
@@ -753,6 +754,50 @@ function Welcome({ mode, onPick }: { mode: AgentMode; onPick: (text: string) => 
   );
 }
 
+const number = (x: number | null | undefined) =>
+  x === null || x === undefined ? "–" : Number.isInteger(x) ? x.toLocaleString("en-US") : x.toLocaleString("en-US", { maximumFractionDigits: 2 });
+
+/** A run's facts, rendered by the platform from the result: the Assistant's text explains them, it does not type them. */
+export function FactsCard({ facts }: { facts: RunFacts }) {
+  const tone = facts.status === "optimal" ? "border-emerald-200 bg-emerald-50" : facts.status === "feasible"
+    ? "border-sky-200 bg-sky-50" : "border-amber-300 bg-amber-50";
+  return (
+    <section aria-label={`Facts of run ${facts.run_id}`} className={`rounded-lg border px-3 py-2 text-sm ${tone}`}>
+      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+        From the result of run {facts.run_id} · written by the platform
+      </p>
+      <p className="mt-1 font-semibold text-slate-900">{facts.status_words}</p>
+      {facts.goal !== null && (
+        <p className="text-slate-800">
+          Goal ({facts.sense}): <strong>{number(facts.goal)}</strong>
+          {facts.bound !== null && <> · best possible {facts.sense === "maximize" ? "at most" : "at least"} {number(facts.bound)}</>}
+        </p>
+      )}
+      {facts.parts && facts.parts.length > 0 && (
+        <p className="text-slate-700">Made of: {facts.parts.map((p) => `${p.id} ${number(p.value)}`).join(" · ")}</p>
+      )}
+      {facts.decisions.map((d) => (
+        <div key={d.var} className="mt-2">
+          <p className="text-slate-700">{d.var}: {d.count.toLocaleString("en-US")} {d.chosen ? "chosen" : "non-zero"}{d.count > d.rows.length ? ` (first ${d.rows.length} shown)` : ""}</p>
+          {d.rows.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="mt-1 min-w-full text-xs">
+                <thead><tr>{d.header.map((h) => <th key={h} className="pe-3 text-start font-medium text-slate-500">{h}</th>)}</tr></thead>
+                <tbody>{d.rows.map((r, n) => <tr key={n}>{r.map((c, m) => <td key={m} className="pe-3 text-slate-800">{c}</td>)}</tr>)}</tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ))}
+      {facts.rules.length > 0 && (
+        <p className="mt-2 text-slate-700">
+          {facts.rules.map((r) => r.state === "broken" ? `${r.id} broken${r.short_by ? ` (short by ${number(r.short_by)})` : ""}` : `${r.id} tight`).join(" · ")}
+        </p>
+      )}
+    </section>
+  );
+}
+
 function ItemView({ item, live, onDecide, onHandover }: {
   item: Item; live: boolean; onDecide: (allow: boolean) => void; onHandover?: () => void;
 }) {
@@ -769,7 +814,12 @@ function ItemView({ item, live, onDecide, onHandover }: {
     case "user":
       return <p className="ms-8 whitespace-pre-wrap rounded-lg bg-blue-600 px-3 py-2 text-sm text-white">{item.text}</p>;
     case "answer":
-      return <div className="rounded-lg border border-slate-200 bg-white px-3 py-2"><Markdown text={item.text} /></div>;
+      return (
+        <div className="space-y-2">
+          {item.facts?.map((f) => <FactsCard key={f.run_id} facts={f} />)}
+          <div className="rounded-lg border border-slate-200 bg-white px-3 py-2"><Markdown text={item.text} /></div>
+        </div>
+      );
     case "steps":
       return <Steps steps={item.steps} notes={item.notes} />;
     case "error":
@@ -787,7 +837,7 @@ function ItemView({ item, live, onDecide, onHandover }: {
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm">
           <p className="font-semibold text-amber-900">Allow this?</p>
           <ul className="mt-1 space-y-1 font-mono text-xs text-amber-900">
-            {item.calls.map((c, n) => <li key={n}>{c.method} {c.path}</li>)}
+            {item.calls.map((c, n) => <li key={n}>{c.text ?? `${c.method ?? ""} ${c.path ?? ""}`}</li>)}
           </ul>
           {live ? (
             <div className="mt-2 flex gap-2">

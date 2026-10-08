@@ -1142,6 +1142,7 @@ function RunDetail({
   const said = planWords(data, solvedVersion.data?.ir);
   const params = data.params as {
     stopped_by_request?: boolean;
+    queue_reason?: string | null;
     why_solver?: string;
     classified_as?: string;
     objective_mode?: string;
@@ -1171,6 +1172,9 @@ function RunDetail({
         Run {String(id)}
       </h2>
       <p className="mb-4 text-sm text-slate-600">{statusNote({ ...data, stopped: params.stopped_by_request === true })}</p>
+      {data.status === "queued" && params.queue_reason && (
+        <p className="mb-2 text-sm text-amber-800" role="status">Waiting to start: {params.queue_reason}.</p>
+      )}
       {unfinished && <ExpectedTime runId={id} />}
       {said ? <PlanSummary said={said} /> : lead && <p className="mb-4 text-sm font-medium text-slate-900">{lead}</p>}
       {onTab && (
@@ -1989,6 +1993,7 @@ const MODEL_WORDS: Record<string, string> = {
   MIQCQP: "Decisions include whole numbers, with squared terms in the rules",
   NLP: "Decisions are amounts, with curved (non-linear) rules or goal",
   MINLP: "Decisions include whole numbers, with curved (non-linear) rules or goal",
+  placement: "Items laid out on a drawing's free area, without a list of positions",
 };
 
 /** A model's class in a planner's words, not "an IP model" (operator trial F8). */

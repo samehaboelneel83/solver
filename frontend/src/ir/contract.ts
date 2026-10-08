@@ -748,6 +748,8 @@ export const CONSTRAINT_KEYS: ReadonlySet<string> = new Set([
   "connected",
   // The routing rule (version 2, queue R15b), likewise.
   "route",
+  // Items placed on a drawing's free area (version 2, plan phase 1C), likewise.
+  "place",
 ]);
 
 /** The two scheduling rules, and the keys each carries (`SCHEDULING_KEYS`
@@ -765,6 +767,17 @@ export const ROUTE_KEYS: readonly string[] = [
   "visit", "vehicles", "stops", "depot", "depot_of", "depot_by", "demand", "capacity",
   // Time windows (queue R15c): a travel-time parameter and stop attributes.
   "travel", "earliest", "latest", "service",
+];
+
+/** What a `place` rule names (`PLACE_KEYS`), and what it must name (`PLACE_REQUIRED`), in `app/ir/contract.py`. */
+export const PLACE_KEYS: readonly string[] = [
+  "slots", "chosen", "x", "y", "turn", "side", "length", "width", "can_turn", "areas", "shape", "step", "origin",
+  "aisle", "aisle_sides",
+  // Access: every placed item's aisle joins, through uncovered free cells, a free cell at one of these features.
+  "access", "access_shape",
+];
+export const PLACE_REQUIRED: readonly string[] = [
+  "areas", "chosen", "length", "origin", "shape", "slots", "step", "width", "x", "y",
 ];
 
 /** What an interval declaration names beyond `index` and `domain`. */

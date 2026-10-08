@@ -925,6 +925,10 @@ def fitting_patterns(seed: Any) -> Any:
     return out
 
 
+#: Links written per statement when a seed is planted.
+LINK_BATCH = 10_000
+
+
 def plant_domain_seed(db: Session, domain_id: int, seed: Any, *, fresh_types: bool = False) -> None:
     """Create missing types, records and cells named by a template's seed.
 
@@ -1036,6 +1040,7 @@ def plant_domain_seed(db: Session, domain_id: int, seed: Any, *, fresh_types: bo
     # The links already there, read once per type rather than one query per link (a layout's occupancy
     # links run to hundreds of thousands); new ones written in one flush.
     linked: dict[int, set[tuple[int, int]]] = {}
+    new_links: list[dict[str, int]] = []
     for spec in seed.get("relationships") or []:
         if not isinstance(spec, dict) or spec.get("type") not in rel_types:
             continue
@@ -1052,14 +1057,12 @@ def plant_domain_seed(db: Session, domain_id: int, seed: Any, *, fresh_types: bo
         if pair in linked[rel_type.id]:
             continue
         linked[rel_type.id].add(pair)
-        db.add(
-            Relationship(
-                relationship_type_id=rel_type.id,
-                from_entity_id=pair[0],
-                to_entity_id=pair[1],
-            )
-        )
+        new_links.append({"relationship_type_id": rel_type.id, "from_entity_id": pair[0], "to_entity_id": pair[1]})
     db.flush()
+    # Written as rows, not one ORM object each, in batches (the scale benchmark of 7 October 2026: 200,000
+    # links took 79 s to build, most of it per-link work; the database's own checks still run on every row).
+    for start in range(0, len(new_links), LINK_BATCH):
+        db.execute(Relationship.__table__.insert(), new_links[start:start + LINK_BATCH])
 
     cells: list[dict[str, Any]] = []
     for spec in seed.get("parameter_values") or []:

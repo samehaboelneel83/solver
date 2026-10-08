@@ -49,6 +49,8 @@ def test_a_cell_with_no_records_is_the_value(tenants, db):  # noqa: F811
     client = TestClient(app)
     checked = client.post("/api/v1/problems/from-spec", json=_spec(True), headers=tenants["a"]).json()
     assert checked["trial"]["status"] == "optimal" and abs(checked["trial"]["objective"] - 5550) < 1e-6, checked
+    # The trial names what it chose, so a summary can say it rightly.
+    assert sorted(checked["trial"]["used"]["make"]["chosen"]) == ["P1 = 30", "P2 = 20", "P5 = 60"]
     built = client.post("/api/v1/problems/from-spec", json=_spec(False), headers=tenants["a"])
     assert built.status_code == 200, built.text
     rows = db.execute(text("SELECT d.name, d.default_value, (SELECT count(*) FROM parameter_value v"

@@ -104,6 +104,16 @@ def accept(compiled: Compiled, result: Solution, approximate: float | None = Non
                 break
     if not any(f["kind"] == "hard_rule_residual" for f in report["failures"]):
         report["checks"].append("hard_rules")
+    for place in getattr(compiled, "placements", None) or []:
+        # A place rule has no residual: its answer is checked cell by cell on its own grid.
+        from app.solve.placement import check_assignments
+
+        broken = check_assignments(place, result.assignments)
+        if broken:
+            report["accepted"] = False
+            report["failures"].append({"kind": "placement", "constraint_id": place.rule, "detail": broken[:10]})
+        else:
+            report["checks"].append("placement")
 
     for key, var in compiled.variables.items():
         if key[0] in _AUX:

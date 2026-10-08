@@ -1278,6 +1278,8 @@ function ConstraintCard({
         <ConnectedEditor constraint={constraint} context={context} onChange={onChange} />
       ) : constraint.route !== undefined ? (
         <RouteEditor constraint={constraint} context={context} onChange={onChange} />
+      ) : (constraint as { place?: unknown }).place !== undefined ? (
+        <PlaceSummary body={(constraint as unknown as { place: PlaceBody }).place} />
       ) : constraint.left == null || constraint.right == null ? (
         <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           <p>
@@ -2245,4 +2247,26 @@ export function noteWithNumber(note: string | undefined, before: unknown, after:
     if (at.test(note)) return note.replace(at, (_m, lead: string) => `${lead}${now.toLocaleString("en-US")}`);
   }
   return null;
+}
+
+
+type PlaceBody = {
+  slots?: { set?: string }; areas?: { set?: string }; step?: number; aisle?: number; aisle_sides?: string;
+};
+
+/** A place rule (plan phase 1C), read back: it is made by the layout tool from a drawing, not typed here. */
+function PlaceSummary({ body }: { body: PlaceBody }) {
+  const aisle = body.aisle ? `, each with an aisle of ${body.aisle} cells (${(body.aisle * (body.step ?? 0)).toFixed(2)} m) free along a ${body.aisle_sides} side` : "";
+  return (
+    <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">
+      <p>
+        Each chosen <strong>{body.slots?.set}</strong> lies wholly on the free cells of one{" "}
+        <strong>{body.areas?.set}</strong> on a {body.step} m grid, no two on the same cell{aisle}.
+      </p>
+      <p className="mt-1 text-xs text-slate-600">
+        Laid out by the placement solver, without a list of positions. To change the areas, sizes or aisle, lay the
+        drawing out again with the Assistant.
+      </p>
+    </div>
+  );
 }

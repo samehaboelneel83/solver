@@ -65,7 +65,7 @@ def test_the_camp_drawing_in_well_under_a_second(tmp_path):
     assert out["zones"] == [f"C{n:02d}" for n in range(1, 12)]
     assert out["grid_step_m"] == 0.5 and out["free_area_m2"] == pytest.approx(2071.7, abs=1)
     assert 20_000 < out["candidates"] < 40_000 and out["upper_bound"]["items"] == 2473
-    with pytest.raises(layout.LayoutRefused, match="coarser exact steps"):
+    with pytest.raises(layout.LayoutRefused, match="Coarser exact steps"):
         layout.make([f], str(tmp_path), area_layers=["BOUNDARY"], items=[{"name": "bed", "length": 1.5, "width": 0.5}],
                     aisle=0.35, aisle_side="any", step=0.25)
 
@@ -74,10 +74,26 @@ def test_layout_can_generate_one_polygon_from_a_layer(tmp_path):
     f = agent_files.parse_spatial("camp_layout_layers.dxf", DRAWING.read_bytes())
     one = layout.make([f], str(tmp_path), area_layers=["BOUNDARY"], area_indices=[0],
                       blocked_layers=["OBSTACLES", "DOORS_OBSTACLE"], label_layer="LABELS",
-                      items=[{"name": "bed", "length": 1.75, "width": 0.5, "rotations": [0, 90]}],
+                      items=[{"name": "bed", "length": 1.5, "width": 0.5, "rotations": [0, 90]}],
                       aisle=0.35, aisle_side="short")
     assert one["areas"] == 1
     assert one["candidates"] > 0
+
+
+def test_a_grid_too_fine_for_the_aisle_falls_back_to_the_coarser_exact_grid(tmp_path):
+    """1.75 m beds with a 0.35 m aisle: the aisle-exact grid is 0.05 m (259,280 positions in this room), refused
+    as too many; the platform lays it out on the exact 0.25 m grid itself and says the aisle it modelled."""
+    out = layout.make(_room(tmp_path, w=20, h=10), str(tmp_path), area_layers=["ROOMS"],
+                      items=[{"name": "bed", "length": 1.75, "width": 0.5, "rotations": [0, 90]}],
+                      aisle=0.35, aisle_side="short")
+    assert out["grid_step_m"] == 0.25 and out["aisle_m"]["modelled"] == 0.5
+    assert 0 < out["candidates"] <= layout.MAX_CANDIDATES
+    assert "coarser exact 0.25 m grid" in out["grid_note"] and "0.05 m grid" in out["grid_note"]
+    # A step the caller chose is kept, and refused as before.
+    with pytest.raises(layout.LayoutRefused, match="Coarser exact steps: 0.25 m"):
+        layout.make(_room(tmp_path, w=20, h=10), str(tmp_path), area_layers=["ROOMS"],
+                    items=[{"name": "bed", "length": 1.75, "width": 0.5, "rotations": [0, 90]}],
+                    aisle=0.35, aisle_side="short", step=0.05)
 
 
 def test_candidate_limit_lists_only_coarser_steps_that_divide_item_sizes(tmp_path):
@@ -99,10 +115,26 @@ def test_the_assistant_tool_attaches_the_files_and_returns_the_plan(tmp_path, mo
                        core.Context("x", mode="model", files=[f], user_id="u", conversation_id="c"))
     text = agent.run_tool("make_layout", {"area_layers": ["BOUNDARY"], "blocked_layers": ["OBSTACLES"],
                                           "items": [{"name": "bed", "length": 1.5, "width": 0.5, "rotations": [0, 90]}],
-                                          "aisle": 0.35, "aisle_side": "short"})
+                                          "aisle": 0.35, "aisle_side": "short", "form": "candidates"})
     assert text.startswith("LAYOUT made") and '"entities_from_file"' in text
     assert {"layout_items.csv", "layout_occupies.csv", "layout_keeps_free.csv"} <= {x["name"] for x in agent.ctx.files}
     assert "make_layout" in {t["function"]["name"] for t in core.MODEL_TOOLS}
+
+
+def test_by_default_the_tool_gives_the_placement_form_on_the_exact_grid(tmp_path, monkeypatch):
+    """No list of positions (plan phase 1C): the areas and slots, a place rule, and the aisle exactly as asked."""
+    monkeypatch.setenv("AGENT_SANDBOX_ROOT", str(tmp_path))
+    from app.main import app
+
+    f = agent_files.parse_spatial("camp_layout_layers.dxf", DRAWING.read_bytes())
+    agent = core.Agent(core.Settings(enabled=False), core.ApiIndex(app.openapi()), lambda *a, **k: {},
+                       core.Context("x", mode="model", files=[f], user_id="u", conversation_id="c"))
+    text = agent.run_tool("make_layout", {"area_layers": ["BOUNDARY"], "blocked_layers": ["OBSTACLES"],
+                                          "items": [{"name": "bed", "length": 1.5, "width": 0.5, "rotations": [0, 90]}],
+                                          "aisle": 0.35, "aisle_side": "short"})
+    assert text.startswith("LAYOUT made, placement form") and '"place"' in text
+    assert '"grid_step_m": 0.05' in text and '"modelled": 0.35' in text
+    assert {"layout_areas.csv", "layout_slots.csv"} <= {x["name"] for x in agent.ctx.files}
 
 
 def test_access_layers_root_every_aisle_at_an_entrance(tmp_path):

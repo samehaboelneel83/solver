@@ -25,10 +25,11 @@ services:
       timeout: 3s
       retries: 12
   ingestion-worker:
+    # No fixed address: several ingestion workers may run (INGESTION_WORKERS); they take addresses from
+    # ip_range below, clear of the fixed ones (.2 the source, .3-.7 free for other fixed services).
     networks:
       solver_net: {}
-      ingestion_source_net:
-        ipv4_address: 172.29.89.3
+      ingestion_source_net: {}
     depends_on:
       ingestion-reference:
         condition: service_healthy
@@ -39,6 +40,7 @@ networks:
     ipam:
       config:
         - subnet: 172.29.89.0/28
+          ip_range: 172.29.89.8/29
 
 volumes:
   ingestion_reference_data:

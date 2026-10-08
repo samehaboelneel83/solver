@@ -58,11 +58,13 @@ def test_the_plan_is_the_newsvendor_quantile_not_the_order_for_the_average_deman
     assert set(solved.solution.assignments) == {("order", ())}  # the plan only: selling waits for the data
     assert solved.solution.wall_seconds > 0.05  # the whole solve, costing the plan included
     out = solved.record["out_of_sample"]
-    assert out["unmet"] == 0 and out["futures"] == 50
+    # Judged on fresh futures: up to OUT_OF_SAMPLE_PER per sample, as many as fit in the time (October 2026).
+    assert out["unmet"] == 0 and 50 <= out["futures"] <= stochastic.OUT_OF_SAMPLE_PER * 50
     assert abs(out["mean"] - 166.67) <= out["ci95"] + 5  # the true expected profit, within the interval
     # Each future's cost is kept, so its spread can be drawn (queue R17b): they average to the mean.
-    assert len(out["costs"]) == 50 and out["costs"] == sorted(out["costs"])
-    assert abs(sum(out["costs"]) / 50 - out["mean"]) < 1e-3
+    n = out["futures"]
+    assert len(out["costs"]) == n and out["costs"] == sorted(out["costs"])
+    assert abs(sum(out["costs"]) / n - out["mean"]) < 1e-3
 
 
 def test_the_extensive_form_shares_the_plan_and_copies_the_recourse():

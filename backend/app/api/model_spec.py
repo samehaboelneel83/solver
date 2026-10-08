@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 from app import audit
 from app.api.deps import requires
 from app.core.db import get_db
+from app.core import limits
 from app.crud.db_errors import translate_db_error
 from app.ir.validate import validate_ir
 from app.models.iam import UserAccount
@@ -45,8 +46,8 @@ NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 ROLES = {"agent", "resource", "time", "location", "task", "org", "other"}
 DATA_TYPES = {"integer", "number", "text", "boolean", "enum", "time", "date", "geometry", "reference"}
 CARDINALITIES = {"one_to_one", "one_to_many", "many_to_one", "many_to_many"}
-MAX_ENTITIES = 150_000  # a layout's generated candidates and cells (camp-bed tests): 50,000 refused 62,000
-MAX_CELLS = 200_000
+MAX_ENTITIES = limits.SPEC_RECORDS  # a layout's generated candidates and cells (app/core/limits.py)
+MAX_CELLS = limits.SPEC_CELLS
 
 
 class ModelSpec(BaseModel):
@@ -305,6 +306,8 @@ def stale_records(db: Session, domain_id: int, seed: dict[str, Any]) -> list[tup
 
 TRIAL_SECONDS = 15
 TRIAL_CELLS = 200_000
+#: A decision's used cells are named in the trial when there are at most this many.
+TRIAL_LISTED = 12
 
 
 def _trial(db: Session, domain_id: int, ir: dict[str, Any]) -> dict[str, Any]:
@@ -338,17 +341,27 @@ def _trial(db: Session, domain_id: int, ir: dict[str, Any]) -> dict[str, Any]:
         return {"status": "no solver", "why": str(exc)[:300]}
     except Exception as exc:  # noqa: BLE001
         return {"status": "failed", "why": f"{type(exc).__name__}: {str(exc)[:300]}"}
+    if result is None:
+        return {"status": "no answer", "why": str(reason or "")[:300]}
     used: dict[str, list[int]] = {}
     for key in compiled.variables:
         if not str(key[0]).startswith("__"):
             used.setdefault(str(key[0]), [0, 0])[1] += 1
+    # Which cells are used, by their records' keys, while that is short enough to read (the file-source test,
+    # October 2026: given only "3 of 5", the Assistant named three projects the trial had not chosen).
+    chosen: dict[str, list[str]] = {}
     for key, value in (result.assignments or {}).items():
         if str(key[0]) in used and abs(float(value)) > 1e-9:
             used[str(key[0])][0] += 1
-    if result is None:
-        return {"status": "no answer", "why": str(reason or "")[:300]}
+            index = key[1] if len(key) > 1 and isinstance(key[1], (tuple, list)) else key[1:]
+            cell = " · ".join(map(str, index))
+            amount = float(value)
+            chosen.setdefault(str(key[0]), []).append(
+                cell if abs(amount - 1) < 1e-9 else f"{cell} = {round(amount, 6):g}")
     return {"status": result.status, "objective": result.objective, "solver": backend.name,
-            "seconds": TRIAL_SECONDS, "used": {k: {"non_zero": v[0], "cells": v[1]} for k, v in used.items()}}
+            "seconds": TRIAL_SECONDS,
+            "used": {k: {"non_zero": v[0], "cells": v[1],
+                         **({"chosen": chosen.get(k, [])} if v[0] <= TRIAL_LISTED else {})} for k, v in used.items()}}
 
 
 @router.post("/problems/from-spec")
@@ -404,6 +417,23 @@ def build_from_spec(
 
         plant_domain_seed(db, domain_id, normalise(spec.seed))
         db.flush()
+        if not spec.dry_run and spec.seed.get("source_bindings"):
+            # What came from which source -- a database table (use_source) or a file kept in the workspace -- so it
+            # can be refreshed (migrations 0114, 0115).
+            from app.integrations.refresh import file_sheet, keepable, record_bindings, save_file
+
+            versions = {}
+            for f in spec.seed.get("source_files") or []:
+                if keepable(f):
+                    versions[f["name"]] = save_file(db, domain_id, f, user.id)
+            for b in spec.seed["source_bindings"]:
+                if b.get("file_name"):
+                    kept = versions.get(b["file_name"]) or (file_sheet(db, domain_id, b["file_name"]) or {}).get("source")
+                    if kept:
+                        b["file_version"], b["sha256"] = kept.get("version"), kept.get("sha256")
+            spec.seed["source_bindings"] = [b for b in spec.seed["source_bindings"]
+                                            if not b.get("file_name") or b.get("file_version")]
+            record_bindings(db, domain_id, spec.seed["source_bindings"])
         problem = Problem(domain_id=domain_id, name=spec.problem_name, owner=user.username)
         db.add(problem)
         db.flush()
@@ -421,6 +451,7 @@ def build_from_spec(
             "variables": len(spec.ir.get("variables") or {}),
             "constraints": len(spec.ir.get("constraints") or []),
             "objective_terms": len((spec.ir.get("objective") or {}).get("terms") or []),
+            **({"bound_to_sources": len(spec.seed["source_bindings"])} if spec.seed.get("source_bindings") else {}),
         }
         if spec.dry_run:
             trial = _trial(db, domain_id, spec.ir) if spec.trial else None

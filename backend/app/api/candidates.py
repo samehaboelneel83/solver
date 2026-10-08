@@ -27,6 +27,7 @@ from app.agent import files as agent_files
 from app.api.deps import get_current_user, requires
 from app.api.validation import NAME_PATTERN, field_error
 from app.core.db import get_db
+from app.core import limits
 from app.crud.db_errors import translate_db_error
 from app.models.iam import UserAccount
 from app.models.v1_domain import EntityType, RelationshipType
@@ -34,8 +35,8 @@ from app.models.v1_domain import EntityType, RelationshipType
 router = APIRouter(prefix="/api/v1/candidate-sets", tags=["candidates"])
 
 MAX_SUPPLIED = 100_000
-MAX_GENERATED_ENTITIES = 150_000
-MAX_GENERATED_LINKS = 200_000
+MAX_GENERATED_ENTITIES = limits.CANDIDATE_RECORDS
+MAX_GENERATED_LINKS = limits.CANDIDATE_LINKS
 
 
 class CandidateAttribute(BaseModel):

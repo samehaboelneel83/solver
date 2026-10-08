@@ -11,6 +11,9 @@ Env (host-wide, shared by every worker process):
 * ``SOLVE_HOST_MEMORY_MB`` — total sandbox memory (default ``SOLVE_MEMORY_MB`` × 4)
 * ``SOLVE_LICENSE_SEATS`` — concurrent commercial-licence seats (default 8)
 * ``SOLVE_CHECK_SHARE`` — fraction reserved for shadow/suite (default 0.25)
+* ``SOLVE_SHORT_SHARE`` — fraction of threads and memory long runs may not take, so a short run (a what-if, a
+  trial, a quick plan) always finds room (default 0: no reserve, as before)
+* ``SOLVE_SHORT_SECONDS`` — a run whose time limit is at most this is short (default 60)
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ class Need:
     memory_mb: int
     license_seats: int
     pool: Pool
+    short: bool = False  # a short run (time limit <= SOLVE_SHORT_SECONDS): may use the short reserve
 
 
 @dataclass(frozen=True)
@@ -37,6 +41,8 @@ class Capacity:
     memory_mb: int
     license_seats: int
     check_share: float
+    short_share: float = 0.0
+    short_seconds: float = 60.0
 
 
 def host_capacity() -> Capacity:
@@ -48,6 +54,8 @@ def host_capacity() -> Capacity:
         memory_mb=max(64, int(os.environ.get("SOLVE_HOST_MEMORY_MB", str(memory_default)))),
         license_seats=max(1, int(os.environ.get("SOLVE_LICENSE_SEATS", "8"))),
         check_share=share,
+        short_share=min(0.9, max(0.0, float(os.environ.get("SOLVE_SHORT_SHARE", "0")))),
+        short_seconds=max(0.0, float(os.environ.get("SOLVE_SHORT_SECONDS", "60"))),
     )
 
 
@@ -58,6 +66,7 @@ def need_for(
     memory_mb: int | None,
     portfolio_size: int = 1,
     licensed_entrants: int = 0,
+    short: bool = False,
 ) -> Need:
     """What one run would occupy if it starts now.
 
@@ -75,6 +84,7 @@ def need_for(
         memory_mb=mem * size,
         license_seats=seats,
         pool="check" if purpose in CHECK_PURPOSES else "planner",
+        short=bool(short) and purpose not in CHECK_PURPOSES,
     )
 
 
@@ -106,6 +116,20 @@ def can_admit(held: list[Need], extra: Need, capacity: Capacity) -> str | None:
             f"{max(0, capacity.license_seats - s_all)} free of {capacity.license_seats})"
         )
 
+    # The short reserve: long runs leave a share free, so a what-if or a quick plan never waits behind them
+    # (the queue measured in October 2026: 26-second runs waited 35 minutes to 2 hours behind long ones).
+    if capacity.short_share > 0 and not extra.short:
+        keep_w = max(1, int(capacity.workers * capacity.short_share))
+        keep_m = int(capacity.memory_mb * capacity.short_share)
+        long_w = sum(n.workers for n in held if not n.short)
+        long_m = sum(n.memory_mb for n in held if not n.short)
+        if long_w + extra.workers > capacity.workers - keep_w:
+            return (f"long runs may use {capacity.workers - keep_w} of {capacity.workers} workers "
+                    f"({keep_w} kept for short runs; {max(0, capacity.workers - keep_w - long_w)} free for long runs)")
+        if long_m + extra.memory_mb > capacity.memory_mb - keep_m:
+            return (f"long runs may use {capacity.memory_mb - keep_m} of {capacity.memory_mb} MB "
+                    f"({keep_m} MB kept for short runs)")
+
     # Per-pool caps: checks stay within their share; planners keep the rest.
     check_w = max(1, int(capacity.workers * capacity.check_share))
     check_m = max(64, int(capacity.memory_mb * capacity.check_share))
@@ -133,11 +157,14 @@ def can_admit(held: list[Need], extra: Need, capacity: Capacity) -> str | None:
     return None
 
 
-def allocated_workers(requested: int, purpose: str, capacity: Capacity) -> int:
+def allocated_workers(requested: int, purpose: str, capacity: Capacity, short: bool = False) -> int:
     """Fit a thread preference to the deployment, including already queued runs."""
     limit = min(capacity.workers, max(1, int(os.environ.get("SOLVE_WORKER_CPUS", str(capacity.workers)))))
     if purpose in CHECK_PURPOSES:
         limit = min(limit, max(1, int(capacity.workers * capacity.check_share)))
+    elif short and capacity.short_share > 0:
+        # A short run fits in the reserve, so it starts even when long runs fill the rest.
+        limit = min(limit, max(1, int(capacity.workers * capacity.short_share)))
     return min(max(1, requested), limit)
 
 
@@ -152,6 +179,7 @@ def need_from_params(params: dict[str, Any] | None, purpose: str) -> Need | None
             memory_mb=max(64, int(stamped["memory_mb"])),
             license_seats=max(1, int(stamped["license_seats"])),
             pool="check" if stamped.get("pool") == "check" else "planner",
+            short=bool(stamped.get("short")),
         )
     except (KeyError, TypeError, ValueError):
         return need_for(
@@ -167,6 +195,7 @@ def as_params(need: Need) -> dict[str, Any]:
         "memory_mb": need.memory_mb,
         "license_seats": need.license_seats,
         "pool": need.pool,
+        "short": need.short,
     }
 
 

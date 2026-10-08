@@ -141,7 +141,8 @@ def summary(rec: dict[str, Any]) -> str:
         cells = t.get("cells") or []
         if cells and t.get("cell_count", len(cells)) <= 25:
             # Exactly which cells make a goal's value -- which requests were broken, on which day.
-            out.append(f"{t['id']} comes from: " + "; ".join(
+            out.append(f"{t['id']} comes from (each cell's share of the goal, in the goal's units -- not the "
+                       f"cell's amount, which DECISION gives): " + "; ".join(
                 f"{c['var']}[{', '.join(c['index'])}] {_num(c['value'])}" for c in cells))
         by_var: dict[str, float] = {}
         for c in cells:
@@ -154,6 +155,7 @@ def summary(rec: dict[str, Any]) -> str:
 
     out.extend(_front(rec, params, sets, fields))
     out.extend(_routes(rec, ir, sets, made_of))
+    out.extend(_layout(rec, ir, data))
     out.extend(_resources(rec, ir, data))
     if rec.get("assignments") is None and rec.get("amounts") is None:
         out.append("No decisions: the run has no answer.")
@@ -710,3 +712,122 @@ def _routes(rec: dict[str, Any], ir: dict[str, Any], sets: dict[str, dict[str, d
             out.append(line)
     return out
 
+
+
+#: The rows of each decision a facts block shows; the run's page and export have them all.
+FACT_ROWS, FACT_DECISIONS, FACT_RULES = 12, 3, 12
+
+
+def facts(rec: dict[str, Any]) -> dict[str, Any]:
+    """A run's facts, rendered by the platform beside the Assistant's explanation and never typed by the model
+    (plan of 8 October 2026, honest answers, step 1): status in words, the goal and its bound, the goal's parts,
+    the first rows of each decision, and which rules are tight or broken."""
+    from app.solve import whatif
+
+    data = whatif.apply(rec.get("data") or {}, rec.get("ir") or {}, rec.get("patch") or {})
+    ir = rec.get("ir") or {}
+    params = rec.get("params") or {}
+    labels = _labels(data)
+    sense = (ir.get("objective") or {}).get("sense") or ""
+    status = rec.get("status")
+    goal = rec.get("objective")
+    bound = params.get("best_bound") if params.get("best_bound") is not None else rec.get("best_bound")
+    gap = None
+    if status == "feasible" and goal is not None and bound is not None:
+        try:
+            gap = round(abs(float(bound) - float(goal)) / max(abs(float(bound)), 1e-9) * 100, 1)
+        except (TypeError, ValueError):
+            gap = None
+    words = {"optimal": "Proven best answer",
+             "feasible": "A good answer, not proven best" + (f" (within {gap}% of the best possible)" if gap is not None
+                                                              else ""),
+             "infeasible": "No answer exists with these rules and data",
+             "unbounded": "The goal can improve without limit: a limit is missing"}.get(str(status), str(status))
+    def plain(x: Any) -> float | int | None:
+        try:
+            v = float(x)
+        except (TypeError, ValueError):
+            return None
+        return int(round(v)) if abs(v - round(v)) < 1e-6 else round(v, 6)
+
+    out: dict[str, Any] = {"run_id": rec.get("id"), "status": status, "status_words": words, "sense": sense,
+                           "goal": plain(goal), "bound": plain(bound) if status == "feasible" else None,
+                           "gap_pct": gap}
+    made_of = params.get("objective_breakdown") or {}
+    if params.get("objective_mode") == "lex" and params.get("objective_terms"):
+        out["parts"] = [{"id": t["id"], "value": plain(t.get("value"))} for t in params["objective_terms"]]
+    elif len(made_of.get("terms") or []) > 1:
+        out["parts"] = [{"id": t["id"], "value": plain(t.get("contribution", t.get("value")))} for t in made_of["terms"]]
+    decisions = []
+    for var, (index, rows) in decision_rows(rec).items():
+        if len(decisions) >= FACT_DECISIONS:
+            break
+        spec = (ir.get("variables") or {}).get(var) or {}
+        binary = (spec.get("domain") or "binary") == "binary"
+        shown = [[(f"{k} ({labels[s][str(k)]})" if labels.get(s, {}).get(str(k)) not in (None, str(k)) else str(k))
+                  for s, k in zip(index, row[:-1])] + ([] if binary else [_amount(row[-1])])
+                 for row in rows[:FACT_ROWS]]
+        decisions.append({"var": var, "header": list(index) + ([] if binary else ["value"]), "rows": shown,
+                          "count": len(rows), "chosen": binary})
+    out["decisions"] = decisions
+    rules = []
+    by_rule: dict[str, list[dict[str, Any]]] = {}
+    for row in (rec.get("ranges") or {}).get("rows") or []:
+        by_rule.setdefault(str(row.get("rule")), []).append(row)
+    relations = {c.get("id"): c.get("relation") for c in ir.get("constraints") or [] if isinstance(c, dict)}
+    for r in rec.get("results") or []:
+        broken = not r.get("satisfied")
+        tight = (not broken and relations.get(r["constraint_id"]) != "=" and r.get("slack") is not None
+                 and _tight(r["slack"], by_rule.get(r["constraint_id"])))
+        if broken or tight:
+            rules.append({"id": r["constraint_id"], "state": "broken" if broken else "tight",
+                          "short_by": plain(r.get("total_violation")) if broken else None, "hard": bool(r.get("hard"))})
+    out["rules"] = rules[:FACT_RULES]
+    return out
+
+
+def _layout(rec: dict[str, Any], ir: dict[str, Any], data: dict[str, Any]) -> list[str]:
+    """For a place rule: how many items were placed, of which kind, in which area, and where (plan phase 1C)."""
+    from app.solve.place_rule import placed_items
+
+    bodies = [c for c in ir.get("constraints") or [] if isinstance(c, dict) and isinstance(c.get("place"), dict)]
+    if not bodies:
+        return []
+    values: dict[tuple[str, str], float] = {}
+    for var, (_, rows) in decision_rows(rec).items():
+        for row in rows:
+            values[(var, str(row[0]))] = float(row[-1])
+    items = placed_items(ir, data, lambda var, sid: values.get((var, sid), 0))
+    body = bodies[0]["place"]
+    slots = len([r for r in (data.get("sets") or {}).get(body["slots"]["set"], [])])
+    out = [f"\nLAYOUT ({bodies[0].get('id')}; from the answer, exact): {len(items)} items placed of {slots} slots, on "
+           f"a {float(body['step']):g} m grid" + (f", each with a {int(body.get('aisle') or 0) * float(body['step']):g} m "
+                                                  f"aisle on a {body.get('aisle_sides')} side" if body.get("aisle") else "")
+           + (f"; every item reachable from a {(body.get('access') or {}).get('set')} through uncovered free cells "
+              "(checked)" if body.get("access") else "")
+           + ". Positions are each item's lower-left corner and size in metres, in the drawing's frame."]
+    by_kind: dict[str, int] = {}
+    for it in items:
+        by_kind[str(it["kind"])] = by_kind.get(str(it["kind"]), 0) + 1
+    out.append("By kind: " + ", ".join(f"{k} {n}" for k, n in sorted(by_kind.items())))
+    try:
+        from shapely import wkt
+        from shapely.geometry import Point
+
+        areas = [(str(r.get("zone") or r.get("id")), wkt.loads(str(r.get(body["shape"]))))
+                 for r in (data.get("sets") or {}).get(body["areas"]["set"], [])]
+        by_zone: dict[str, int] = {}
+        for it in items:
+            point = Point(it["x_m"], it["y_m"])
+            zone = next((z for z, shape in areas if shape.contains(point)), "?")
+            by_zone[zone] = by_zone.get(zone, 0) + 1
+        out.append("By area: " + ", ".join(f"{z} {n}" for z, n in sorted(by_zone.items())))
+    except Exception:  # noqa: BLE001 -- the areas are a courtesy; the counts above stand
+        pass
+    for it in items[:MAX_ROWS // 4]:
+        out.append(f"  {it['slot']} ({it['kind']}): at ({_num(it['min_x_m'])}, {_num(it['min_y_m'])}) m, "
+                   f"{_num(it['width_m'])} x {_num(it['height_m'])} m" + (", turned" if it["turned"] else "")
+                   + (f", aisle {it['aisle_side']}" if it["aisle_side"] else ""))
+    if len(items) > MAX_ROWS // 4:
+        out.append(f"  ...[{len(items) - MAX_ROWS // 4} more; the run's export has them all]")
+    return out

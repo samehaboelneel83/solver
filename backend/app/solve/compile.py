@@ -351,6 +351,8 @@ class Compiled:
     # The predictions the model optimizes over (Epic ML, `app.solve.predict`):
     # each a trained model's inputs and the leaf-binary form standing for it.
     predictions: list[Any] = field(default_factory=list)
+    #: Place rules (plan phase 1C): items on a drawing's free area, solved by `app.solve.placement`.
+    placements: list[Any] = field(default_factory=list)
 
     @property
     def is_integral(self) -> bool:
@@ -490,6 +492,7 @@ class _Compiler:
         self.connectivity: list[str] = []
         #: The ids of `route` rules (`app.solve.route`).
         self.routes: list[str] = []
+        self.placements: list[Any] = []
 
     # -- setup ------------------------------------------------------------
 
@@ -527,6 +530,7 @@ class _Compiler:
             symmetry=self._symmetry(),
             connectivity=self.connectivity,
             routes=self.routes,
+            placements=self.placements,
         )
 
     def _check_edges_were_frozen(self) -> None:
@@ -654,6 +658,11 @@ class _Compiler:
             from app.solve.route import expand as expand_route
 
             expand_route(self, spec)
+            return
+        if "place" in spec:
+            from app.solve.place_rule import expand as expand_place
+
+            expand_place(self, spec)
             return
         if "left" not in spec or "right" not in spec:
             # A model version published before the IR contract existed: its
@@ -929,6 +938,17 @@ class _Compiler:
             {"constraint_id": constraint_id, "kind": kind, "index": dict(index)}
         )
 
+    def _filtered(self, set_name: str, fixed: list[dict[str, Any]]) -> tuple[list[dict], dict[Any, int]]:
+        """A set's rows passing filters that do not depend on the scope, with each kept row's position by id --
+        once per set and filter for the whole compile, not once per rule instance."""
+        cache = self.__dict__.setdefault("_filtered_cache", {})
+        key = (set_name, json.dumps(fixed, sort_keys=True, default=str))
+        if key not in cache:
+            rows = [r for r in self.sets.get(set_name, []) if _passes(r, fixed)] if fixed else \
+                list(self.sets.get(set_name, []))
+            cache[key] = (rows, {r["id"]: k for k, r in enumerate(rows)})
+        return cache[key]
+
     def _bindings(
         self,
         bindings: list[dict[str, Any]],
@@ -956,7 +976,7 @@ class _Compiler:
             # So does one comparing the row with another bound item ("a != b", benchmark October 2026).
             fixed = [f for f in where if not isinstance(f.get("value"), dict) and "index" not in f]
             varying = [f for f in where if isinstance(f.get("value"), dict) or "index" in f]
-            rows = [r for r in self.sets.get(set_name, []) if _passes(r, fixed)]
+            rows, position = self._filtered(set_name, fixed)
 
             def kept(env, rows=rows, varying=varying):
                 return [r for r in rows if all(self._holds(r, f, env) for f in varying)] if varying else rows
@@ -978,11 +998,14 @@ class _Compiler:
                 anchor = env[via[anchor_end]][1]["id"]
                 reachable = self._reachable(via, anchor_end, anchor)
                 if "as" not in via:
-                    grown.extend(
-                        dict(env, **{binding["index"]: (set_name, row)})
-                        for row in kept(env)
-                        if row["id"] in reachable
-                    )
+                    # Only the rows the walk reaches, in the set's order: a lookup per reached id, not a scan of
+                    # the whole set per anchor (the camp test, October 2026: 54,468 candidates over 7,670 cells
+                    # compiled for hours, cells x candidates).
+                    hit = sorted(position[i] for i in reachable if i in position)
+                    reached = [rows[k] for k in hit]
+                    if varying:
+                        reached = [r for r in reached if all(self._holds(r, f, env) for f in varying)]
+                    grown.extend(dict(env, **{binding["index"]: (set_name, row)}) for row in reached)
                     continue
                 # The walk names its edge (queue R19): each landing carries the
                 # edges it took, which an `attr of` the edge reads.

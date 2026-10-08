@@ -122,3 +122,54 @@ validation and load answer 409 with the reason.
 The next run's `snapshot_dataset()` freezes the loaded records like any other;
 `import_load` says which extraction and mapping they came from. In the UI:
 Domain → Data → Sources & imports → Extractions → Import….
+
+## Failure classes (October 2026)
+
+A failed job records one safe class in `error_code`, never driver text: `authentication_failed`, `tls_failed`,
+`source_unreachable`, `network_not_allowed`, `source_missing`, `not_permitted`, `trust_unavailable`,
+`credential_unreadable`, `deadline_exceeded`, `limit_exceeded`, `format_invalid` (web sources), `worker_lost`, or
+`extraction_failed` when nothing more specific is known. The Sources page explains each.
+
+## Web sources (HTTPS)
+
+`source` may instead be `{"kind": "http", "url": "https://…", "format": "json" | "csv" | "xlsx", "columns": [...],
+"auth": "none" | "bearer" | "basic", "username"?, "sheet"?, "records_at"?}`: a REST endpoint's JSON list (at the
+dotted path `records_at`, e.g. `data.items`), or a CSV or Excel file served over HTTPS. The same policy applies as
+for a database: the host must resolve inside `OAAS_INTEGRATION_NETWORKS`, TLS is verified (against
+`OAAS_INTEGRATION_CA` when set), redirects are not followed, the answer is capped at 20 MB. A token or password is
+encrypted like a database password; `auth: "none"` needs no `password`. A database view is read like a table; raw
+SQL is still not accepted -- define a view for a query.
+
+## Database engines (plan of 8 October 2026, phase 4A)
+
+A database source names its `engine`: `postgres` (default), `mysql` (MySQL and MariaDB), `sqlserver` or `oracle`;
+`port` defaults to the engine's usual one (5432, 3306, 1433, 1521). For Oracle, `database` is the service name and
+`schema` the owner; for MySQL, `schema` is the database the table is in. The drivers need no system libraries:
+PyMySQL, pymssql (FreeTDS inside its wheel) and python-oracledb in thin mode (no Oracle client).
+
+Every engine keeps the PostgreSQL contract: the host must resolve inside `OAAS_INTEGRATION_NETWORKS` before any
+credential is used; TLS is required and verified against `OAAS_INTEGRATION_CA` by host name; only
+`SELECT <columns> FROM <schema>.<table>` is sent, with quoted identifiers; a statement timeout and the worker's
+deadline bound it; failures become the same classes. MySQL is reached on the checked address. SQL Server and Oracle
+drivers open their own connection by host name; TLS ties the answer to the certificate for that name. A read-only
+transaction is used where the engine has one (MySQL, Oracle); on SQL Server, give the login read permission only
+(`db_datareader`, or SELECT on the tables).
+
+## The Assistant, bindings and refresh (migrations 0114, 0115)
+
+- `describe_workspace` lists `data_sources` (to `integration.run`) and `files` kept in the workspace.
+- `use_source` attaches a source's latest (or a fresh) extraction, or a kept file, as a sheet; a plan loads it with
+  `*_from_file`.
+- A build records a `source_binding` for every `*_from_file` entry that read a source or an attached file: the
+  connection or the workspace file (kept by version in `workspace_file`), the mapping, and the extraction or version
+  used.
+- `GET /api/v1/domains/{id}/source-bindings`, `GET|POST /api/v1/domains/{id}/files`,
+  `GET /api/v1/domains/{id}/files/{name}?version=`.
+- `POST /api/v1/domains/{id}/sources/refresh` `{"jobs"?, "files"?, "connections"?, "apply": false,
+  "remove_missing": true}` compares the newest (or named) extraction / file version with what the domain holds:
+  records added, fields changed (before -> after), records gone, links and values added / changed / gone. With
+  `"apply": true` (needs `domain.edit`) it writes all of it in one transaction; records a source no longer has are
+  set inactive, not deleted. The Assistant's `refresh_sources` reports first, asks, and applies exactly what it
+  reported; the Sources page has the same ("Check for changes", "Apply these changes", "Add a new version").
+- Only data loaded from a source is refreshed: a number typed into a plan is not. The Assistant is told to take
+  every number a source holds from the source.

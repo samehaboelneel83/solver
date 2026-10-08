@@ -35,3 +35,8 @@ casadi==3.8.1
 scikit-learn==1.5.2
 # The run report as a PDF file (export?format=pdf); draws text with Pango (the Dockerfile installs it).
 weasyprint==63.1
+# Database sources besides PostgreSQL (app/integrations/databases.py), all without system libraries:
+# MySQL / MariaDB (pure Python), SQL Server (FreeTDS inside the wheel), Oracle (thin mode, no client).
+PyMySQL==1.2.3
+pymssql==2.4.3
+oracledb==26.0.1

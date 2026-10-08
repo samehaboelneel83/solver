@@ -644,7 +644,7 @@ def test_read_result_names_the_cells_behind_each_goal(tenants, db):
         if work_once(db) is None:
             break
     text = client.get(f"/api/v1/agent/result/{run['id']}", headers=tenants["b"]).json()["text"]
-    line = next(x for x in text.splitlines() if x.startswith("o_requests_broken comes from: "))
+    line = next(x for x in text.splitlines() if x.startswith("o_requests_broken comes from"))
     assert line.count("work[") == 2 and line.count(", Fri, ") == 2, line
 
 

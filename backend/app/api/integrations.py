@@ -1,5 +1,6 @@
 """Domain-owned connections. No response exposes ciphertext or plaintext secrets."""
 import json
+from typing import Literal, Union
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from sqlalchemy import text
@@ -15,9 +16,12 @@ router = APIRouter(prefix="/api/v1", tags=["integrations"])
 
 
 class SourceBody(BaseModel):
+    """A table or view in a database (app/integrations/postgres.py, databases.py). For Oracle, `database` is the
+    service name and `schema` the owner; for MySQL / MariaDB, `schema` is the database the table is in."""
     model_config = ConfigDict(extra="forbid")
+    engine: Literal["postgres", "mysql", "sqlserver", "oracle"] = "postgres"
     host: str = Field(min_length=1, max_length=253)
-    port: int = Field(default=5432, ge=1, le=65535)
+    port: int | None = Field(default=None, ge=1, le=65535, description="default: the engine's usual port")
     database: str = Field(min_length=1, max_length=128)
     username: str = Field(min_length=1, max_length=128)
     schema_name: str = Field(alias="schema", min_length=1, max_length=128)
@@ -25,12 +29,30 @@ class SourceBody(BaseModel):
     columns: list[str] = Field(min_length=1, max_length=200)
 
 
+class HttpSourceBody(BaseModel):
+    """A REST endpoint's JSON list, or a CSV / Excel file, read over HTTPS (app/integrations/http_source.py)."""
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["http"]
+    url: str = Field(min_length=9, max_length=2000, pattern=r"^https://")
+    format: Literal["json", "csv", "xlsx"]
+    columns: list[str] = Field(min_length=1, max_length=200)
+    auth: Literal["none", "bearer", "basic"] = "none"
+    username: str = Field(default="", max_length=128)
+    sheet: str = Field(default="", max_length=128)
+    records_at: str = Field(default="", max_length=200, description='dotted path to the list in a JSON answer, e.g. "data.items"')
+
+
 class ConnectionBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     domain_id: int = Field(gt=0)
     name: str = Field(min_length=1, max_length=200)
-    source: SourceBody
-    password: SecretStr
+    source: Union[HttpSourceBody, SourceBody]
+    #: The database password, or the web source's token or password; none for a web source without a login.
+    password: SecretStr | None = None
+
+
+def _needs_secret(source) -> bool:
+    return not (isinstance(source, HttpSourceBody) and source.auth == "none")
 
 
 class CredentialBody(BaseModel):
@@ -67,22 +89,29 @@ def list_connections(domain_id: int = Query(gt=0), limit: int = Query(50, ge=1, 
 
 @router.post("/connections", status_code=201)
 def create_connection(body: ConnectionBody, db: Session = Depends(get_db), user=Depends(requires("integration.manage"))):
-    password = _password(body.password)
+    if _needs_secret(body.source) and body.password is None:
+        raise HTTPException(422, "A credential of 1–4096 characters is required")
+    password = _password(body.password) if _needs_secret(body.source) else None
     domain = db.execute(text("SELECT id FROM domain WHERE id=:id AND organization_id=:o"), {"id": body.domain_id, "o": user.organization_id}).scalar_one_or_none()
     if domain is None:
         raise HTTPException(404, "Domain not found")
     config = body.source.model_dump(by_alias=True)
+    if "engine" in config and config.get("port") is None:
+        from app.integrations.databases import DEFAULT_PORTS
+
+        config["port"] = DEFAULT_PORTS[config["engine"]]
     try:
         source_for({"config": config, "organization_id": user.organization_id, "id": 1})
     except ValueError:
         raise HTTPException(503, "Integration policy is unavailable or the source configuration is invalid") from None
     identity = db.execute(text("INSERT INTO integration_connection(domain_id,organization_id,name,config) VALUES (:d,:o,:n,CAST(:c AS jsonb)) RETURNING id"), {"d": body.domain_id, "o": user.organization_id, "n": body.name, "c": json.dumps(config)}).scalar_one()
-    try:
-        envelope = secrets.encrypt(password, user.organization_id, identity)
-    except secrets.SecretUnavailable:
-        db.rollback()
-        raise HTTPException(503, "Integration keyring is unavailable") from None
-    db.execute(text("UPDATE integration_connection SET credential=CAST(:s AS jsonb) WHERE id=:id"), {"s": json.dumps(envelope), "id": identity})
+    if password is not None:
+        try:
+            envelope = secrets.encrypt(password, user.organization_id, identity)
+        except secrets.SecretUnavailable:
+            db.rollback()
+            raise HTTPException(503, "Integration keyring is unavailable") from None
+        db.execute(text("UPDATE integration_connection SET credential=CAST(:s AS jsonb) WHERE id=:id"), {"s": json.dumps(envelope), "id": identity})
     _audit(db, user, "integration.connection.create", identity)
     db.commit()
     return {"id": identity, "domain_id": body.domain_id, "name": body.name, "enabled": True}
