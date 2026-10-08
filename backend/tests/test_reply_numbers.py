@@ -63,3 +63,34 @@ def test_saying_it_is_unproven_is_fine(answer):
 
     assert reply_contradictions(answer, FEASIBLE) == []
     assert reply_contradictions("The optimal plan.", ["RUN 9: optimal; goal (maximize) = 7"]) == []
+
+
+SENSITIVITY = ("SENSITIVITY (from the solver; exact only inside each range -- for a bigger change call what_if):\n"
+               "- c_capacity (<= limit 100): each +1 on the limit changes the goal by -50 (goal falls); holds while "
+               "the limit stays from 90 to 110.")
+
+
+def test_a_what_if_amount_from_a_rate_inside_its_range_passes():
+    from app.agent.core import unsupported_what_ifs
+
+    # +5 on a limit of 100 that holds to 110: 5 x 50 = 250 is what the rate says.
+    assert unsupported_what_ifs("Cost would fall by 250 if the capacity limit rose to 105.", [SENSITIVITY], []) == []
+
+
+def test_a_rate_taken_past_its_range_is_sent_back():
+    from app.agent.core import unsupported_what_ifs
+
+    # +20 on a limit that holds only to 110: 1,000 is the rate extrapolated, not an answer (the blend test).
+    assert unsupported_what_ifs("If the capacity limit rose by 20, cost would fall by 1,000.", [SENSITIVITY], []) == ["1,000"]
+
+
+def test_a_what_if_runs_difference_passes_and_plain_sentences_are_not_checked():
+    from app.agent.core import unsupported_what_ifs
+
+    run = ("WHAT-IF 'more capacity' (scenario 9, from scenario 8; changes: limit 150)\n"
+           "BASE goal 12,800.00 (run 3) -> WHAT-IF goal 12,300.00 (run 4): -500.00")
+    assert unsupported_what_ifs("You would save 500 if capacity were 150 (12,300 instead of 12,800).", [run], []) == []
+    # Not a what-if: the number check covers it, this one does not.
+    assert unsupported_what_ifs("The plan costs 4,321 in all.", [SENSITIVITY], []) == []
+    # A what-if amount with nothing behind it.
+    assert unsupported_what_ifs("With an extra truck you could save 7,400.", [SENSITIVITY], []) == ["7,400"]

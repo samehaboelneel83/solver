@@ -1612,7 +1612,9 @@ How to work:
    kinds of record, records or relationships for it yourself; the Describe a problem tab does all of that.
 1. Use only tools listed in the current tool schema; never call an unavailable tool. Make one API call at a time.
    For writes, search_endpoints -> describe_endpoint -> call_api. Never guess a request body; describe it first.
-2. Look things up before changing them; use ids you got from the API, never invented ones.
+2. Look things up before changing them; use ids you got from the API, never invented ones. A scenario, run or
+   problem the person names by its number may be in another workspace than the selected one: use it by that id
+   (GET /api/v1/scenarios/{{id}}, read_result, what_if) -- never say it does not exist without that lookup.
    describe_workspace gives a domain's whole contents (kinds of record, fields, relationships, data values,
    map data, problems, data sources) in one call: start there. A data source (a database table) is read with
    use_source, which attaches it as a sheet for read_file / query_file. When the person says a source's data
@@ -1981,6 +1983,62 @@ def unsupported_numbers(answer: str, results: list[str], person: list[str]) -> l
                 break
         if not ok:
             flagged.append(raw + ("%" if percent else (" " + unit if unit else "")))
+    return list(dict.fromkeys(flagged))
+
+
+_COUNTERFACTUAL = re.compile(r"\b(?:would|could)\b", re.I)
+_HYPOTHESIS = re.compile(r"\b(?:if|by (?:adding|raising|increasing|reducing|lowering|cutting|removing)|with (?:an? )?"
+                         r"(?:extra|more|additional|another))\b[^,;:]*?(?=,|;|:|\bthen\b|\bwould\b|\bcould\b|$)", re.I)
+_SENS_LIMIT = re.compile(r"limit (?P<now>-?[\d,.]+)[^:\n]*: each \+1 on the limit changes the goal by (?P<rate>[-+]?[\d,.]+(?:e[-+]?\d+)?)"
+                         r"[^\n]*?holds while the limit stays from (?P<lo>-?[\d,.]+|-∞) to (?P<hi>-?[\d,.]+|∞)")
+_SENS_PARAM = re.compile(r"per \+1 on \S+ \(now (?P<now>-?[\d,.]+)\): limit \+[\d,.]+, goal (?P<rate>[-+]?[\d,.]+(?:e[-+]?\d+)?); "
+                         r"holds for \S+ from (?P<lo>-?[\d,.]+|-∞) to (?P<hi>-?[\d,.]+|∞)")
+
+
+def _ranged_rates(texts: list[str]) -> list[tuple[float, float, float, float]]:
+    """The SENSITIVITY rates read_result gave: (goal change per +1, value now, lowest, highest it holds for)."""
+    def num(raw: str) -> float:
+        return {"-∞": float("-inf"), "∞": float("inf")}.get(raw) or float(raw.replace(",", ""))
+
+    out = []
+    for text in texts:
+        for pattern in (_SENS_LIMIT, _SENS_PARAM):
+            for m in pattern.finditer(text):
+                try:
+                    out.append((num(m["rate"]), num(m["now"]), num(m["lo"]), num(m["hi"])))
+                except ValueError:
+                    continue
+    return out
+
+
+def unsupported_what_ifs(answer: str, tool_texts: list[str], person: list[str]) -> list[str]:
+    """Amounts an answer says would follow from a change ("it would save 5,000 if capacity rose by 10") that no
+    what-if run and no sensitivity rate inside its range gives.
+
+    Plan of 8 October 2026, honest answers: "would save X if" needs a what-if, or a shadow price within its range.
+    In a sentence that says would/could under a condition, the condition's own numbers are the hypothesis and
+    are not checked; every other amount must be a number the tools or the person gave, one step of arithmetic on
+    a what-if run's numbers (its base and changed goals), or a SENSITIVITY rate times a change that keeps inside
+    the range it holds for. A rate taken past its range is exactly what is sent back (the blend test: -1.018 per
+    kg-% quoted for 7 % -> 8 %, past the 7.142 % it holds to)."""
+    whatifs = [t for t in tool_texts if "WHAT-IF '" in t or "BASE goal " in t]
+    rates = _ranged_rates(tool_texts)
+    flagged: list[str] = []
+    for sentence in re.split(r"(?<=[.!?])\s+|\n+", answer):
+        if not _COUNTERFACTUAL.search(sentence) or not _HYPOTHESIS.search(sentence):
+            continue
+        claim = _HYPOTHESIS.sub(lambda m: " " * len(m.group(0)), sentence)
+        for raw in unsupported_numbers(claim, whatifs, tool_texts + person) if (whatifs or tool_texts or person) else []:
+            percent = raw.endswith("%")
+            try:
+                value = abs(float(raw.split()[0].rstrip("%").replace(",", "")))
+            except ValueError:
+                continue
+            inside = not percent and any(
+                rate and ((now + value / abs(rate) <= hi + 1e-9) or (now - value / abs(rate) >= lo - 1e-9))
+                for rate, now, lo, hi in rates)
+            if not inside:
+                flagged.append(raw)
     return list(dict.fromkeys(flagged))
 
 
@@ -3529,6 +3587,23 @@ class Agent:
                                      + ". Write it again taking every number from the result text (or one step of "
                                      "arithmetic on its numbers), and leave out any number you cannot take from it."})
                     yield {"type": "note", "text": "The answer had numbers the results do not give; asking for a corrected one."}
+                    continue
+                what_ifs = reports and unsupported_what_ifs(
+                    content, [str(m.get("content") or "") for m in messages if m.get("role") == "tool"],
+                    [str(m.get("content") or "") for m in messages if m.get("role") == "user"
+                     and not str(m.get("content") or "").startswith(PLATFORM)])
+                if what_ifs and nudge("unsupported_what_ifs", 1):
+                    # "Would save X if ..." needs a what-if run, or a shadow price inside its range (plan of
+                    # 8 October 2026, honest answers).
+                    messages.append({"role": "assistant", "content": "(an answer with what-if amounts no run gives; "
+                                                                     "not shown)"})
+                    messages.append({"role": "user", "content": PLATFORM + "Your answer was NOT shown: it says what "
+                                     "a change would do with these amounts, which no what_if run gives and no "
+                                     "SENSITIVITY rate gives inside the range it holds for: " + ", ".join(what_ifs[:8])
+                                     + ". Call what_if with that change and report its BASE and WHAT-IF lines, or "
+                                     "leave the amount out."})
+                    yield {"type": "note", "text": "The answer said what a change would do without solving it; asking "
+                                                   "for a what-if."}
                     continue
                 if not content.strip():
                     if nudge("empty"):
