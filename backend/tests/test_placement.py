@@ -171,8 +171,9 @@ def test_a_place_plan_builds_runs_and_reports_through_the_platform(tmp_path, ten
     # The run's clock is the wall clock: a run that solved for seconds did not finish the moment it started
     # (live camp test, October 2026: a 118 s run was stored as finishing 1.2 s after it started).
     assert float(row["took"]) >= 0.9 * float(row["wall_time_s"]), dict(row)
-    assert outcome.objective >= 9 and out["upper_bound"]["items"] == 10
-    assert (row["status"] == "optimal") == (outcome.objective == 10)
+    # 32 free cells / (2 cells + a quarter of a 2-cell aisle) = 12: proven best only when the answer reaches it.
+    assert outcome.objective >= 9 and out["upper_bound"]["items"] == 12
+    assert (row["status"] == "optimal") == (outcome.objective == 12)
     result = TestClient(app).get(f"/api/v1/agent/result/{run_id}", headers=tenants["a"]).json()
     assert "LAYOUT" in result["text"] and result["facts"]["goal"] == outcome.objective
     for fmt in ("dxf", "csv", "xlsx"):
@@ -291,3 +292,45 @@ def test_a_room_scanned_from_the_far_side_packs_about_as_well_as_from_the_near_s
     counts = {scan: len(pl._greedy_at(zone, vs, 1, 1, time.monotonic() + 30, None, scan)[0].items)
               for scan in ("rows", "rows-back", "cols", "cols-back")}
     assert counts["rows-back"] >= 0.97 * counts["rows"] and counts["cols-back"] >= 0.97 * counts["cols"], counts
+
+
+def _exact_most(nx, ny, length, width, aisle, side):
+    """The most items a room holds, solved exactly: every fitting position a yes/no, footprints apart, no
+    footprint on a chosen item's aisle."""
+    from ortools.sat.python import cp_model
+
+    zone = np.zeros((nx, ny), dtype=np.int32)
+    vs = pl.variants_cells([(length, width, [0, 90], 1.0)], side, aisle)
+    m = cp_model.CpModel()
+    cover, strip, xs = {}, {}, []
+    for k, v in enumerate(vs):
+        for i, j in zip(*np.nonzero(pl.static_fits(zone, v, aisle))):
+            x = m.NewBoolVar("")
+            xs.append(x)
+            for a in range(i, i + v.w):
+                for b in range(j, j + v.h):
+                    cover.setdefault((a, b), []).append(x)
+            s = v.aisle(aisle)
+            for a in range(i + s[0], i + s[0] + s[2]):
+                for b in range(j + s[1], j + s[1] + s[3]):
+                    strip.setdefault((a, b), []).append(x)
+    for cell, on in cover.items():
+        m.Add(sum(on) <= 1)
+        for y in strip.get(cell, []):
+            for x in on:
+                m.AddImplication(y, x.Not())
+    m.Maximize(sum(xs))
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = 20
+    assert solver.Solve(m) == cp_model.OPTIMAL
+    return int(solver.ObjectiveValue()), vs
+
+
+@pytest.mark.parametrize("room", [(7, 7, 2, 1, 1, "any"), (9, 9, 2, 1, 1, "short"), (8, 6, 3, 1, 1, "any"),
+                                  (7, 6, 3, 1, 2, "long")])
+def test_the_bound_is_never_beaten_by_an_exact_solution(room):
+    """The area bound is a bound: exact optima stay at or under it (half an aisle per item was not -- a 7 x 7
+    room of 2 x 1 items holds 20 and the half-aisle count said 19, so 19 would have been called proven best)."""
+    nx, ny, length, width, aisle, side = room
+    most, vs = _exact_most(nx, ny, length, width, aisle, side)
+    assert pl.area_bound(nx * ny, vs, aisle, side) >= most

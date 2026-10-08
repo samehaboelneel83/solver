@@ -11,7 +11,8 @@ the area is a grid of free cells (any step), and the answer is built and improve
    wholly inside it may move, turn, change aisle side, or be added; everything else stays. Two-dimensional
    no-overlap holds items apart; each item's aisle may touch other aisles but no item. A window's answer
    replaces the old one only when it places more (or more value), so the answer never gets worse.
-3. **A bound.** The free area over the smallest item's area plus half its aisle: no layout can place more.
+3. **A bound.** The free area over the smallest item's area plus a quarter of its aisle: no layout can place
+   more (an aisle cell lies in the aisles of at most four items, one from each direction).
 
 Rules, as for the candidate form (app/agent/layout.py): an item covers whole free cells of one zone; its aisle
 (when asked) is a strip of free cells along one of its allowed sides, covered by no item; aisles may be shared.
@@ -774,14 +775,20 @@ def ruin_recreate(lay: Layout, fits: list[np.ndarray], *, seconds: float, seed: 
 
 
 def area_bound(free_cells: int, vs: list[Variant], n_aisle: int, aisle_side: str) -> int:
-    """No layout places more: the free cells over the smallest item's cells plus half its aisle."""
+    """No layout places more: the free cells over the smallest item's cells plus a quarter of its aisle.
+
+    A quarter, not a half: an aisle cell can lie in the aisles of four items, one from each direction (two
+    items whose aisles both run below them and share a cell would overlap, or cover one another's aisle), and
+    rows that meet at a corner do share that way. With a half, exact solutions beat the "bound": a 7 x 7 room of
+    2 x 1 items with a 1-cell aisle holds 20, and the half-aisle count said 19 (October 2026), so an answer of
+    19 would have been called proven best."""
     smallest = min(vs, key=lambda v: v.w * v.h)
     side = 0
     if aisle_side != "none" and n_aisle:
         long_ = max(smallest.w, smallest.h)
         short = min(smallest.w, smallest.h)
         side = {"long": long_, "short": short, "any": short}[aisle_side]
-    return int(free_cells // (smallest.w * smallest.h + side * n_aisle / 2))
+    return int(free_cells // (smallest.w * smallest.h + side * n_aisle / 4))
 
 
 def solve(compiled: Any, *, time_limit: float, workers: int, should_stop: Callable[[], bool] | None = None,

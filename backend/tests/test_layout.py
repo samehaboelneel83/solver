@@ -32,7 +32,7 @@ def test_a_room_gets_every_position_turn_and_aisle_side(tmp_path):
     rows = (tmp_path / "layout_items.csv").read_text().splitlines()
     assert len(rows) - 1 == out["candidates"] > 0
     assert set(out["spec"]["ir"]["variables"]) == {"place"} and len(out["spec"]["ir"]["constraints"]) == 2
-    assert out["upper_bound"]["items"] == int(8.0 // (0.5 + 0.5 * 0.5 / 2))
+    assert out["upper_bound"]["items"] == int(8.0 // (0.5 + 0.5 * 0.5 / 4))  # a quarter aisle: four may share
 
 
 def test_blocked_areas_are_never_covered(tmp_path):
@@ -64,7 +64,7 @@ def test_the_camp_drawing_in_well_under_a_second(tmp_path):
                       aisle=0.35, aisle_side="short")
     assert out["zones"] == [f"C{n:02d}" for n in range(1, 12)]
     assert out["grid_step_m"] == 0.5 and out["free_area_m2"] == pytest.approx(2071.7, abs=1)
-    assert 20_000 < out["candidates"] < 40_000 and out["upper_bound"]["items"] == 2473
+    assert 20_000 < out["candidates"] < 40_000 and out["upper_bound"]["items"] == 2609
     with pytest.raises(layout.LayoutRefused, match="Coarser exact steps"):
         layout.make([f], str(tmp_path), area_layers=["BOUNDARY"], items=[{"name": "bed", "length": 1.5, "width": 0.5}],
                     aisle=0.35, aisle_side="any", step=0.25)

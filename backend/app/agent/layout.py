@@ -407,8 +407,9 @@ def _make(files: list[dict[str, Any]], folder: str, *, area_layers: list[str], i
     smallest = min(kinds, key=lambda kd: kd["length"] * kd["width"])
     side_len = {"long": smallest["length"], "short": smallest["width"], "any": smallest["width"],
                 "none": 0}[aisle_side]
-    # Each item needs its own area and half an aisle along one side (two rows can share one aisle).
-    per_item = smallest["length"] * smallest["width"] + side_len * aisle / 2
+    # Each item needs its own area and at least a quarter of an aisle along one side: an aisle cell serves at
+    # most four items, one from each direction (placement.area_bound; half an aisle was not a bound).
+    per_item = smallest["length"] * smallest["width"] + side_len * aisle / 4
     bound = int(free_area // per_item)
     spec = _spec(kinds, names, bool(aisle_rows), prefix, access is not None)
     return {
@@ -421,7 +422,7 @@ def _make(files: list[dict[str, Any]], folder: str, *, area_layers: list[str], i
         "candidates_by_kind": {kd["name"]: sum(1 for r in item_rows if r[1] == kd["name"]) for kd in kinds},
         "links": {"occupies": len(occ_rows), "keeps_free": len(aisle_rows)},
         "upper_bound": {"items": bound, "how": f"free area {free_area:,.1f} m2 / ({smallest['length']:g} x "
-                        f"{smallest['width']:g} m + half an aisle of {aisle:g} m along its "
+                        f"{smallest['width']:g} m + a quarter of an aisle of {aisle:g} m along its "
                         f"{'side' if aisle_side != 'none' else 'nothing'}) = {per_item:.4g} m2 each"},
         "largest_item_m": [biggest["length"], biggest["width"]],
         "spec": spec,
@@ -648,7 +649,8 @@ def place(files: list[dict[str, Any]], folder: str, *, area_layers: list[str], i
         "free_area_m2": round(free_area, 1),
         "slots_by_kind": slots,
         "upper_bound": {"items": sum(slots.values()),
-                        "how": "free cells / (the item's cells + half its aisle), per kind"},
+                        "how": "free cells / (the item's cells + a quarter of its aisle, which at most four "
+                               "items share), per kind"},
         "spec": {"seed": seed, "ir": ir},
         "access": ({"layers": list(access_layers or []), "features": len(access_rows),
                     "areas_without_access": without} if access_rows else None),
