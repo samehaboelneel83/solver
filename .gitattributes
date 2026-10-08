@@ -8,3 +8,4 @@ scripts/hooks/* text eol=lf
 
 # Windows batch files need CRLF, or cmd misreads labels and blocks.
 *.cmd text eol=crlf
+*.bat text eol=crlf

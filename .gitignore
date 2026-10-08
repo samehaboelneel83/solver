@@ -42,3 +42,20 @@ agent/.env
 agent/logs/
 .agent_tmp/
 .vitest-cache/
+
+# Local scratch: rebuild watcher state, logs, test-driver output, editor and Vite leftovers
+/.claude/
+/FETCH_HEAD
+/git
+/*.log
+/rebuild.status
+/rebuild.request
+/assistant-browser-test-*.jpg
+/general_assistant_kit.zip
+frontend/vite.config.ts.timestamp-*.mjs
+samples/alex-flood-usertest/_transfer/
+agent-test/old/
+agent-test/*.txt
+agent-test/*.log
+agent-test/turn.json
+agent-test/*.dxf
