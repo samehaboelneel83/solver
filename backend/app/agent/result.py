@@ -33,6 +33,35 @@ def _numeric_fields(rows: list[dict[str, Any]]) -> list[str]:
     return seen[:MAX_FIELDS]
 
 
+def exports(rec: dict[str, Any], data: dict[str, Any] | None = None,
+            ir: dict[str, Any] | None = None) -> tuple[list[dict[str, str]], bool, bool]:
+    """The files a run's answer downloads as, each with what it holds in the platform's words; whether the
+    answer reaches a map; whether its records are placed by metres. One source for read_result and the facts
+    card, so the model and the person are told the same."""
+    data = rec.get("data") or {} if data is None else data
+    ir = rec.get("ir") or {} if ir is None else ir
+    run_id = rec.get("id")
+    shaped = bool(data.get("sets") and any("geometry" in (rows[0] if rows and isinstance(rows[0], dict) else {})
+                                           for rows in (data.get("sets") or {}).values() if isinstance(rows, list)))
+    by_metres = any(k in json.dumps(ir)[:20000] for k in ('"x_m"', '"occupies"', '"place"'))
+    # Records placed by metres reach a map only through a drawing placed in the workspace's map data (the camp
+    # retest, October 2026: a new workspace without it got a GeoJSON link that came back empty).
+    mapped = shaped or (by_metres and rec.get("map_placed", True))
+    base = f"/api/v1/runs/{run_id}/export?format="
+    files = [{"name": "spreadsheet", "format": "xlsx", "url": base + "xlsx", "holds": "each decision's values by record"},
+             {"name": "CSV", "format": "csv", "url": base + "csv", "holds": "each decision's values by record"},
+             {"name": "PDF report", "format": "pdf", "url": base + "pdf",
+              "holds": "the goal, the rules" + (", a map of the records" if mapped else "") + " and the decision values"}]
+    if mapped:
+        files.append({"name": "MAP: GeoJSON", "format": "geojson", "url": base + "geojson",
+                      "holds": "one layer per decision, holding the shapes of its records; nothing else of the drawing"})
+    if shaped or by_metres:
+        files.append({"name": "CAD drawing", "format": "dxf", "url": base + "dxf",
+                      "holds": "the chosen items on <decision>-CHOSEN layers, over the original drawing on grey MAP- "
+                               "layers when the workspace holds it"})
+    return files, mapped, by_metres
+
+
 def summary(rec: dict[str, Any]) -> str:
     from app.solve import whatif
 
@@ -81,23 +110,11 @@ def summary(rec: dict[str, Any]) -> str:
         out.append("UNCERTAINTY NOT SOLVED: " + skipped + ". Tell the user this answer ignores the uncertainty, and offer to plan for it: what_if on this "
                    "scenario with futures (e.g. 50), which solves it over that many sampled futures.")
     run_id = rec.get("id")
-    shaped = bool(data.get("sets") and any("geometry" in (rows[0] if rows and isinstance(rows[0], dict) else {})
-                                           for rows in (data.get("sets") or {}).values() if isinstance(rows, list)))
-    by_metres = any(k in json.dumps(ir)[:20000] for k in ('"x_m"', '"occupies"'))
-    # Records placed by metres reach a map only through a drawing placed in the workspace's map data (the camp
-    # retest, October 2026: a new workspace without it got a GeoJSON link that came back empty).
-    mapped = shaped or (by_metres and rec.get("map_placed", True))
-    # What each file holds, said by the platform: the live camp test (October 2026) had the Assistant say the
-    # GeoJSON showed "the aisles, and the obstacles", which it does not hold.
-    out.append(f"EXPORTS (give the user the ones they asked for, as links, and say what a file holds only in these "
-               f"words): spreadsheet /api/v1/runs/{run_id}/export?format=xlsx and CSV ?format=csv (each decision's "
-               f"values by record), PDF report ?format=pdf (the goal, the rules"
-               + (", a map of the records" if mapped else "") + " and the decision values)"
-               + (f", MAP: GeoJSON /api/v1/runs/{run_id}/export?format=geojson (one layer per decision, holding the "
-                  f"shapes of its records; nothing else of the drawing)" if mapped else "")
-               + (f", CAD drawing /api/v1/runs/{run_id}/export?format=dxf (the chosen items on <decision>-CHOSEN "
-                  f"layers, over the original drawing on grey MAP- layers when the workspace holds it)"
-                  if shaped or by_metres else "") + ".")
+    files, mapped, by_metres = exports(rec, data, ir)
+    # What each file holds, said by the platform (the same words the facts card shows the person): the live camp
+    # test (October 2026) had the Assistant say the GeoJSON showed "the aisles, and the obstacles".
+    out.append("EXPORTS (give the user the ones they asked for, as links, and say what a file holds only in these "
+               "words): " + ", ".join(f"{f['name']} {f['url']} ({f['holds']})" for f in files) + ".")
     if mapped and rec.get("scenario_id") is not None:
         # The answer is on the app's own map: what to give a person who asks to see it (the live camp test: asked
         # for "a map of the beds", the answer only pointed at files to download).
@@ -794,6 +811,13 @@ def facts(rec: dict[str, Any]) -> dict[str, Any]:
             rules.append({"id": r["constraint_id"], "state": "broken" if broken else "tight",
                           "short_by": plain(r.get("total_violation")) if broken else None, "hard": bool(r.get("hard"))})
     out["rules"] = rules[:FACT_RULES]
+    if goal is not None or rec.get("assignments"):
+        # The files and what each holds, drawn by the platform: what the person reads about a file is never the
+        # model's account of it (live camp test, October 2026).
+        files, mapped, _ = exports(rec, data, ir)
+        out["files"] = [{"name": f["name"].replace("MAP: ", ""), "url": f["url"], "holds": f["holds"]} for f in files]
+        if mapped and rec.get("scenario_id") is not None:
+            out["map"] = f"/runs?scenario={rec['scenario_id']}&run={rec.get('id')}"
     return out
 
 

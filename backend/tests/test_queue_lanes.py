@@ -79,3 +79,21 @@ def test_a_long_run_that_waited_too_long_is_not_passed_by_other_long_runs(db, em
     assert "waiting behind run" in _reason(db, small_long)  # the long one does not jump the queue
     assert "host workers exhausted" in _reason(db, big)
     assert claim_next(db) is None
+
+
+def test_the_queue_lists_waiting_and_solving_runs_with_lane_and_reason(db, empty_queue):  # noqa: F811
+    """GET /api/v1/workers/queue (handover of 8 October 2026: a queue panel): each waiting or solving run with
+    its problem, lane, held workers and why it waits."""
+    from app.api.preflight import queue
+
+    scenario = _scenario(db, "queue panel")
+    short = _queue(db, scenario, 10)
+    long_ = _queue(db, scenario, 600)
+    db.execute(text("UPDATE run SET params = params || jsonb_build_object('queue_reason', 'waiting for room')"
+                    " WHERE id = :r"), {"r": long_})
+    db.commit()
+    body = queue(db=db, _=None)
+    mine = {r["run_id"]: r for r in body["runs"]}
+    assert mine[short]["lane"] == "short" and mine[long_]["lane"] == "long"
+    assert mine[long_]["waits_because"] == "waiting for room" and mine[short]["status"] == "queued"
+    assert mine[short]["problem"] and mine[short]["waited_s"] >= 0 and body["capacity"]["workers"] >= 1

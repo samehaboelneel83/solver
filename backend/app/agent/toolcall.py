@@ -77,6 +77,27 @@ def strict_loads(s, notes=None):
         raise json.JSONDecodeError(f"{e.msg}; near: ...{near}...", e.doc, e.pos) from None
 
 
+_BARE_NAME = re.compile(r'^(\s*\{\s*"name"\s*:\s*)([A-Za-z_][\w\-.]*)(\s*[,}])')
+
+
+def _extra_closers(s):
+    """The call's own JSON when all that follows a whole object is stray closing brackets; else None."""
+    text = s.strip()
+    try:
+        _, end = json.JSONDecoder().raw_decode(text)
+    except ValueError:
+        return None
+    rest = text[end:]
+    return text[:end] if rest and set(rest) <= set("}] \n\t\r") else None
+
+
+def _loads_or_none(s, notes):
+    try:
+        return strict_loads(s, list(notes)) is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _repair(s):
     """Light repair for truncated or sloppy JSON: drop trailing commas, close open brackets."""
     s = re.sub(r",\s*([}\]])", r"\1", s.strip())
@@ -211,6 +232,16 @@ def extract_tool_calls(text, known_tools=None, allow_repair=True):
                     obj = strict_loads(fixed, joined)
                     errors.append("note: your call's JSON had a slip (a rule's \"right\" key left out, or the "
                                   "closing brackets out of order) and was put right; write it correctly next time")
+                elif _extra_closers(raw) is not None:
+                    # One closing bracket too many after a whole call (live what-if test, October 2026: the
+                    # what_if call was lost to "Extra data"): the call is the object before them.
+                    obj = strict_loads(_extra_closers(raw), joined)
+                    errors.append("note: the call had closing brackets left over after it; they were dropped")
+                elif _BARE_NAME.search(raw) and _loads_or_none(_BARE_NAME.sub(r'\1"\2"\3', raw, count=1), joined):
+                    # The tool's name written without quotes ({"name": describe_workspace, ...}): the live what-if
+                    # test of October 2026 lost the call to it, and the model then answered without looking.
+                    obj = strict_loads(_BARE_NAME.sub(r'\1"\2"\3', raw, count=1), joined)
+                    errors.append("note: the tool's name was written without quotes and was put right; quote it next time")
                 else:
                     if not allow_repair:
                         raise

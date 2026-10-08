@@ -11,8 +11,8 @@ the area is a grid of free cells (any step), and the answer is built and improve
    wholly inside it may move, turn, change aisle side, or be added; everything else stays. Two-dimensional
    no-overlap holds items apart; each item's aisle may touch other aisles but no item. A window's answer
    replaces the old one only when it places more (or more value), so the answer never gets worse.
-3. **A bound.** The free area over the smallest item's area plus a quarter of its aisle: no layout can place
-   more (an aisle cell lies in the aisles of at most four items, one from each direction).
+3. **A bound.** The free area over the least an item can take: its area plus the share of its aisle no other item
+   can use (two items share the middle of an aisle, at most four its ends; `aisle_share`).
 
 Rules, as for the candidate form (app/agent/layout.py): an item covers whole free cells of one zone; its aisle
 (when asked) is a strip of free cells along one of its allowed sides, covered by no item; aisles may be shared.
@@ -774,21 +774,31 @@ def ruin_recreate(lay: Layout, fits: list[np.ndarray], *, seconds: float, seed: 
     return {"moves": moves, "kept": kept, "better": better, "seconds": round(time.monotonic() - began, 2)}
 
 
-def area_bound(free_cells: int, vs: list[Variant], n_aisle: int, aisle_side: str) -> int:
-    """No layout places more: the free cells over the smallest item's cells plus a quarter of its aisle.
+def aisle_share(along: int, depth: int) -> float:
+    """The least share of the free cells one item's aisle (a strip `along` cells by `depth`) can count for.
 
-    A quarter, not a half: an aisle cell can lie in the aisles of four items, one from each direction (two
-    items whose aisles both run below them and share a cell would overlap, or cover one another's aisle), and
-    rows that meet at a corner do share that way. With a half, exact solutions beat the "bound": a 7 x 7 room of
-    2 x 1 items with a 1-cell aisle holds 20, and the half-aisle count said 19 (October 2026), so an answer of
-    19 would have been called proven best."""
-    smallest = min(vs, key=lambda v: v.w * v.h)
-    side = 0
-    if aisle_side != "none" and n_aisle:
-        long_ = max(smallest.w, smallest.h)
-        short = min(smallest.w, smallest.h)
-        side = {"long": long_, "short": short, "any": short}[aisle_side]
-    return int(free_cells // (smallest.w * smallest.h + side * n_aisle / 4))
+    Each cell of the strip lies in at most m(t) items' aisles, t its place along the strip: its own, the one
+    facing it from the other side, and a crosswise one only within `depth` of either end -- a crosswise item
+    farther in would have its footprint on this aisle. So m is 2 in the middle and at most 4 near the ends, and
+    the strip counts for sum(depth / m(t)) cells. (A quarter for every cell holds too, but is weaker: the camp's
+    bound 2,592 against 2,564; exact optima of 1,344 small rooms never beat this one, October 2026.)"""
+    return sum(depth / (2 + (t < depth) + (t > along - 1 - depth)) for t in range(along))
+
+
+def area_bound(free_cells: int, vs: list[Variant], n_aisle: int, aisle_side: str) -> int:
+    """No layout places more: the free cells over the least an item can take -- its cells plus the share of its
+    aisle no other item can use too (`aisle_share`).
+
+    Not half an aisle per item, as before October 2026: an aisle cell near a strip's end can serve up to four
+    items, and exact solutions beat the half-aisle count (a 7 x 7 room of 2 x 1 items with a 1-cell aisle holds
+    20; the half-aisle count said 19, so an answer of 19 would have been called proven best)."""
+    def least(v: Variant) -> float:
+        if aisle_side == "none" or not n_aisle or v.aisle(n_aisle) is None:
+            return float(v.w * v.h)
+        along = v.w if v.side in ("bottom", "top") else v.h
+        return v.w * v.h + aisle_share(along, n_aisle)
+
+    return int(free_cells // min(least(v) for v in vs))
 
 
 def solve(compiled: Any, *, time_limit: float, workers: int, should_stop: Callable[[], bool] | None = None,

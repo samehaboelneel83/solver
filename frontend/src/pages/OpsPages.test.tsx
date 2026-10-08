@@ -39,6 +39,27 @@ describe("OpsQueue", () => {
     expect(screen.getByText("2")).toBeInTheDocument();
     expect(screen.getByText("30 s")).toBeInTheDocument();
   });
+
+  it("lists each run in the queue with its lane, what it holds and why it waits", async () => {
+    mockText.mockResolvedValue("");
+    mockFetch.mockImplementation(async (path: string) => path === "/api/v1/workers/queue" ? {
+      capacity: { workers: 16, memory_mb: 20480, short_share: 0.25, short_seconds: 60 },
+      runs: [
+        { run_id: 151, status: "running", purpose: "plan", scenario_id: 56, scenario: "Base", problem_id: 9,
+          problem: "Camp beds", domain_id: 3, time_limit_s: 120, lane: "long", workers: 6, memory_mb: 4096,
+          waited_s: 2, running_s: 45, waits_because: null },
+        { run_id: 152, status: "queued", purpose: "plan", scenario_id: 57, scenario: "Base", problem_id: 10,
+          problem: "Rota", domain_id: 3, time_limit_s: 600, lane: "long", workers: null, memory_mb: null,
+          waited_s: 900, running_s: null, waits_because: "waiting behind run 151, which has waited longest for room" },
+      ],
+    } : []);
+    wrap(<OpsQueue />);
+    expect(await screen.findByText(/Camp beds · Base/)).toBeInTheDocument();
+    expect(screen.getByText(/solving for 45 s/)).toBeInTheDocument();
+    expect(screen.getByText(/waiting behind run 151/)).toBeInTheDocument();
+    expect(screen.getByText(/6 workers, 4 GB/)).toBeInTheDocument();
+    expect(screen.getByText(/kept for short/)).toBeInTheDocument();
+  });
 });
 
 describe("OpsAudit", () => {

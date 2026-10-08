@@ -81,6 +81,24 @@ describe("sources and extractions (Epic UX, U-4)", () => {
     expect(body.source).toEqual({ engine: "mysql", host: "10.0.0.6", port: 3306, database: "planning", username: "reader", schema: "planning", table: "products", columns: ["id", "profit"] });
   });
 
+  it("adds a REST source read in pages, with where its next address is", async () => {
+    mount("/domains/7/data/sources");
+    fireEvent.click(await screen.findByRole("button", { name: "Add a source" }));
+    const form = screen.getByRole("form", { name: "Add a source" });
+    fireEvent.click(within(form).getByLabelText(/Web address/));
+    fireEvent.change(within(form).getByLabelText("Pages"), { target: { value: "next_link" } });
+    for (const [label, value] of [["Name", "Projects"], ["Address (https://…)", "https://data.internal/api/projects"],
+      [/Where the list is/, "items"], [/Where the next address is/, "links.next"],
+      ["Columns to extract, separated by commas", "project, cost"]] as [string | RegExp, string][]) {
+      fireEvent.change(within(form).getByLabelText(label), { target: { value } });
+    }
+    fireEvent.click(within(form).getByRole("button", { name: "Save source" }));
+    await waitFor(() => expect(calls()).toContain("POST /api/v1/connections"));
+    const body = JSON.parse(String((vi.mocked(apiFetch).mock.calls.find(([p]) => p === "/api/v1/connections")![1] as RequestInit).body));
+    expect(body.source).toEqual({ kind: "http", url: "https://data.internal/api/projects", format: "json", auth: "none",
+      columns: ["project", "cost"], records_at: "items", paging: "next_link", next_at: "links.next" });
+  });
+
   it("offers no source form to an account that may only run extractions", async () => {
     access.capabilities = ["integration.run"];
     mount("/domains/7/data/sources");

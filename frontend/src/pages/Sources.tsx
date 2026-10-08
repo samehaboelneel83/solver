@@ -352,7 +352,7 @@ function SourceForm({ domainId, onDone }: { domainId: string; onDone: (created: 
   const id = useId();
   const [kind, setKind] = useState<"postgres" | "http">("postgres");
   const [fields, setFields] = useState({ name: "", engine: "postgres", host: "", port: "5432", database: "", username: "", schema: "public", table: "", columns: "", password: "",
-    url: "", format: "json", auth: "none", sheet: "", records_at: "" });
+    url: "", format: "json", auth: "none", sheet: "", records_at: "", paging: "none", next_at: "", page_param: "" });
   const columns = fields.columns.split(",").map((c) => c.trim()).filter(Boolean);
   const create = useMutation({
     mutationFn: () => post<{ id: number }>("/api/v1/connections", kind === "postgres" ? {
@@ -364,7 +364,11 @@ function SourceForm({ domainId, onDone }: { domainId: string; onDone: (created: 
       source: { kind: "http", url: fields.url.trim(), format: fields.format, auth: fields.auth, columns,
         ...(fields.auth === "basic" ? { username: fields.username.trim() } : {}),
         ...(fields.format === "xlsx" && fields.sheet.trim() ? { sheet: fields.sheet.trim() } : {}),
-        ...(fields.format === "json" && fields.records_at.trim() ? { records_at: fields.records_at.trim() } : {}) },
+        ...(fields.format === "json" && fields.records_at.trim() ? { records_at: fields.records_at.trim() } : {}),
+        // A REST answer in pages: every page is read, under the same rules as the first.
+        ...(fields.format === "json" && fields.paging !== "none" ? { paging: fields.paging,
+          ...(fields.paging === "next_link" ? { next_at: fields.next_at.trim() } : {}),
+          ...(fields.paging === "page_number" ? { page_param: fields.page_param.trim() } : {}) } : {}) },
     }),
     onSuccess: () => onDone(true),
   });
@@ -374,7 +378,7 @@ function SourceForm({ domainId, onDone }: { domainId: string; onDone: (created: 
         onChange={(event) => setFields({ ...fields, [key]: event.target.value })} className="mt-1 w-full rounded border border-slate-300 px-2 py-1" />
     </label>
   );
-  const choice = (key: "format" | "auth" | "engine", label: string, options: [string, string][]) => (
+  const choice = (key: "format" | "auth" | "engine" | "paging", label: string, options: [string, string][]) => (
     <label className="block text-sm" htmlFor={`${id}-${key}`}>{label}
       <select id={`${id}-${key}`} value={fields[key]} onChange={(event) => setFields({ ...fields, [key]: event.target.value,
         // A new engine brings its usual port and schema, unless the person typed their own.
@@ -386,7 +390,9 @@ function SourceForm({ domainId, onDone }: { domainId: string; onDone: (created: 
   );
   const needed: (keyof typeof fields)[] = kind === "postgres"
     ? ["name", "host", "database", "username", "table", "columns", "password", ...(fields.engine === "mysql" ? [] : ["schema" as const])]
-    : ["name", "url", "columns", ...(fields.auth === "none" ? [] : ["password" as const]), ...(fields.auth === "basic" ? ["username" as const] : [])];
+    : ["name", "url", "columns", ...(fields.auth === "none" ? [] : ["password" as const]), ...(fields.auth === "basic" ? ["username" as const] : []),
+       ...(fields.format === "json" && fields.paging === "next_link" ? ["next_at" as const] : []),
+       ...(fields.format === "json" && fields.paging === "page_number" ? ["page_param" as const] : [])];
   const missing = needed.filter((k) => !fields[k].trim());
   return <form aria-label="Add a source" className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-2"
     onSubmit={(event) => { event.preventDefault(); create.mutate(); }}>
@@ -408,6 +414,11 @@ function SourceForm({ domainId, onDone }: { domainId: string; onDone: (created: 
       <div className="sm:col-span-2">{field("url", "Address (https://…)")}</div>
       {choice("format", "What it answers", [["json", "JSON list of records"], ["csv", "CSV file"], ["xlsx", "Excel workbook"]])}
       {fields.format === "json" && field("records_at", "Where the list is (e.g. data.items; empty if the answer is the list)")}
+      {fields.format === "json" && choice("paging", "Pages", [["none", "One answer, no pages"],
+        ["next_link", "Next page's address in the answer"], ["link_header", "Next page in the Link header"],
+        ["page_number", "Page number in the address"]])}
+      {fields.format === "json" && fields.paging === "next_link" && field("next_at", "Where the next address is (e.g. next, links.next)")}
+      {fields.format === "json" && fields.paging === "page_number" && field("page_param", "The address's page parameter (e.g. page)")}
       {fields.format === "xlsx" && field("sheet", "Sheet (empty for the first)")}
       {choice("auth", "Login", [["none", "None"], ["bearer", "Token (bearer)"], ["basic", "User name and password"]])}
       {fields.auth === "basic" && field("username", "User name")}

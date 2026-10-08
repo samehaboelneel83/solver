@@ -55,6 +55,45 @@ def workers(db: Session = Depends(get_db), _: UserAccount = Depends(get_current_
     return worker_status(db)
 
 
+#: How many queued or running runs the queue lists.
+QUEUE_SHOWN = 200
+
+
+@router.get("/workers/queue")
+def queue(db: Session = Depends(get_db), _: UserAccount = Depends(get_current_user)) -> dict[str, Any]:
+    """The runs waiting or solving, as the queue sees them (handover of 8 October 2026: a queue panel on the
+    workers page): oldest first, each with its problem and scenario, how long it has waited or run, its time
+    limit and lane (short runs may use the reserve kept for them), the workers and memory it holds, and, for a
+    waiting run, why it waits. Only the caller's organisation's runs (row-level security)."""
+    from app.solve.reserve import host_capacity
+
+    capacity = host_capacity()
+    rows = db.execute(text(
+        "SELECT r.id, r.status, r.purpose, r.scenario_id, s.name AS scenario, p.id AS problem_id, p.name AS problem,"
+        "       p.domain_id, r.params->'time_limit_s' AS time_limit_s, r.params->'reservation' AS reservation,"
+        "       r.params->>'queue_reason' AS queue_reason,"
+        "       extract(epoch FROM now() - r.queued_at) AS waited_s,"
+        "       CASE WHEN r.status = 'running' THEN extract(epoch FROM clock_timestamp() - r.started_at) END AS running_s"
+        "  FROM run r JOIN scenario s ON s.id = r.scenario_id JOIN problem p ON p.id = s.problem_id"
+        " WHERE r.status IN ('queued', 'running')"
+        " ORDER BY (r.status = 'running') DESC, r.queued_at LIMIT :n"), {"n": QUEUE_SHOWN}).mappings().all()
+    out = []
+    for r in rows:
+        limit = float(r["time_limit_s"]) if r["time_limit_s"] is not None else None
+        held = r["reservation"] if isinstance(r["reservation"], dict) else {}
+        out.append({"run_id": r["id"], "status": r["status"], "purpose": r["purpose"], "scenario_id": r["scenario_id"],
+                    "scenario": r["scenario"], "problem_id": r["problem_id"], "problem": r["problem"],
+                    "domain_id": r["domain_id"], "time_limit_s": limit,
+                    "lane": "short" if (held.get("short") if "short" in held else
+                                        limit is not None and limit <= capacity.short_seconds) else "long",
+                    "workers": held.get("workers"), "memory_mb": held.get("memory_mb"),
+                    "waited_s": round(float(r["waited_s"] or 0), 1),
+                    "running_s": None if r["running_s"] is None else round(float(r["running_s"]), 1),
+                    "waits_because": r["queue_reason"] if r["status"] == "queued" else None})
+    return {"runs": out, "capacity": {"workers": capacity.workers, "memory_mb": capacity.memory_mb,
+                                      "short_share": capacity.short_share, "short_seconds": capacity.short_seconds}}
+
+
 def _finding(kind: str, code: str, says: str, **extra: Any) -> dict[str, Any]:
     return {"kind": kind, "code": code, "says": says, **extra}
 

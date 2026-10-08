@@ -31,6 +31,10 @@ export type RunFacts = {
   parts?: { id: string; value: number | null }[];
   decisions: { var: string; header: string[]; rows: string[][]; count: number; chosen: boolean }[];
   rules: { id: string; state: "broken" | "tight"; short_by: number | null; hard: boolean }[];
+  /** The answer's files, each with what it holds in the platform's words (never the model's). */
+  files?: { name: string; url: string; holds: string }[];
+  /** The answer on the app's own map, when it has one. */
+  map?: string;
 };
 
 export type AgentEvent =

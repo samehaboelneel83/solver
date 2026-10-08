@@ -968,6 +968,22 @@ export const getWorkers = () => apiFetch<WorkerStatus>("/api/v1/workers");
 export function useWorkers() {
   return useQuery({ queryKey: [V1, "workers"], queryFn: getWorkers, refetchInterval: 15_000 });
 }
+/** One waiting or solving run, as the queue sees it (GET /api/v1/workers/queue). */
+export type QueuedRun = {
+  run_id: Id; status: "queued" | "running"; purpose: string | null; scenario_id: Id; scenario: string;
+  problem_id: Id; problem: string; domain_id: Id; time_limit_s: number | null; lane: "short" | "long";
+  workers: number | null; memory_mb: number | null; waited_s: number; running_s: number | null;
+  waits_because: string | null;
+};
+export type RunQueue = {
+  runs: QueuedRun[];
+  capacity: { workers: number; memory_mb: number; short_share: number; short_seconds: number };
+};
+export const getRunQueue = () => apiFetch<RunQueue>("/api/v1/workers/queue");
+/** The runs in the queue, oldest first, each with its lane and why it waits: followed every 10 s. */
+export function useRunQueue() {
+  return useQuery({ queryKey: [V1, "workers", "queue"], queryFn: getRunQueue, refetchInterval: 10_000 });
+}
 export const getPreflight = (scenarioId: Id) => apiFetch<Preflight>(`/api/v1/scenarios/${scenarioId}/preflight`);
 export function usePreflight(scenarioId: Id | null) {
   return useQuery({ queryKey: [V1, "preflight", scenarioId], queryFn: () => getPreflight(scenarioId as Id), enabled: isId(scenarioId),

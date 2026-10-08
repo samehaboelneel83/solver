@@ -472,3 +472,23 @@ def test_the_assistant_asks_for_a_drawings_system_places_it_and_builds_records_w
         "SELECT e.attrs->'location' FROM entity e JOIN entity_type t ON t.id = e.entity_type_id"
         " WHERE t.domain_id = :d AND t.name = 'well' ORDER BY e.key LIMIT 1"), {"d": built["domain_id"]}).scalar_one()
     assert shape["type"] == "Point" and 31.1 < shape["coordinates"][0] < 31.3
+
+
+def test_a_scenario_and_run_named_by_number_are_looked_up_for_the_model():
+    """The live what-if test (October 2026): with another workspace selected, "scenario 53 (its latest run is
+    144)" was called missing twice. The platform now looks named ones up and says where they are."""
+    rows = {"/api/v1/runs/144": {"status": "optimal", "scenario_id": 53},
+            "/api/v1/scenarios/53": {"name": "Base", "problem_id": 7},
+            "/api/v1/problems/7": {"name": "Transport", "domain_id": 12}}
+
+    def call(method, path, query=None, body=None, form=None, headers=None):
+        return {"ok": path in rows, "status": 200 if path in rows else 404, "body": rows.get(path, {"detail": "no"})}
+
+    agent = core.Agent.__new__(core.Agent)
+    agent.call = call
+    agent.ctx = type("Ctx", (), {"domain_id": 55})()
+    note = agent._named_records("For scenario 53 (its latest run is 144): what if demand rose? And run 999?")
+    assert note.startswith(core.PLATFORM)
+    assert 'scenario 53 "Base" belongs to problem 7 "Transport" in workspace (domain) 12 -- not the selected' in note
+    assert "run 144 (optimal) is a run of scenario 53" in note and "run 999: not found" in note
+    assert agent._named_records("Nothing named here.") is None

@@ -490,4 +490,21 @@ describe("FactsCard", () => {
     expect(screen.getByText(/1,939 chosen \(first 2 shown\)/)).toBeTruthy();
     expect(screen.getByText("one_per_cell tight")).toBeTruthy();
   });
+
+  it("lists the answer's files with what each holds, in the platform's words, and its map", async () => {
+    const { FactsCard } = await import("./AssistantPanel");
+    render(
+      <MemoryRouter>
+        <FactsCard facts={{
+          run_id: 9, status: "optimal", status_words: "Proven best answer", sense: "maximize", goal: 12, bound: null,
+          gap_pct: null, decisions: [], rules: [], map: "/runs?scenario=3&run=9",
+          files: [{ name: "GeoJSON", url: "/api/v1/runs/9/export?format=geojson",
+                    holds: "one layer per decision, holding the shapes of its records; nothing else of the drawing" }],
+        }} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("link", { name: "On the map" }).getAttribute("href")).toBe("/runs?scenario=3&run=9");
+    expect(screen.getByRole("button", { name: "GeoJSON" })).toBeTruthy();
+    expect(screen.getByText(/nothing else of the drawing/)).toBeTruthy();
+  });
 });

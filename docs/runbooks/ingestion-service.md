@@ -140,6 +140,13 @@ for a database: the host must resolve inside `OAAS_INTEGRATION_NETWORKS`, TLS is
 encrypted like a database password; `auth: "none"` needs no `password`. A database view is read like a table; raw
 SQL is still not accepted -- define a view for a query.
 
+A JSON answer in pages is read whole with `paging` (8 October 2026): `"next_link"` follows the next page's address in
+the answer at `next_at` (`next`, `links.next`, `@odata.nextLink`; a relative address is taken from the page it is
+on), `"link_header"` follows `Link: <…>; rel="next"`, and `"page_number"` sets `page_param` (from `first_page`,
+default 1) until a page is empty. Every page is read under the policy above; the next address must stay on the
+source's host over https (else `network_not_allowed`), the 20 MB cap is for all pages together, at most 1,000 pages
+are read (`limit_exceeded`), and an address seen twice ends the reading.
+
 ## Database engines (plan of 8 October 2026, phase 4A)
 
 A database source names its `engine`: `postgres` (default), `mysql` (MySQL and MariaDB), `sqlserver` or `oracle`;

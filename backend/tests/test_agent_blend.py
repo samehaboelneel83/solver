@@ -568,6 +568,10 @@ def test_a_feasible_answer_is_never_reported_as_optimal_and_exports_are_listed()
     assert "a map of the records" in text and "original drawing on grey MAP- layers" in text
     assert "ON THE MAP" not in text  # no scenario known: no link made up
     assert "ON THE MAP in the app: /runs?scenario=12&run=69" in result.summary({**rec, "scenario_id": 12})
+    # The person reads the same words on the facts card, drawn by the platform.
+    card = result.facts({**rec, "scenario_id": 12})
+    geo = next(f for f in card["files"] if f["name"] == "GeoJSON")
+    assert geo["holds"] in text and card["map"] == "/runs?scenario=12&run=69"
 
 
 def test_questions_after_go_ahead_are_not_shown_and_the_plan_is_made(tenants, monkeypatch):

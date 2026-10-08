@@ -171,7 +171,7 @@ def test_a_place_plan_builds_runs_and_reports_through_the_platform(tmp_path, ten
     # The run's clock is the wall clock: a run that solved for seconds did not finish the moment it started
     # (live camp test, October 2026: a 118 s run was stored as finishing 1.2 s after it started).
     assert float(row["took"]) >= 0.9 * float(row["wall_time_s"]), dict(row)
-    # 32 free cells / (2 cells + a quarter of a 2-cell aisle) = 12: proven best only when the answer reaches it.
+    # 32 free cells / (2 cells + a 2-cell aisle shared by three at most) = 12: proven best only when reached.
     assert outcome.objective >= 9 and out["upper_bound"]["items"] == 12
     assert (row["status"] == "optimal") == (outcome.objective == 12)
     result = TestClient(app).get(f"/api/v1/agent/result/{run_id}", headers=tenants["a"]).json()
@@ -334,3 +334,10 @@ def test_the_bound_is_never_beaten_by_an_exact_solution(room):
     nx, ny, length, width, aisle, side = room
     most, vs = _exact_most(nx, ny, length, width, aisle, side)
     assert pl.area_bound(nx * ny, vs, aisle, side) >= most
+
+
+def test_an_aisles_middle_is_shared_by_two_and_its_ends_by_more():
+    # 10 cells along, 7 deep (the camp's short-side aisle): ends shared by three, the overlap by four.
+    assert pl.aisle_share(10, 7) == pytest.approx(21.0)
+    # 30 along, 7 deep: 16 middle cells by two, 7 at each end by three.
+    assert pl.aisle_share(30, 7) == pytest.approx(7 * (16 / 2 + 14 / 3))

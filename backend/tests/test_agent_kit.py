@@ -327,3 +327,43 @@ def test_without_a_network_namespace_python_still_has_no_sockets(python_on, monk
         "    except Exception as e:\n        print('refused', type(e).__name__)\n", folder)
     assert result["isolation"]["network"] == "blocked in Python only"
     assert "CONNECTED" not in result["stdout"] and result["stdout"].count("refused") == 3, result
+
+
+def test_a_tool_name_written_without_quotes_is_put_right():
+    """The live what-if test (October 2026): {"name": describe_workspace, ...} was not run, and the answer was
+    given without looking."""
+    from app.agent.toolcall import extract_tool_calls
+
+    calls, _, errors = extract_tool_calls('<tool_call>{"name": describe_workspace, "arguments": {"domain_id": 7}}'
+                                          '</tool_call>', known_tools=["describe_workspace"])
+    assert calls == [{"name": "describe_workspace", "arguments": {"domain_id": 7}}]
+    assert any("without quotes" in e for e in errors)
+
+
+def test_a_limit_that_is_a_data_value_is_changed_through_that_value():
+    """read_result prints "c_demand [A] (= limit 180 = demand[m])"; set_limit {"c_demand[A]": 220} becomes
+    set_param demand[A] = 220 (live what-if test, October 2026)."""
+    from app.agent.core import limit_as_param
+
+    ir = {"constraints": [
+        {"id": "c_demand", "forall": [{"index": "m", "set": "market"}], "left": {"sum": "..."}, "relation": "=",
+         "right": {"par": "demand", "index": ["m"]}},
+        {"id": "c_budget", "left": {"sum": "..."}, "relation": "<=", "right": {"par": "budget"}},
+        {"id": "c_cap", "left": {"sum": "..."}, "relation": "<=", "right": {"const": 100}}]}
+    assert limit_as_param(ir, "c_demand[A]", 220) == {"param": "demand", "index": ["A"], "value": 220}
+    assert limit_as_param(ir, "c_demand [ 'B' ]", 5) == {"param": "demand", "index": ["B"], "value": 5}
+    assert limit_as_param(ir, "c_budget", 900) == {"param": "budget", "index": [], "value": 900}
+    assert limit_as_param(ir, "c_cap", 120) is None and limit_as_param(ir, "c_demand", 1) is None
+
+
+def test_a_call_with_a_closing_bracket_too_many_still_runs():
+    from app.agent.toolcall import extract_tool_calls
+
+    calls, _, errors = extract_tool_calls('<tool_call>{"name": "what_if", "arguments": {"scenario_id": 53, '
+                                          '"set_param": [{"param": "demand", "index": ["A"], "value": 220}]}}}'
+                                          '</tool_call>', known_tools=["what_if"])
+    assert calls and calls[0]["arguments"]["scenario_id"] == 53 and any("left over" in e for e in errors)
+    # Anything else after the call is still refused.
+    calls, _, errors = extract_tool_calls('<tool_call>{"name": "what_if", "arguments": {}} {"x": 1}</tool_call>',
+                                          known_tools=["what_if"])
+    assert not calls or len(calls) == 1

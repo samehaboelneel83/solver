@@ -2,7 +2,7 @@
 import json
 from typing import Literal, Union
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -40,6 +40,20 @@ class HttpSourceBody(BaseModel):
     username: str = Field(default="", max_length=128)
     sheet: str = Field(default="", max_length=128)
     records_at: str = Field(default="", max_length=200, description='dotted path to the list in a JSON answer, e.g. "data.items"')
+    paging: Literal["none", "next_link", "link_header", "page_number"] = "none"
+    next_at: str = Field(default="", max_length=200, description='where the next page\'s address is, e.g. "next", "links.next", "@odata.nextLink"')
+    page_param: str = Field(default="", max_length=64, description='the address\'s page parameter, e.g. "page"')
+    first_page: int = Field(default=1, ge=0, le=1_000_000)
+
+    @model_validator(mode="after")
+    def _paging_is_whole(self):
+        if self.paging != "none" and self.format != "json":
+            raise ValueError("pages are read for a JSON answer only")
+        if self.paging == "next_link" and not self.next_at.strip():
+            raise ValueError('paging by a next link needs next_at: where the link is in the answer, e.g. "next"')
+        if self.paging == "page_number" and not self.page_param.strip():
+            raise ValueError('paging by page number needs page_param: the address\'s page parameter, e.g. "page"')
+        return self
 
 
 class ConnectionBody(BaseModel):

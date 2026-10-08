@@ -107,3 +107,54 @@ def test_a_web_source_without_a_login_needs_no_password(setup):  # noqa: F811
     # No credential was needed (else credential_unreadable): the worker reached the trust check, and this test's
     # configured CA file does not exist.
     assert done["state"] == "failed" and done["error_code"] == "trust_unavailable", done
+
+
+def _pages(pages: dict[str, httpx.Response]):
+    """A server answering each address (path and query) from `pages`, and the addresses asked, in order."""
+    asked = []
+
+    def answer(request: httpx.Request):
+        key = request.url.raw_path.decode()
+        asked.append(key)
+        return pages.get(key, httpx.Response(404))
+    return answer, asked
+
+
+def test_pages_by_a_next_link_in_the_answer():
+    answer, asked = _pages({
+        "/api/projects": httpx.Response(200, json={"items": [{"project": "P1", "cost": 1}], "next": "/api/projects?cursor=b"}),
+        "/api/projects?cursor=b": httpx.Response(200, json={"items": [{"project": "P2", "cost": 2}],
+                                                             "next": "https://data.internal/api/projects?cursor=c"}),
+        "/api/projects?cursor=c": httpx.Response(200, json={"items": [{"project": "P3", "cost": 3}], "next": None})})
+    rows, _ = _read(_source(records_at="items", paging="next_link", next_at="next"), answer)
+    assert [r["project"] for r in rows] == ["P1", "P2", "P3"] and len(asked) == 3
+
+
+def test_pages_by_a_link_header_and_by_page_number():
+    answer, _ = _pages({
+        "/api/projects": httpx.Response(200, json=[{"project": "P1", "cost": 1}],
+                                        headers={"Link": '</api/projects?p=2>; rel="next"'}),
+        "/api/projects?p=2": httpx.Response(200, json=[{"project": "P2", "cost": 2}])})
+    rows, _ = _read(_source(paging="link_header"), answer)
+    assert [r["project"] for r in rows] == ["P1", "P2"]
+    answer, asked = _pages({
+        "/api/projects?size=2&page=1": httpx.Response(200, json={"value": [{"project": "P1", "cost": 1}]}),
+        "/api/projects?size=2&page=2": httpx.Response(200, json={"value": [{"project": "P2", "cost": 2}]}),
+        "/api/projects?size=2&page=3": httpx.Response(200, json={"value": []})})
+    rows, _ = _read(_source(url="https://data.internal/api/projects?size=2", records_at="value",
+                            paging="page_number", page_param="page"), answer)
+    assert [r["project"] for r in rows] == ["P1", "P2"] and asked[-1].endswith("page=3")
+
+
+def test_a_next_page_elsewhere_is_refused_and_a_loop_ends():
+    answer, _ = _pages({"/api/projects": httpx.Response(200, json={
+        "items": [{"project": "P1", "cost": 1}], "@odata.nextLink": "https://evil.example/steal"})})
+    with pytest.raises(ExtractionError) as refused:
+        _read(_source(records_at="items", paging="next_link", next_at="@odata.nextLink"), answer)
+    assert refused.value.code == "network_not_allowed"
+    answer, asked = _pages({"/api/projects": httpx.Response(200, json={
+        "items": [{"project": "P1", "cost": 1}], "next": "/api/projects"})})
+    rows, _ = _read(_source(records_at="items", paging="next_link", next_at="next"), answer)
+    assert len(rows) == 1 and len(asked) == 1  # the same address again: read once
+    with pytest.raises(ValueError):
+        _source(paging="next_link")  # where the link is must be said

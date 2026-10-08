@@ -1986,6 +1986,36 @@ def unsupported_numbers(answer: str, results: list[str], person: list[str]) -> l
     return list(dict.fromkeys(flagged))
 
 
+_RULE_AT = re.compile(r"^\s*([\w.\-]+)\s*(?:\[\s*(.*?)\s*\])?\s*$")
+
+
+def limit_as_param(ir: dict, key: str, value: Any) -> dict | None:
+    """`set_limit` on a rule (or one instance of it, "rule[A]" / "rule [A, 2]") whose limit is a single data
+    value (`demand[m]`): the same change made through that value for that instance, as a set_param item. None
+    when the limit is a plain number (set_limit changes it) or anything more than one value."""
+    m = _RULE_AT.match(key)
+    if not m:
+        return None
+    rule = next((c for c in ir.get("constraints") or [] if isinstance(c, dict) and c.get("id") == m.group(1)), None)
+    if rule is None:
+        return None
+    at = [v.strip().strip("'\"") for v in m.group(2).split(",")] if m.group(2) else []
+    names = [str(f.get("index")) for f in rule.get("forall") or [] if isinstance(f, dict)]
+    if len(at) != len(names):
+        return None
+    where = dict(zip(names, at))
+    for side in ("right", "left"):
+        term = rule.get(side)
+        if isinstance(term, dict) and set(term) <= {"par", "index"} and "par" in term:
+            index = [where.get(str(i), str(i)) for i in term.get("index") or []]
+            if all(str(i) in where or str(i) not in names for i in term.get("index") or []):
+                return {"param": str(term["par"]), "index": [str(i) for i in index], "value": value}
+    return None
+
+
+#: A scenario or run the person names by its number ("scenario 53", "run #144").
+_NAMED = re.compile(r"\b(scenario|run)s?\s*(?:is\s+|was\s+|=\s*|:\s*)?(?:#|no\.?\s*|number\s+|id\s+)?(\d{1,9})\b",
+                    re.I)
 _COUNTERFACTUAL = re.compile(r"\b(?:would|could)\b", re.I)
 _HYPOTHESIS = re.compile(r"\b(?:if|by (?:adding|raising|increasing|reducing|lowering|cutting|removing)|with (?:an? )?"
                          r"(?:extra|more|additional|another))\b[^,;:]*?(?=,|;|:|\bthen\b|\bwould\b|\bcould\b|$)", re.I)
@@ -2652,6 +2682,24 @@ class Agent:
                     items = [{"param": str(c.get("param")), "index": [str(i) for i in c.get("index") or []],
                               "value": c.get("value")} for c in items if isinstance(c, dict)]
                 patch[key] = [*(patch.get(key) or []), *items]
+        moved: list[str] = []
+        if isinstance(args.get("set_limit"), dict) and args["set_limit"]:
+            # A limit that is a data value ("c_demand [A] (= limit 180 = demand[m])", as read_result prints it) is
+            # changed through that value (live what-if test, October 2026: set_limit {"c_demand[A]": 220} was
+            # refused, the rule's limit being demand[m], not a number).
+            ver = self.call("GET", f"/api/v1/versions/{b.get('model_version_id')}")
+            ir = (ver.get("body") or {}).get("ir") if ver.get("ok") and isinstance(ver.get("body"), dict) else None
+            kept = {}
+            for key, value in args["set_limit"].items():
+                as_param = limit_as_param(ir or {}, str(key), value)
+                if as_param is None:
+                    kept[key] = value
+                else:
+                    args.setdefault("set_param", [])
+                    args["set_param"] = [*args["set_param"], as_param]
+                    patch["set_param"] = [*(patch.get("set_param") or []), as_param]
+                    moved.append(f"{key} -> set_param {as_param['param']}{as_param['index'] or ''} = {value}")
+            args["set_limit"] = kept
         for key in ("scale_param", "set_limit", "remove"):
             if isinstance(args.get(key), dict) and args[key]:
                 patch[key] = {**(patch.get(key) or {}), **args[key]}
@@ -2701,6 +2749,7 @@ class Agent:
         lines = [f"WHAT-IF '{name}' (scenario {sid}, from scenario {base_id}; changes: "
                  + json.dumps({k: v for k, v in patch.items() if k not in (b.get('patch') or {})
                                or v != (b.get('patch') or {}).get(k)}, ensure_ascii=False)
+                 + (f"; a limit that is a data value was changed through it: {'; '.join(moved)}" if moved else "")
                  + (f"; planned for {futures} sampled futures" if futures else "")
                  + (f"; the trade-off front in {front} steps" if front else "") + ")"]
         if base_run and run.get("objective") is not None and base_run.get("objective") is not None:
@@ -3378,6 +3427,39 @@ class Agent:
             yield {"type": "error", "text": f"{type(e).__name__}: {e}"}
         yield {"type": "state", "messages": messages, "wrote": self.wrote}
 
+    def _named_records(self, text: str) -> str | None:
+        """Scenarios and runs the person names by number, looked up with their permissions: where each one is.
+        The live what-if test (October 2026): asked about "scenario 53 (its latest run is 144)" with another
+        workspace selected, the Assistant said twice that it did not exist, without looking it up."""
+        named = list(dict.fromkeys((k.lower(), int(n)) for k, n in _NAMED.findall(text)))[:4]
+        if not named:
+            return None
+        said = []
+        for kind, ident in named:
+            if kind == "run":
+                run = self.call("GET", f"/api/v1/runs/{ident}")
+                if not run.get("ok") or not isinstance(run.get("body"), dict):
+                    said.append(f"run {ident}: not found, or not readable by this user")
+                    continue
+                body = run["body"]
+                said.append(f"run {ident} ({body.get('status')}) is a run of scenario {body.get('scenario_id')}")
+                ident = body.get("scenario_id")
+                if ident is None or ("scenario", int(ident)) in named:
+                    continue
+            got = self.call("GET", f"/api/v1/scenarios/{ident}")
+            if not got.get("ok") or not isinstance(got.get("body"), dict):
+                said.append(f"scenario {ident}: not found, or not readable by this user")
+                continue
+            sc = got["body"]
+            prob = self.call("GET", f"/api/v1/problems/{sc.get('problem_id')}")
+            pb = prob.get("body") if prob.get("ok") and isinstance(prob.get("body"), dict) else {}
+            domain = pb.get("domain_id")
+            other = "" if domain is None or domain == self.ctx.domain_id else " -- not the selected workspace"
+            said.append(f"scenario {ident} \"{sc.get('name')}\" belongs to problem {sc.get('problem_id')} "
+                        f"\"{pb.get('name', '')}\" in workspace (domain) {domain}{other}")
+        return (PLATFORM + "Looked up from the person's message: " + "; ".join(said)
+                + ". Use these ids directly (read_result, what_if, GET); they need no other workspace selected.")
+
     def _is_write(self, c: dict) -> bool:
         return c["function"]["name"] == "what_if" or (
             c["function"]["name"] == "call_api" and str(_args(c).get("method", "GET")).upper() != "GET")
@@ -3420,6 +3502,10 @@ class Agent:
             self.wrote |= any(self._is_write(c) and (allow or not self._needs_ok(c)) for c in pending)
             yield from self._execute(pending, messages, allow)
 
+        if last and last["role"] == "user" and not str(last.get("content") or "").startswith(PLATFORM):
+            found = self._named_records(str(last.get("content") or ""))
+            if found:
+                messages.append({"role": "user", "content": found})
         claimed, pending_feedback = False, None
         # Each kind of correction has its own budget (the roster field test: three broken calls used up a
         # shared budget of three, and an empty reply then ended the turn), with a cap on them all.

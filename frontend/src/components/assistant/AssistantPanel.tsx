@@ -11,6 +11,7 @@ import {
   type RunFacts,
 } from "../../api/agent";
 import { apiFetch } from "../../api/client";
+import { downloadFrom } from "../../api/download";
 import Markdown from "./Markdown";
 
 /**
@@ -792,6 +793,19 @@ export function FactsCard({ facts }: { facts: RunFacts }) {
       {facts.rules.length > 0 && (
         <p className="mt-2 text-slate-700">
           {facts.rules.map((r) => r.state === "broken" ? `${r.id} broken${r.short_by ? ` (short by ${number(r.short_by)})` : ""}` : `${r.id} tight`).join(" · ")}
+        </p>
+      )}
+      {(facts.map || (facts.files && facts.files.length > 0)) && (
+        <p className="mt-2 text-xs text-slate-600">
+          {facts.map && <><Link className="font-medium text-sky-700 underline" to={facts.map}>On the map</Link>{facts.files?.length ? " · " : ""}</>}
+          {facts.files?.map((f, i) => (
+            <span key={f.url}>
+              {i > 0 && " · "}
+              <button type="button" className="font-medium text-sky-700 underline" title={f.holds}
+                      onClick={() => { void downloadFrom(f.url); }}>{f.name}</button>
+              <span className="text-slate-500"> ({f.holds})</span>
+            </span>
+          ))}
         </p>
       )}
     </section>
