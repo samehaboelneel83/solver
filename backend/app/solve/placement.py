@@ -318,9 +318,16 @@ def _greedy_at(zone_of: np.ndarray, vs: list[Variant], n_aisle: int, c: int, dea
     # Bottom to top, left to right (rows) or left to right, bottom to top (cols); at each position the most
     # valuable variant using the least area first (a short-side aisle before a long one), so rows pack tightly.
     major, minor = (jj, ii) if scan.startswith("rows") else (ii, jj)
+    rank = kk
     if scan.endswith("-back"):  # from the far side: top to bottom, or right to left
         major, minor = -major, -minor
-    order = np.lexsort((kk, cost, val, minor, major))
+        # ... with the aisle preferred on the mirrored side too (right before left, top before bottom), so the
+        # rows face each other as they do scanned forward (the camp: 2,159 beds scanned back, 2,386 forward).
+        mirror = {"left": "right", "right": "left", "bottom": "top", "top": "bottom", None: None}
+        where = {(v.kind, v.turn, v.side): k for k, v in enumerate(vs)}
+        mirrored = np.array([where.get((v.kind, v.turn, mirror[v.side]), k) for k, v in enumerate(vs)], dtype=np.int64)
+        rank = mirrored[kk] if len(kk) else kk
+    order = np.lexsort((rank, cost, val, minor, major))
     plan = list(zip(kk[order].tolist(), ii[order].tolist(), jj[order].tolist()))
     greedy(lay, plan, deadline)
     return lay, len(plan)
@@ -330,17 +337,65 @@ def _greedy_at(zone_of: np.ndarray, vs: list[Variant], n_aisle: int, c: int, dea
 TRIES_PER_SECOND = 1_000_000
 
 
+def _by_zone(lay: Layout) -> dict[int, float]:
+    """The value each area holds in a layout (an item belongs to the area of its footprint)."""
+    out: dict[int, float] = {}
+    for v, i, j in lay.items.values():
+        z = int(lay.zone_of[i, j])
+        out[z] = out.get(z, 0.0) + lay.vs[v].value
+    return out
+
+
+def best_per_zone(layouts: list[Layout]) -> Layout | None:
+    """One layout taking, area by area, the items of the layout that holds most there. Areas are packed apart
+    (an item lies in one area, and a way to an entrance runs within one area), but an aisle may cross onto a
+    neighbouring area's free cells: every item is placed again through the layout's own check, so a clash
+    loses an item rather than breaking a rule. None when there is one layout or fewer."""
+    if len(layouts) < 2:
+        return None
+    first = layouts[0]
+    combined = Layout(first.zone_of, first.vs, first.n_aisle, limits=first.limits)
+    combined.entrance = first.entrance
+    shares = [_by_zone(lay) for lay in layouts]
+    for z in sorted(set().union(*shares)):
+        pick = max(range(len(layouts)), key=lambda k: shares[k].get(z, 0.0))
+        for v, i, j in layouts[pick].items.values():
+            if int(first.zone_of[i, j]) == z and combined.can(v, i, j):
+                combined.place(v, i, j)
+    make_reachable(combined)
+    return combined
+
+
+#: The directions a greedy pass scans the finest grid in: rows pack differently against each area's walls and
+#: entrances, and each area keeps the direction that does best there.
+SCANS = ("rows", "cols", "rows-back", "cols-back")
+
+
 def start(zone_of: np.ndarray, vs: list[Variant], n_aisle: int, *, seconds: float,
-          limits: dict[int, int] | None = None) -> tuple[Layout, dict[str, Any]]:
-    """A first layout: greedy passes from the coarsest exact grid to the finest the time allows, the best kept
-    (the camp, 0.05 m grid: 2,158 beds at 0.5 m, 2,220 at 0.25 m, 2,316 at 0.1 m, 2,386 at 0.05 m)."""
+          limits: dict[int, int] | None = None, entrance: np.ndarray | None = None) -> tuple[Layout, dict[str, Any]]:
+    """A first layout: greedy passes from the coarsest exact grid to the finest the time allows, then the finest
+    grid scanned in other directions, and the best kept -- whole, or area by area when the areas do best in
+    different directions (the camp, 0.05 m grid: 2,158 beds at 0.5 m, 2,220 at 0.25 m, 2,316 at 0.1 m, 2,386 at
+    0.05 m; with its 68 doors, 2,260 for the best single pass and 2,336 area by area).
+
+    With an access rule (`entrance`), every pass is scored after the items no way reaches are taken away, so the
+    directions are compared on what will count."""
     began = time.monotonic()
     nx, ny = zone_of.shape
     sizes = [x for v in vs for x in (v.w, v.h)]
     factors = sorted((c for c in range(1, min(sizes) + 1) if all(x % c == 0 for x in sizes)), reverse=True)
-    # From about 0.5 m-equivalent cells (a few tens of thousands of positions) to the grid itself.
+
+    def scored(lay: Layout) -> Layout:
+        if entrance is not None:
+            lay.entrance = entrance
+            make_reachable(lay)
+        return lay
+
     # From the coarsest (fast, a sure first answer) to the grid itself, as long as the time allows.
     best, record = None, []
+    # Every pass lies on the grid itself (a coarse pass only tries fewer positions), so any of them can give
+    # an area its items: with an access rule a coarser pass often keeps more ways open.
+    passes: list[Layout] = []
     for c in factors:
         left = seconds - (time.monotonic() - began)
         estimate = (nx // c) * (ny // c) * len(vs) * 0.35 / TRIES_PER_SECOND
@@ -348,23 +403,31 @@ def start(zone_of: np.ndarray, vs: list[Variant], n_aisle: int, *, seconds: floa
             record.append({"factor": c, "skipped": f"about {estimate:.0f} s, {left:.0f} s left"})
             continue
         lay, tried = _greedy_at(zone_of, vs, n_aisle, c, time.monotonic() + max(left, 1.0), limits)
+        lay = scored(lay)
         record.append({"factor": c, "placed": len(lay.items), "tried": tried})
+        passes.append(lay)
         if best is None or lay.value() > best.value():
             best = lay
-    # The finest grid passed, scanned in the other directions too: rows pack differently against each area's
-    # walls, and the best is kept.
+    # The finest grid passed, scanned in the other directions too.
     done = [r for r in record if "placed" in r]
     if done:
         c = done[-1]["factor"]
-        for scan in ("cols",):
+        for scan in SCANS[1:]:
             left = seconds - (time.monotonic() - began)
             estimate = (nx // c) * (ny // c) * len(vs) * 0.35 / TRIES_PER_SECOND * 1.5
             if estimate > left:
                 break
             lay, tried = _greedy_at(zone_of, vs, n_aisle, c, time.monotonic() + left, limits, scan)
+            lay = scored(lay)
             record.append({"factor": c, "scan": scan, "placed": len(lay.items)})
+            passes.append(lay)
             if lay.value() > best.value():
                 best = lay
+        combined = best_per_zone(passes)
+        if combined is not None:
+            record.append({"factor": c, "scan": "best per area", "placed": len(combined.items)})
+            if combined.value() > best.value():
+                best = combined
     return best, {"passes": record, "seconds": round(time.monotonic() - began, 3)}
 
 
@@ -751,7 +814,8 @@ def solve(compiled: Any, *, time_limit: float, workers: int, should_stop: Callab
     limits = {k: len(kinds[key]) for k, key in enumerate(kind_list)}
     zone = place.zone_grid
     free_cells = int((zone >= 0).sum())
-    lay, started = start(zone, vs, place.aisle, seconds=0.5 * time_limit, limits=limits) if vs else (
+    lay, started = start(zone, vs, place.aisle, seconds=0.5 * time_limit, limits=limits,
+                         entrance=place.entrance) if vs else (
         Layout(zone, vs, place.aisle, limits=limits), {"passes": []})
     if place.entrance is not None:
         # Access: the greedy start packs without it; every item no way reaches is taken away, and ruin and

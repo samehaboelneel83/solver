@@ -42,7 +42,8 @@ SHEET_ROWS = 200_000
 
 def _record(db: Session, run_id: int) -> dict[str, Any]:
     row = db.execute(
-        text("SELECT r.id, r.status, r.objective, r.best_bound, r.solver, r.params, r.error, r.finished_at, mv.ir, d.data,"
+        text("SELECT r.id, r.scenario_id, r.status, r.objective, r.best_bound, r.solver, r.params, r.error, r.finished_at,"
+             "       mv.ir, d.data,"
              "       sol.assignments, sol.amounts, sol.ranges, sol.reduced_costs,"
              "       s.name AS scenario, s.patch, p.name AS problem, p.domain_id"
              "  FROM run r JOIN scenario s ON s.id = r.scenario_id JOIN model_version mv ON mv.id = r.model_version_id"
@@ -361,6 +362,31 @@ def _tile_picture(template: str, z: int, left: float, top: float, width: float, 
     return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode()
 
 
+def _one_per_record(features: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Each record drawn once: a model with several decisions on one set (open and capacity of a site; chosen, x,
+    y, turned of a placed item) has one feature per decision on the same shape, and a printed map draws them all
+    on top of each other. Kept: the most telling status (fell short, chosen, not chosen), titled with every
+    decision's value (live camp test, October 2026: 5 x 2,305 bed shapes, a 2.4 MB report)."""
+    rank = {"short": 3, "chosen": 2, "not_chosen": 1, "place": 0}
+    kept: dict[tuple[str, str, str], dict[str, Any]] = {}
+    titles: dict[tuple[str, str, str], list[str]] = {}
+    out: list[dict[str, Any]] = []
+    for f in features:
+        props = f.get("properties") or {}
+        if props.get("key") is None or str(props.get("layer") or "").endswith("_served"):
+            out.append(f)  # not a record (a served-from line, a bare shape): drawn as it is
+            continue
+        k = (str(props.get("set")), str(props.get("key")), json.dumps(f.get("geometry"), sort_keys=True))
+        titles.setdefault(k, []).append(str(props.get("title") or ""))
+        best = kept.get(k)
+        if best is None or rank.get(props.get("status"), 1) > rank.get(best["properties"].get("status"), 1):
+            kept[k] = f
+    for k, f in kept.items():
+        named = [t for t in dict.fromkeys(titles[k]) if t]
+        out.append({**f, "properties": {**f["properties"], "title": "; ".join(named[:8])}})
+    return out
+
+
 def _svg_map(features: list[dict[str, Any]], width: int = 720, height: int = 440,
              basemap: tuple[str, str] | None = None) -> str:
     """The answer map as an SVG drawing in Web Mercator (as the app's map and every tile server draw it), fitted
@@ -380,6 +406,7 @@ def _svg_map(features: list[dict[str, Any]], width: int = 720, height: int = 440
             return [p for poly in c for ring in poly for p in ring]
         return []
 
+    features = _one_per_record(features)
     pts = [p for f in features for p in coords(f.get("geometry") or {})]
     if not pts:
         return ""

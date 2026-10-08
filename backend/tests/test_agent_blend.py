@@ -563,6 +563,11 @@ def test_a_feasible_answer_is_never_reported_as_optimal_and_exports_are_listed()
     text = result.summary(rec)
     assert "NOT PROVEN OPTIMAL" in text and "at most 808, so it is 21.0% short of that bound (a bound, not an answer found" in text
     assert "MAP: GeoJSON /api/v1/runs/69/export?format=geojson" in text and "format=dxf" in text
+    # What each file holds is said, so the answer does not invent it (live camp test: "the aisles, and the obstacles").
+    assert "say what a file holds only in these words" in text and "nothing else of the drawing" in text
+    assert "a map of the records" in text and "original drawing on grey MAP- layers" in text
+    assert "ON THE MAP" not in text  # no scenario known: no link made up
+    assert "ON THE MAP in the app: /runs?scenario=12&run=69" in result.summary({**rec, "scenario_id": 12})
 
 
 def test_questions_after_go_ahead_are_not_shown_and_the_plan_is_made(tenants, monkeypatch):

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import os
+import time
 from pathlib import Path
 
 import numpy as np
@@ -263,3 +264,30 @@ def test_the_read_back_says_where_the_aisle_runs_in_plain_words():
     assert "free on any side" in text and "one access_point" in text and "a any" not in text and "a access" not in text
     ir["constraints"][0]["place"]["aisle_sides"] = "long"
     assert "free along a long side" in readback({"ir": ir})
+
+
+def test_areas_are_combined_from_the_layouts_that_do_best_in_each():
+    """General: a layout that packs one area better and another that packs the other better make one that
+    packs both; it is checked again under the layout's own rules."""
+    zone = np.full((4, 2), -1, dtype=np.int32)
+    zone[0:2, :] = 0
+    zone[2:4, :] = 1
+    one = [pl.Variant(0, 0, 1, 1, None, 1.0)]
+    a, b = pl.Layout(zone, one, 0), pl.Layout(zone, one, 0)
+    for i, j in ((0, 0), (0, 1), (1, 0), (2, 0)):
+        a.place(0, i, j)  # three in area 0, one in area 1
+    for i, j in ((0, 0), (2, 0), (2, 1), (3, 1)):
+        b.place(0, i, j)  # one in area 0, three in area 1
+    combined = pl.best_per_zone([a, b])
+    assert combined.value() == 6 and not combined.check()
+    assert pl.best_per_zone([a]) is None
+
+
+def test_a_room_scanned_from_the_far_side_packs_about_as_well_as_from_the_near_side():
+    """General: a mirrored scan prefers the mirrored aisle side, so its rows face each other as a forward scan's
+    do (before: 70 beds scanned back against 78 forward in this room; the camp: 2,159 against 2,386)."""
+    zone = np.zeros((20, 14), dtype=np.int32)
+    vs = pl.variants_cells([(3, 1, [0, 90], 1.0)], "any", 1)
+    counts = {scan: len(pl._greedy_at(zone, vs, 1, 1, time.monotonic() + 30, None, scan)[0].items)
+              for scan in ("rows", "rows-back", "cols", "cols-back")}
+    assert counts["rows-back"] >= 0.97 * counts["rows"] and counts["cols-back"] >= 0.97 * counts["cols"], counts

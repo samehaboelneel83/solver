@@ -491,3 +491,20 @@ def test_a_drawing_sized_answer_fills_the_report_map():
     svg = run_export._svg_map([bed(31.2350, 30.0444), bed(31.2359, 30.0444)])
     xs = [float(x) for x in re.findall(r'(-?\d+\.\d),-?\d+\.\d', svg)]
     assert max(xs) - min(xs) > 400, (min(xs), max(xs))  # most of the 720 px width
+
+
+def test_a_record_with_several_decisions_is_drawn_once_on_the_report_map():
+    from app.api import run_export
+
+    ring = [[31.0, 30.0], [31.0001, 30.0], [31.0001, 30.0001], [31.0, 30.0], [31.0, 30.0]]
+    shape = {"type": "Polygon", "coordinates": [ring]}
+
+    def f(layer, key, status, title, geometry=shape):
+        return {"type": "Feature", "geometry": geometry,
+                "properties": {"layer": layer, "set": "slot", "key": key, "status": status, "title": title}}
+
+    other = {"type": "Polygon", "coordinates": [[[p[0] + 0.001, p[1]] for p in ring]]}
+    svg = run_export._svg_map([f("turned", "s1", "not_chosen", "s1: turned = 0"), f("placed", "s1", "chosen", "s1: placed"),
+                               f("x", "s1", "chosen", "s1: x = 12"), f("placed", "s2", "chosen", "s2: placed", other)])
+    assert svg.count("<polygon") == 2  # s1 once, s2 once
+    assert "#2563eb" in svg and "s1: turned = 0; s1: placed; s1: x = 12" in svg  # chosen wins; every value named

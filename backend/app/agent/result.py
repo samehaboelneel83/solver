@@ -87,11 +87,22 @@ def summary(rec: dict[str, Any]) -> str:
     # Records placed by metres reach a map only through a drawing placed in the workspace's map data (the camp
     # retest, October 2026: a new workspace without it got a GeoJSON link that came back empty).
     mapped = shaped or (by_metres and rec.get("map_placed", True))
-    out.append(f"EXPORTS (give the user the ones they asked for, as links): spreadsheet /api/v1/runs/{run_id}/export?format=xlsx, "
-               f"CSV ?format=csv, PDF report ?format=pdf"
-               + (f", MAP: GeoJSON /api/v1/runs/{run_id}/export?format=geojson" if mapped else "")
-               + (f", CAD drawing /api/v1/runs/{run_id}/export?format=dxf (the chosen items on the drawing)"
+    # What each file holds, said by the platform: the live camp test (October 2026) had the Assistant say the
+    # GeoJSON showed "the aisles, and the obstacles", which it does not hold.
+    out.append(f"EXPORTS (give the user the ones they asked for, as links, and say what a file holds only in these "
+               f"words): spreadsheet /api/v1/runs/{run_id}/export?format=xlsx and CSV ?format=csv (each decision's "
+               f"values by record), PDF report ?format=pdf (the goal, the rules"
+               + (", a map of the records" if mapped else "") + " and the decision values)"
+               + (f", MAP: GeoJSON /api/v1/runs/{run_id}/export?format=geojson (one layer per decision, holding the "
+                  f"shapes of its records; nothing else of the drawing)" if mapped else "")
+               + (f", CAD drawing /api/v1/runs/{run_id}/export?format=dxf (the chosen items on <decision>-CHOSEN "
+                  f"layers, over the original drawing on grey MAP- layers when the workspace holds it)"
                   if shaped or by_metres else "") + ".")
+    if mapped and rec.get("scenario_id") is not None:
+        # The answer is on the app's own map: what to give a person who asks to see it (the live camp test: asked
+        # for "a map of the beds", the answer only pointed at files to download).
+        out.append(f"ON THE MAP in the app: /runs?scenario={rec['scenario_id']}&run={run_id} (give this link when the "
+                   f"user asks to see the answer on a map; the files above are for downloading).")
     if by_metres and not mapped:
         out.append("NO MAP: this workspace holds no placed drawing, so the answer cannot be shown on a map (no GeoJSON); "
                    "the DXF has it in the drawing's metres. To get a map, the user attaches the drawing again.")
