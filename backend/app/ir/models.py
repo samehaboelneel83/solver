@@ -398,6 +398,19 @@ class PlaceBody(_Model):
     access_shape: Optional[Name] = None
 
 
+class JoinBody(_Model):
+    """Network design (version 2): the links built (`build`, yes or no per link) join the places -- every one, or
+    those `use` chooses -- into one network, or each to a source. `ends` names the two relationships from each link
+    to its two places."""
+
+    links: Binding
+    build: VarRef
+    ends: Annotated[list[Name], Field(min_length=2, max_length=2)]
+    places: Binding
+    use: Optional[VarRef] = None
+    sources: Optional[Union[Name, list[WhereEntry]]] = None
+
+
 class Constraint(_Model):
     """An expression -- `left relation right` -- or, in version 2, one
     scheduling rule or one connected rule in its place."""
@@ -413,6 +426,7 @@ class Constraint(_Model):
     connected: Optional[ConnectedBody] = None
     route: Optional[RouteBody] = None
     place: Optional[PlaceBody] = None
+    join: Optional[JoinBody] = None
     severity: Severity
     weight: Optional[StrictInt] = None
     when: Optional[When] = None
@@ -422,13 +436,13 @@ class Constraint(_Model):
     def _one_kind(self) -> "Constraint":
         expression = [self.left, self.relation, self.right]
         scheduling = [k for k in (self.no_overlap, self.cumulative) if k is not None]
-        wholes = [k for k in (self.connected, self.route, self.place) if k is not None]
+        wholes = [k for k in (self.connected, self.route, self.place, self.join) if k is not None]
         if len(wholes) > 1:
-            raise ValueError("a constraint is one connected, route or place rule")
+            raise ValueError("a constraint is one connected, route, place or join rule")
         whole = wholes[0] if wholes else None
         if whole is not None:
             if scheduling or self.forall is not None or any(part is not None for part in expression):
-                raise ValueError("a connected, route or place rule is neither an expression nor inside a forall")
+                raise ValueError("a connected, route, place or join rule is neither an expression nor inside a forall")
         elif scheduling:
             if len(scheduling) > 1 or any(part is not None for part in expression):
                 raise ValueError("a constraint is one expression or one scheduling rule")

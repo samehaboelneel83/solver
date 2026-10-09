@@ -738,6 +738,49 @@ Refusals, all `shape` but the last:
 | `connected_via_invalid` | `via` is not in `relationships` |
 | `connected_via_not_self` (domain) | `via` does not join the units' entity type to itself |
 
+### 4.4a `join` — links built join the places (version 2, 9 October 2026)
+
+Network design: which links (cables, roads, pipes, corridors) to build, each a yes-or-no decision, so that the
+places are joined.
+
+```json
+{ "id": "c_join", "severity": "hard",
+  "join": { "links":  {"index": "l", "set": "segment"},
+            "build":  {"var": "lay", "index": ["l"]},
+            "ends":   ["seg_a", "seg_b"],
+            "places": {"index": "p", "set": "site"},
+            "use":    {"var": "serve", "index": ["p"]},
+            "sources": "is_exchange" } }
+```
+
+**Meaning:** the links with `build = 1` join every place into one network -- or, with `sources` (a 0/1 field of
+the places, or a `where` list of fixed filters on them), join every place to a source. With `use` (a binary over
+the places) only the places with `use = 1` must be joined, and a link is built only between two used places (a
+Steiner network: which places are worth joining is the model's choice). `ends` names the two relationships from
+each link to its two places, one edge per link in each. The rule binds its own `links` and `places`, is never
+inside a `forall`, and is hard and unconditional.
+
+The compiler turns it into an exact single-commodity flow along the built links (`app/solve/join.py`). Places no
+link could ever join are found first: with `use` they are switched off; without it the run is refused, naming a
+place. When the rule has no `use` and the goal only adds up the links built (links may be forced in or out by
+rules of one decision each), the model is a minimum spanning tree -- or forest, with sources -- and is solved
+exactly by Kruskal in the network lane (`solve.network`), or by `networkx` asked for by name. Otherwise the
+tree (with `use`: a Steiner tree joining the places forced in and the sources) is the solver's start
+(`solve.connected_start`).
+
+Refusals, all `shape` but the last two:
+
+| code | when |
+|---|---|
+| `join_needs_version_2` | the document is version 1 |
+| `join_malformed` | a key missing or unknown, `sources` neither a name nor a where list, `ends` not two names, the links and places read by one index, or the rule also carries an expression, another rule kind or a `forall` |
+| `join_on_soft` | `severity` is not `hard`, or a `weight`, `when` or `chance` is given |
+| `join_index_mismatch` | `build` is not read `[links' index]`, or `use` not `[places' index]` |
+| `join_not_binary` | `build` or `use` is not binary |
+| `join_ends_invalid` | an `ends` relationship is not in `relationships` |
+| `join_ends_mismatch` (domain) | an `ends` relationship does not run from the links' entity type to the places' |
+| `join_sources_invalid` (domain) | `sources` is not a yes/no or 0/1 field of the places, or its filters read an index or parameter |
+
 ### 4.5 `route` — vehicles round the stops (version 2, queue R15b)
 
 ```json

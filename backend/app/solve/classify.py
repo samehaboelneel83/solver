@@ -180,6 +180,14 @@ def classify(ir: dict[str, Any], data: dict[str, Any] | None = None) -> Classifi
         )
         planner.append("some groups must be one connected piece")
 
+    if any(isinstance(c, dict) and "join" in c for c in ir.get("constraints", [])):
+        needs.add("connected")
+        reasons.append(
+            "a rule makes the links built join the places into one network (or networks reaching a source), "
+            "which a solver holds as a flow along the built links"
+        )
+        planner.append("the links built must join the places into a network")
+
     if any(isinstance(c, dict) and "place" in c for c in ir.get("constraints", [])):
         needs.add("placement")
         reasons.append(

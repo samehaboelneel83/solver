@@ -219,6 +219,20 @@ def readback(spec: dict[str, Any]) -> str:
                             if start else f"forms one connected piece along {body.get('via')}")
                          + (f", per {groups}" if groups else "") + " (hard)")
             continue
+        if isinstance(c.get("join"), dict):
+            body = c["join"]
+            links, places = (body.get("links") or {}).get("set"), (body.get("places") or {}).get("set")
+            build, use = (body.get("build") or {}).get("var"), (body.get("use") or {}).get("var")
+            sources = body.get("sources")
+            start = (f"a {places} with {sources} set" if isinstance(sources, str) else
+                     f"a {places} where {_filters(sources)}" if isinstance(sources, list) else None)
+            which = f"every {places} with {use} = 1" if use else f"every {places}"
+            ends = body.get("ends") if isinstance(body.get("ends"), list) else []
+            lines.append(f"- rule {c.get('id')}: the {links} with {build} = 1 (ends along {' and '.join(map(str, ends))}) "
+                         + (f"join {which} to {start}" if start else f"join {which} into one network")
+                         + (f"; a {links} is built only between two {places} with {use} = 1" if use else "")
+                         + " (hard)")
+            continue
         lines.append(f"- rule {c.get('id')}: " + (f"for every {scope}: " if scope else "")
                      + f"{term(c.get('left'))} {c.get('relation')} {term(c.get('right'))} ({severity})")
     objective = ir.get("objective") or {}

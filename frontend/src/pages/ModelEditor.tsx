@@ -35,6 +35,7 @@ import { isName, RELATIONS, SENSES, SEVERITIES } from "../ir/contract";
 import { declareCalled, offered } from "../model/predictors";
 import WhenEditor from "../model/WhenEditor";
 import ConnectedEditor from "../model/ConnectedEditor";
+import JoinEditor from "../model/JoinEditor";
 import RouteEditor from "../model/RouteEditor";
 import SchedulingEditor, { newSchedulingRule } from "../model/SchedulingEditor";
 import TermBuilder, { BindingsEditor } from "../model/TermBuilder";
@@ -77,6 +78,7 @@ import {
 import {
   describeSchedule,
   newConnectedRule,
+  newJoinRule,
   newRouteRule,
   routeChoices,
   describeTerm,
@@ -1039,6 +1041,24 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
             Add a route rule
           </button>
         )}
+        {newJoinRule("c_", context) !== null && (
+          <button
+            type="button"
+            className="ml-2 mt-3 rounded border border-slate-300 px-3 py-2 text-sm text-slate-700"
+            onClick={() =>
+              setDraft((current) => {
+                if (!current) return current;
+                const rule = newJoinRule(
+                  freeNumberedId("c_", current.constraints.map((constraint) => constraint.id)),
+                  context
+                );
+                return rule ? { ...current, constraints: [...current.constraints, rule] } : current;
+              })
+            }
+          >
+            Add a join rule (network design)
+          </button>
+        )}
           </>
         )}
       </section>
@@ -1296,6 +1316,8 @@ function ConstraintCard({
         <ConnectedEditor constraint={constraint} context={context} onChange={onChange} />
       ) : constraint.route !== undefined ? (
         <RouteEditor constraint={constraint} context={context} onChange={onChange} />
+      ) : constraint.join !== undefined ? (
+        <JoinEditor constraint={constraint} context={context} onChange={onChange} />
       ) : (constraint as { place?: unknown }).place !== undefined ? (
         <PlaceSummary body={(constraint as unknown as { place: PlaceBody }).place} />
       ) : constraint.left == null || constraint.right == null ? (

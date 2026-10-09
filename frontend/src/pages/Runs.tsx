@@ -331,10 +331,16 @@ export function statusNote(run: {
  * "under 0.01%" rather than a string of zeros. */
 export type NetworkRunRecord = { kind?: string; engine?: string; nodes?: number; arcs?: number; records?: number;
   pairs?: number; chosen?: number; perfect?: boolean; scaled?: { costs: number; quantities: number };
-  shadow_prices?: string; why?: string };
+  shadow_prices?: string; why?: string; places?: number; links?: number; built?: number; sources?: number | null };
 
 /** How a network or pairing run was solved, in words. */
 export function networkRunText(r: NetworkRunRecord): string {
+  if (r.kind === "spanning") {
+    const forest = r.sources !== null && r.sources !== undefined;
+    return `the cheapest links joining ${forest ? "every place to a source" : "every place"}, by a minimum spanning `
+      + `${forest ? "forest" : "tree"} (Kruskal): ${r.places ?? "?"} places, ${r.links ?? "?"} possible links`
+      + `${r.built !== undefined ? `, ${r.built} built` : ""}${r.why ? ` (${r.why})` : ""}`;
+  }
   if (r.kind === "matching") {
     return `a pairing, by Edmonds' blossom (NetworkX): ${r.records ?? "?"} records, ${r.pairs ?? "?"} possible pairs`
       + `${r.chosen !== undefined ? `, ${r.chosen} chosen` : ""}${r.perfect ? ", everyone paired" : ""}${r.why ? ` (${r.why})` : ""}`;
@@ -1200,6 +1206,7 @@ function RunDetail({
     selector?: SelectorRecord;
     connected_start_run?: ConnectedStartRecord;
     routing_start_run?: RoutingStartRecord;
+    join_start_run?: { used?: boolean; why?: string; how?: string; built?: number; used_places?: number; seconds?: number };
     computed_inputs?: (ComputedSource & { input: string; name: string })[];
     metaheuristic_run?: MetaheuristicRecord;
     network_run?: NetworkRunRecord;
@@ -1444,6 +1451,9 @@ function RunDetail({
           )}
           {params.connected_start_run && <Fact label="Started from" value={connectedStartText(params.connected_start_run)} />}
           {params.routing_start_run && <Fact label="Started from" value={routingStartText(params.routing_start_run)} />}
+          {params.join_start_run && <Fact label="Started from" value={params.join_start_run.used && params.join_start_run.how
+            ? `a ${params.join_start_run.how}${params.join_start_run.built !== undefined ? `, ${params.join_start_run.built} links built` : ""}`
+            : `no network start${params.join_start_run.why ? ` (${params.join_start_run.why})` : ""}`} />}
           {params.computed_inputs && params.computed_inputs.length > 0 && (
             <Fact label="Computed from the map" value={computedText(params.computed_inputs)} />
           )}

@@ -651,12 +651,17 @@ def _networkx_solve(
         # Not a network, but a pairing any record may join (not two-sided): Edmonds' blossom, proven.
         if matching.applies(compiled) is None:
             return matching.solve(compiled).solution
+        from app.solve import join
+
+        # Not a network, but the cheapest links joining every place (or every place to a source): Kruskal, proven.
+        if join.applies(compiled) is None:
+            return join.solve(compiled).solution
         # Its class fits (a linear model), its shape does not: said, never answered as something else.
         raise Unsupported(
             "networkx solves a network -- every rule flow in less flow out (each coefficient +1 or -1, "
             "each decision in at most two rules), every number whole: transport, assignment, shortest "
-            f"path, maximum flow -- or a matching (each record in at most, or exactly, one pair). This model is "
-            f"neither: {why}. Leave the solver unset and the rules choose one that takes it.")
+            f"path, maximum flow -- a matching (each record in at most, or exactly, one pair), or a spanning tree "
+            f"(the cheapest links joining the places of a join rule). This model is none of these: {why}. Leave the solver unset and the rules choose one that takes it.")
     return network.solve(compiled, engine="networkx", ceilings=True).solution
 
 

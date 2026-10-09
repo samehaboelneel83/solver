@@ -1147,8 +1147,8 @@ def _execute(
                     {"w": _json({"warm_start_from": prior[0], "warm_start_hinted": len(hint or {})}), "r": run_id},
                 )
                 db.commit()  # not held through the solve: see `_record_fingerprint`
-        kinds = {key for c in ir.get("constraints") or [] if isinstance(c, dict) for key in ("connected", "route")
-                 if key in c}
+        kinds = {key for c in ir.get("constraints") or [] if isinstance(c, dict)
+                 for key in ("connected", "route", "join") if key in c}
         starter = None
         if params.get("connected_start") and "connected" in kinds and reach_rows.rule_of(ir) is not None:
             # Rooted at its sources (app.solve.reach): the model solved without the reach, then repaired.
@@ -1159,6 +1159,12 @@ def _execute(
             # `solve.connected_start`, app.solve.partition, queue R13).
             starter, start_key = partition_rows, "connected_start_run"
             why_not = partition_rows.applies(ir)
+        elif params.get("connected_start") and "join" in kinds:
+            # A spanning tree, or a Steiner tree joining the places that must be joined (app.solve.join).
+            from app.solve import join as join_start
+
+            starter, start_key = _JoinStarter, "join_start_run"
+            why_not = join_start.start_applies(compiled)
         elif params.get("routing_start") and "route" in kinds:
             # Routes from OR-Tools' routing search to start from (setting
             # `solve.routing_start`, app.solve.routing, queue R15b).
@@ -1327,8 +1333,14 @@ def _execute(
                        and any(v.is_integral for v in solving_model.variables.values())
                        and network_rows.applies(solving_model) is not None
                        and matching_rows.applies(solving_model) is None)
+            # Not a network nor a pairing, but the cheapest links joining the places: Kruskal, proven.
+            from app.solve import join as join_rows
+
+            spanned = (bool(params.get("network")) and not stochastic_wanted and not allocate and not networked
+                       and not matched and join_rows.applies(solving_model) is None)
             horizon_plan = None
-            if params.get("rolling_horizon") and not stochastic_wanted and not networked and not matched:
+            if params.get("rolling_horizon") and not stochastic_wanted and not networked and not matched \
+                    and not spanned:
                 # Relax-and-fix over the model's time set (setting
                 # `solve.rolling_horizon`, app.solve.horizon, queue R9).
                 time_set = _time_set(db, run_id, solving_model)
@@ -1339,7 +1351,7 @@ def _execute(
                 else:
                     horizon_record = {"used": False, "why": why_not}
             if (params.get("separable") and not stochastic_wanted and horizon_plan is None and not allocate
-                    and not networked and not matched):
+                    and not networked and not matched and not spanned):
                 # Independent blocks solved at once (setting `solve.separable`,
                 # app.solve.blocks) -- unless something ties them together.
                 refused = block_rows.refusal(
@@ -1365,6 +1377,9 @@ def _execute(
                 elif matched:
                     matched_run = matching_rows.solve(solving_model)
                     result, reason, network_record = matched_run.solution, None, matched_run.record
+                elif spanned:
+                    spanned_run = join_rows.solve(solving_model)
+                    result, reason, network_record = spanned_run.solution, None, spanned_run.record
                 elif stochastic_wanted:
                     result, stochastic_record = sandbox.run(
                         "app.solve.sandbox:stochastic_in_child",
@@ -2138,6 +2153,18 @@ def _computed_sources(db: Session, run_id: int, ir: dict[str, Any]) -> list[dict
         {"r": run_id, "params": parameters, "rels": relationships},
     ).all()
     return [{**source, "input": kind, "name": name} for kind, name, source in rows]
+
+
+class _JoinStarter:
+    """`app.solve.join.start` in a starter's shape (`start(ir, data, compiled, seconds=...)`)."""
+
+    from app.solve.join import CEILING, SHARE
+
+    @staticmethod
+    def start(ir, data, compiled, *, seconds):
+        from app.solve import join
+
+        return join.start(compiled, seconds=seconds)
 
 
 def _time_set(db: Session, run_id: int, compiled: Compiled) -> str | None:

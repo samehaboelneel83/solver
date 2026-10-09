@@ -188,12 +188,24 @@ that cannot exist is a proven infeasibility. It runs when `networkx` is asked fo
 a network, and in the network lane (`solve.network`) after the network check. The solver string says
 `matching (Edmonds' blossom, NetworkX)`; `params.network_run.kind` is `matching`.
 
+**Network design (9 October 2026): spanning trees.** The `join` rule (`docs/contracts/problem-ir.md` §4.4a)
+says the links built join the places. `app/solve/join.py` compiles it as an exact flow, and reads the compiled
+model: when the rule has no `use`, every other rule fixes one link in or out, and the goal only adds up the links
+built, it is a minimum spanning tree (a forest, with sources: one more node joined to every source at no cost).
+Links that pay for themselves and forced links are taken first, Kruskal completes the rest, and the answer is the
+proven optimum with every flow variable set. On a 20×20 grid (400 places, 760 links) Kruskal answers in 4 ms
+where HiGHS, after 60 s on the flow rows, has 7,410 against the optimum 5,747; 10,000 places take 0.15 s. It runs
+in the network lane after the network and pairing checks, and when `networkx` is asked for by name; the solver
+string says `minimum spanning tree (Kruskal)`, `params.network_run.kind` is `spanning`. Every other model with one
+join rule gets the tree as a start (`params.join_start_run`); with `use`, a Steiner tree (NetworkX's
+approximation) joining the places forced in and the sources.
+
 The Assistant's `run_python` has NetworkX too (paths, connectivity, components), e.g. to work out which
 cells of a layout reach a door before the model is written.
 
 Code: `backend/app/solve/network.py` (`_walk_networkx`, `_walk_ortools`, `_prices`),
-`backend/app/solve/matching.py`, the `NETWORKX` entry in `backend/app/solve/backends.py`. Tests:
-`backend/tests/test_network.py`, `backend/tests/test_matching.py`, the `transport_network` case in
+`backend/app/solve/matching.py`, `backend/app/solve/join.py`, the `NETWORKX` entry in `backend/app/solve/backends.py`. Tests:
+`backend/tests/test_network.py`, `backend/tests/test_matching.py`, `backend/tests/test_join.py`, the `transport_network` case in
 `test_golden.py`.
 
 

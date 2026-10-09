@@ -2,7 +2,7 @@ import type { FormDraft } from "./draftIr";
 import { referencesOf } from "./declarations";
 import { fieldsRead } from "./fieldsRead";
 import { printRule, printTerm } from "./formula";
-import { describeConnected, describeRoute, describeSchedule, describeWhen, type Constraint } from "./terms";
+import { describeConnected, describeJoin, describeRoute, describeSchedule, describeWhen, type Constraint } from "./terms";
 
 /**
  * The whole model on one readable page, before it is published (Epic UX, U-3):
@@ -99,7 +99,7 @@ function Part({ title, children }: { title: string; children: React.ReactNode })
 }
 
 export function ruleInWords(rule: Constraint): string {
-  return describeSchedule(rule) ?? describeRoute(rule) ?? describeConnected(rule) ?? printRule(rule);
+  return describeSchedule(rule) ?? describeRoute(rule) ?? describeConnected(rule) ?? describeJoin(rule) ?? printRule(rule);
 }
 
 /** What looks unfinished: decisions nothing reads, data nothing uses, a goal-less model with no rules. */

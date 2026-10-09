@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 import { INPUT_CLASS } from "../components/attrTypes";
 import type { FormDraft } from "./draftIr";
 import { applyPattern, PATTERNS, tasksOf, type Amount, type PatternCommand, type PatternKind } from "./patterns";
-import { describeConnected, describeRoute, describeSchedule } from "./terms";
+import { describeConnected, describeJoin, describeRoute, describeSchedule } from "./terms";
 
 type Relationship = { name: string; from: string; to: string };
 
@@ -179,7 +179,7 @@ export function describeAdded(before: FormDraft, after: FormDraft): string {
       : `the decision ${name} (${spec.domain === "binary" ? "yes or no" : spec.domain === "integer" ? "whole number" : "any number"})`);
   }
   for (const rule of after.constraints.slice(before.constraints.length)) {
-    added.push(`the rule ${rule.id}: ${describeSchedule(rule) ?? describeRoute(rule) ?? describeConnected(rule) ?? "each unit in exactly one group"}`);
+    added.push(`the rule ${rule.id}: ${describeSchedule(rule) ?? describeRoute(rule) ?? describeConnected(rule) ?? describeJoin(rule) ?? "each unit in exactly one group"}`);
   }
   for (const term of after.objective.terms.slice(before.objective.terms.length)) added.push(`the goal term ${term.id}`);
   return `Adds ${added.join("; ")}.`;

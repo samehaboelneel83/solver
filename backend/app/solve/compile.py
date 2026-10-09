@@ -353,6 +353,9 @@ class Compiled:
     predictions: list[Any] = field(default_factory=list)
     #: Place rules (plan phase 1C): items on a drawing's free area, solved by `app.solve.placement`.
     placements: list[Any] = field(default_factory=list)
+    #: Join rules (network design, `app.solve.join`): each rule's links, ends, places and flow, for the exact
+    #: spanning-tree lane and the start.
+    joins: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def is_integral(self) -> bool:
@@ -536,6 +539,7 @@ class _Compiler:
         self._current_id: str | None = None
         #: The ids of `connected` rules, whose rows are a flow (`app.solve.connected`).
         self.connectivity: list[str] = []
+        self.joins: list[dict[str, Any]] = []
         #: The ids of `route` rules (`app.solve.route`).
         self.routes: list[str] = []
         self.placements: list[Any] = []
@@ -577,6 +581,7 @@ class _Compiler:
             connectivity=self.connectivity,
             routes=self.routes,
             placements=self.placements,
+            joins=self.joins,
         )
 
     def _check_edges_were_frozen(self) -> None:
@@ -704,6 +709,11 @@ class _Compiler:
             from app.solve.route import expand as expand_route
 
             expand_route(self, spec)
+            return
+        if "join" in spec:
+            from app.solve.join import expand as expand_join
+
+            expand_join(self, spec)
             return
         if "place" in spec:
             from app.solve.place_rule import expand as expand_place

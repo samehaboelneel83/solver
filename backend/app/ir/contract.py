@@ -100,6 +100,8 @@ CONSTRAINT_KEYS: frozenset[str] = frozenset(
         "route",
         # Items placed on a drawing's free area (version 2, plan phase 1C), likewise.
         "place",
+        # Links built join places into one network, or into networks each reaching a source (version 2), likewise.
+        "join",
     }
 )
 #: The two scheduling rules, and the keys each carries.
@@ -125,6 +127,13 @@ PLACE_KEYS: frozenset[str] = frozenset({"slots", "chosen", "x", "y", "turn", "si
                                         "access", "access_shape"})
 PLACE_REQUIRED: frozenset[str] = frozenset({"slots", "chosen", "x", "y", "length", "width", "areas", "shape", "step",
                                             "origin"})
+#: What a `join` rule names (network design, 9 October 2026): the links that may be built (a yes/no `build` per
+#: link), the two relationships naming each link's ends (link to place), the places, and optionally `use` (a yes/no
+#: decision per place: only used places need joining, and a link is built only between two used places) and
+#: `sources` (a 0/1 field of the places, or a where list: every used place then reaches a source instead of all
+#: of them reaching each other).
+JOIN_KEYS: frozenset[str] = frozenset({"links", "build", "ends", "places", "use", "sources"})
+JOIN_REQUIRED: frozenset[str] = frozenset({"links", "build", "ends", "places"})
 #: What an interval declaration names beyond `index` and `domain`.
 INTERVAL_KEYS: frozenset[str] = frozenset({"start", "end", "size", "presence"})
 

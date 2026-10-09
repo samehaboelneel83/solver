@@ -126,7 +126,71 @@ export type Constraint = {
   /** Vehicles round the stops from a depot (version 2, queue R15b), in place
    * of left/relation/right. */
   route?: RouteBody;
+  /** The links built join the places (version 2, network design), in place of left/relation/right. */
+  join?: JoinBody;
 };
+
+export type JoinBody = {
+  links: { index: string; set: string };
+  build: { var: string; index: string[] };
+  /** The two relationships from each link to its two places. */
+  ends: string[];
+  places: { index: string; set: string };
+  /** Only the places this yes-or-no decision chooses need joining (a Steiner network). */
+  use?: { var: string; index: string[] };
+  /** A 0/1 field of the places, or fixed filters: every place joined to one of these instead of to each other. */
+  sources?: string | unknown[];
+};
+
+/** A join rule in words, or null for any other rule. */
+export function describeJoin(rule: { join?: unknown }): string | null {
+  const j = rule.join as Partial<JoinBody> | undefined;
+  if (!j) return null;
+  const places = j.places?.set || "places";
+  const which = j.use ? `every ${places} with ${j.use.var} = 1` : `every ${places}`;
+  const to = j.sources ? `to a source (${typeof j.sources === "string" ? j.sources : "fixed filters"})` : "into one network";
+  return `the ${j.links?.set || "links"} with ${j.build?.var || "?"} = 1 join ${which} ${to}`;
+}
+
+/** What a join rule can read: binary variables over one set (the links), each with the pairs of relationships
+ * from that set to another (the ends), and the binary variables over that other set (use). */
+export function joinChoices(context: ModelContext): { build: string; links: string; places: string; ends: string[]; uses: string[] }[] {
+  const out: { build: string; links: string; places: string; ends: string[]; uses: string[] }[] = [];
+  for (const [build, v] of Object.entries(context.variables)) {
+    if (v.domain !== "binary" || v.index.length !== 1) continue;
+    const links = v.index[0];
+    const byPlace = new Map<string, string[]>();
+    for (const r of context.relationships) {
+      if (r.from === links && r.to !== links) byPlace.set(r.to, [...(byPlace.get(r.to) ?? []), r.name]);
+    }
+    for (const [places, ends] of byPlace) {
+      if (ends.length < 2) continue;
+      const uses = Object.entries(context.variables)
+        .filter(([, u]) => u.domain === "binary" && u.index.length === 1 && u.index[0] === places).map(([name]) => name);
+      out.push({ build, links, places, ends, uses });
+    }
+  }
+  return out;
+}
+
+/** The body for one choice: the indices named after their sets, never the same name twice. */
+export function joinBody(choice: { build: string; links: string; places: string; ends: string[] }): JoinBody {
+  const l = seedForSet(choice.links);
+  let p = seedForSet(choice.places);
+  if (p === l) p = `${p}2`;
+  return {
+    links: { index: l, set: choice.links },
+    build: { var: choice.build, index: [l] },
+    ends: choice.ends.slice(0, 2),
+    places: { index: p, set: choice.places },
+  };
+}
+
+/** A new join rule over the first admissible links, or null when the model has none. */
+export function newJoinRule(id: string, context: ModelContext): Constraint | null {
+  const choice = joinChoices(context)[0];
+  return choice ? ({ id, join: joinBody(choice), severity: "hard" } as Constraint) : null;
+}
 
 export type RouteBody = {
   visit: { var: string; index: string[] };
@@ -615,6 +679,7 @@ export function declaredRelationships(
     fromBindings(constraint.cumulative?.over);
     if (constraint.connected?.via) found.add(constraint.connected.via);
     if (constraint.route?.depot_by) found.add(constraint.route.depot_by);
+    for (const end of constraint.join?.ends ?? []) if (typeof end === "string" && end) found.add(end);
   }
   for (const term of objectiveTerms) fromTerm(term.expression);
 

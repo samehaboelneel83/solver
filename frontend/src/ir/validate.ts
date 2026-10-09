@@ -29,6 +29,8 @@ import {
   CONNECTED_KEYS,
   ROUTE_KEYS,
   PLACE_KEYS,
+  JOIN_KEYS,
+  JOIN_REQUIRED,
   PLACE_REQUIRED,
   FILTER_OPERATORS,
   FUNCTIONS,
@@ -708,7 +710,7 @@ class ShapeChecker {
         scope = bound as Map<string, string>;
       }
 
-      if ("chance" in constraint && ("connected" in constraint || "route" in constraint || "place" in constraint || "no_overlap" in constraint || "cumulative" in constraint)) {
+      if ("chance" in constraint && ("connected" in constraint || "route" in constraint || "place" in constraint || "join" in constraint || "no_overlap" in constraint || "cumulative" in constraint)) {
         const problem = this.checkChance(constraint, at, identifier);
         if (problem) return problem;
       }
@@ -729,6 +731,11 @@ class ShapeChecker {
       }
       if ("place" in constraint) {
         const problem = this.checkPlace(constraint, at, identifier);
+        if (problem) return problem;
+        continue;
+      }
+      if ("join" in constraint) {
+        const problem = this.checkJoin(constraint, at, identifier);
         if (problem) return problem;
         continue;
       }
@@ -798,8 +805,8 @@ class ShapeChecker {
         'a chance is the share of futures the rule may fail in, strictly between 0 and 1: {"epsilon": 0.1} holds it in 90% of them'
       );
     }
-    if ("connected" in constraint || "route" in constraint || "place" in constraint || "no_overlap" in constraint || "cumulative" in constraint) {
-      return refusal("chance_misplaced", loc, `the constraint ${show(identifier)} is a scheduling, connected or route rule; a chance is on an expression rule`);
+    if ("connected" in constraint || "route" in constraint || "place" in constraint || "join" in constraint || "no_overlap" in constraint || "cumulative" in constraint) {
+      return refusal("chance_misplaced", loc, `the constraint ${show(identifier)} is a scheduling, connected, route, place or join rule; a chance is on an expression rule`);
     }
     if (constraint.severity === "soft") {
       return refusal("chance_misplaced", loc, `the constraint ${show(identifier)} is soft; a rule that may bend at a cost needs no chance -- make it hard`);
@@ -825,7 +832,7 @@ class ShapeChecker {
     }
     const body = constraint.connected;
     const loc: IrLoc = [...at, "connected"];
-    const beside = ["left", "relation", "right", "forall", "no_overlap", "cumulative"].filter((key) => key in constraint);
+    const beside = ["left", "relation", "right", "forall", "join", "no_overlap", "cumulative"].filter((key) => key in constraint);
     if (beside.length > 0) {
       return refusal(
         "connected_malformed",
@@ -940,7 +947,7 @@ class ShapeChecker {
       return refusal("place_needs_version_2", at,
         `the constraint '${identifier}' is a place rule, which version 1 does not have; publish it as version 2`);
     }
-    const beside = ["left", "relation", "right", "forall", "connected", "route", "no_overlap", "cumulative"].filter((key) => key in constraint);
+    const beside = ["left", "relation", "right", "forall", "connected", "route", "join", "no_overlap", "cumulative"].filter((key) => key in constraint);
     if (beside.length > 0) {
       return refusal("place_malformed", [...at, beside[0]], `the constraint '${identifier}' is a place rule and also carries ${beside[0]}`);
     }
@@ -1014,6 +1021,88 @@ class ShapeChecker {
       const declared = (this.ir.variables as Record<string, Json>)[ref.var as string];
       if (declared.domain !== domain) {
         return refusal("place_domain", [...loc, key, "var"], `'${String(ref.var)}' must be ${domain} for a place rule's ${key}`);
+      }
+    }
+    return null;
+  }
+
+  /** `join` (version 2, network design): the links built join the places (as `_check_join` in
+   * `app/ir/validate.py`, in the same order and with the same locs). */
+  private checkJoin(constraint: Json, at: IrLoc, identifier: string): IrRefusal | null {
+    const loc: IrLoc = [...at, "join"];
+    if (this.ir.version === 1) {
+      return refusal("join_needs_version_2", at,
+        `the constraint '${identifier}' is a join rule, which version 1 does not have; publish it as version 2`);
+    }
+    const beside = ["left", "relation", "right", "forall", "connected", "route", "place", "no_overlap", "cumulative"]
+      .filter((key) => key in constraint);
+    if (beside.length > 0) {
+      return refusal("join_malformed", [...at, beside[0]],
+        `the constraint '${identifier}' is a join rule and also carries ${beside[0]}; a join rule is not also an expression, and binds its own indices`);
+    }
+    const body = constraint.join;
+    const words = "a join rule names links, build, ends and places, and optionally use (a yes/no decision per place) " +
+      "and sources (a 0/1 field of the places, or a where list picking them)";
+    if (!isObject(body)) return refusal("join_malformed", loc, words);
+    let odd = [...JOIN_REQUIRED].sort().find((key) => !(key in body));
+    let what = "missing";
+    if (odd === undefined) {
+      odd = Object.keys(body).find((key) => !JOIN_KEYS.includes(key));
+      what = "not one of its keys";
+    }
+    if (odd === undefined && "sources" in body && !isName(body.sources)
+      && !(Array.isArray(body.sources) && body.sources.length > 0)) {
+      odd = "sources";
+      what = "neither a field name nor a where list";
+    }
+    if (odd !== undefined) return refusal("join_malformed", [...loc, odd], `${words}; '${odd}' is ${what}`);
+    for (const key of ["severity", "weight", "when", "chance"]) {
+      if (key in constraint && (key !== "severity" || constraint[key] !== "hard")) {
+        return refusal("join_on_soft", [...at, key],
+          `the join rule '${identifier}' is hard and unconditional; a network that is half joined has no price`);
+      }
+    }
+    if (constraint.severity !== "hard") {
+      return refusal("constraint_severity_unsupported", [...at, "severity"], 'a join rule is hard: write "severity": "hard"');
+    }
+    let scope = new Map<string, string>();
+    for (const part of ["links", "places"] as const) {
+      const inner = this.checkBindings([body[part]], [...loc, part], scope);
+      if ("code" in inner) {
+        const problem = inner as IrRefusal;
+        return { ...problem, loc: [...loc, part, ...problem.loc.slice(loc.length + 2)] };
+      }
+      scope = inner as Map<string, string>;
+    }
+    if ((body.links as Json).index === (body.places as Json).index) {
+      return refusal("join_malformed", [...loc, "places", "index"], "the links and the places are read by two different indices");
+    }
+    for (const [key, part, what] of [["build", "links", "a link is built or it is not"],
+      ["use", "places", "a place is used or it is not"]] as const) {
+      if (!(key in body)) continue;
+      const ref = body[key];
+      const index = (body[part] as Json).index;
+      if (!isObject(ref) || Object.keys(ref).length !== 2 || !("var" in ref) || !Array.isArray(ref.index)
+        || ref.index.length !== 1 || ref.index[0] !== index) {
+        return refusal("join_index_mismatch", [...loc, key],
+          `${key} is a variable read per ${part.slice(0, -1)}: {"var": "...", "index": ["${String(index)}"]}`);
+      }
+      const reference = this.reference(ref, [...loc, key], scope, "var", this.variables);
+      if (reference) return reference;
+      const declared = (this.ir.variables as Record<string, Json>)[ref.var as string];
+      if (declared.domain !== "binary") {
+        return refusal("join_not_binary", [...loc, key, "var"], `'${String(ref.var)}' must be binary: ${what}`);
+      }
+    }
+    const ends = body.ends;
+    if (!(Array.isArray(ends) && ends.length === 2 && ends.every((e) => typeof e === "string"))) {
+      return refusal("join_malformed", [...loc, "ends"],
+        'ends names the two relationships from a link to its two places: ["from_end", "to_end"]');
+    }
+    for (let i = 0; i < ends.length; i++) {
+      if (!this.relationships.has(ends[i] as string)) {
+        return refusal("join_ends_invalid", [...loc, "ends", i],
+          `${show(ends[i])} is not a relationship this model declares in relationships, so no dataset would carry the links' ends`);
       }
     }
     return null;

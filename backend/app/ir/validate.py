@@ -47,6 +47,8 @@ from app.ir.contract import (
     ROUTE_KEYS,
     PLACE_KEYS,
     PLACE_REQUIRED,
+    JOIN_KEYS,
+    JOIN_REQUIRED,
     CONSTRAINT_KEYS,
     INTERVAL_KEYS,
     UNCERTAINTY_KINDS,
@@ -762,7 +764,7 @@ class _ShapeChecker:
                 scope = result
 
             if "chance" in constraint and (
-                "connected" in constraint or "route" in constraint or "place" in constraint
+                "connected" in constraint or "route" in constraint or "place" in constraint or "join" in constraint
                 or any(kind in constraint for kind in SCHEDULING_KEYS)
             ):
                 problem = self._check_chance(constraint, at, identifier)
@@ -785,6 +787,11 @@ class _ShapeChecker:
                 continue
             if "place" in constraint:
                 problem = self._check_place(constraint, at, identifier)
+                if problem:
+                    return problem
+                continue
+            if "join" in constraint:
+                problem = self._check_join(constraint, at, identifier)
                 if problem:
                     return problem
                 continue
@@ -921,7 +928,8 @@ class _ShapeChecker:
             )
         body = constraint["connected"]
         loc: Loc = [*at, "connected"]
-        beside = [key for key in ("left", "relation", "right", "forall", *SCHEDULING_KEYS) if key in constraint]
+        beside = [key for key in ("left", "relation", "right", "forall", "join", *SCHEDULING_KEYS)
+                  if key in constraint]
         if beside:
             return Refusal(
                 "connected_malformed",
@@ -1037,7 +1045,7 @@ class _ShapeChecker:
             )
         body = constraint["route"]
         loc: Loc = [*at, "route"]
-        beside = [key for key in ("left", "relation", "right", "forall", "connected", *SCHEDULING_KEYS)
+        beside = [key for key in ("left", "relation", "right", "forall", "connected", "join", *SCHEDULING_KEYS)
                   if key in constraint]
         if beside:
             return Refusal(
@@ -1155,7 +1163,8 @@ class _ShapeChecker:
             return Refusal("place_needs_version_2", at,
                            f"the constraint {identifier!r} is a place rule, which version 1 does not have; "
                            "publish it as version 2")
-        beside = [key for key in ("left", "relation", "right", "forall", "connected", "route", *SCHEDULING_KEYS)
+        beside = [key for key in ("left", "relation", "right", "forall", "connected", "route", "join",
+                                     *SCHEDULING_KEYS)
                   if key in constraint]
         if beside:
             return Refusal("place_malformed", [*at, beside[0]],
@@ -1224,6 +1233,81 @@ class _ShapeChecker:
                                f"{ref['var']!r} must be {allowed[0]} for a place rule's {key}")
         return None
 
+    def _check_join(self, constraint: dict[str, Any], at: Loc, identifier: str):
+        """`join` (version 2, network design): the links built (yes or no per link) join the places -- all of
+        them, or those `use` chooses -- into one network, or into networks each reaching a source. Each link's
+        two ends are named by two relationships from the links to the places. The rule binds its own links
+        and places, so it stands outside any forall; it is hard and unconditional."""
+        loc: Loc = [*at, "join"]
+        if self.ir.get("version") == 1:
+            return Refusal("join_needs_version_2", at,
+                           f"the constraint {identifier!r} is a join rule, which version 1 does not have; "
+                           "publish it as version 2")
+        beside = [key for key in ("left", "relation", "right", "forall", "connected", "route", "place",
+                                  *SCHEDULING_KEYS) if key in constraint]
+        if beside:
+            return Refusal("join_malformed", [*at, beside[0]],
+                           f"the constraint {identifier!r} is a join rule and also carries {beside[0]}; a join "
+                           "rule is not also an expression, and binds its own indices")
+        body = constraint["join"]
+        words = ("a join rule names links, build, ends and places, and optionally use (a yes/no decision per "
+                 "place) and sources (a 0/1 field of the places, or a where list picking them)")
+        if not isinstance(body, dict):
+            return Refusal("join_malformed", loc, words)
+        odd = next((k for k in sorted(JOIN_REQUIRED) if k not in body), None)
+        what = "missing"
+        if odd is None:
+            odd, what = next((k for k in body if k not in JOIN_KEYS), None), "not one of its keys"
+        if odd is None and "sources" in body and not (_is_name(body["sources"]) or (
+                isinstance(body["sources"], list) and body["sources"])):
+            odd, what = "sources", "neither a field name nor a where list"
+        if odd is not None:
+            return Refusal("join_malformed", [*loc, odd], f"{words}; {odd!r} is {what}")
+        for key in ("severity", "weight", "when", "chance"):
+            if key in constraint and (key != "severity" or constraint[key] != "hard"):
+                return Refusal("join_on_soft", [*at, key],
+                               f"the join rule {identifier!r} is hard and unconditional; a network that is half "
+                               "joined has no price")
+        if constraint.get("severity") != "hard":
+            return Refusal("constraint_severity_unsupported", [*at, "severity"],
+                           'a join rule is hard: write "severity": "hard"')
+        scope: dict[str, str] = {}
+        for part in ("links", "places"):
+            inner = self.check_bindings([body[part]], [*loc, part], scope)
+            if isinstance(inner, Refusal):
+                return Refusal(inner.code, [*loc, part, *inner.loc[len(loc) + 2:]], inner.message)
+            scope = inner
+        if body["links"].get("index") == body["places"].get("index"):
+            return Refusal("join_malformed", [*loc, "places", "index"],
+                           "the links and the places are read by two different indices")
+        for key, part, what in (("build", "links", "a link is built or it is not"),
+                                ("use", "places", "a place is used or it is not")):
+            if key not in body:
+                continue
+            ref, index = body[key], body[part]["index"]
+            if not isinstance(ref, dict) or set(ref) != {"var", "index"} or ref.get("index") != [index]:
+                return Refusal("join_index_mismatch", [*loc, key],
+                               f'{key} is a variable read per {part[:-1]}: {{"var": "...", "index": ["{index}"]}}')
+            problem = self._reference(ref, [*loc, key], scope, "var", self.variables)
+            if problem:
+                return problem
+            if self.ir["variables"][ref["var"]].get("domain") != "binary":
+                return Refusal("join_not_binary", [*loc, key, "var"], f"{ref['var']!r} must be binary: {what}")
+        ends = body["ends"]
+        if not (isinstance(ends, list) and len(ends) == 2 and all(isinstance(e, str) for e in ends)):
+            return Refusal("join_malformed", [*loc, "ends"],
+                           'ends names the two relationships from a link to its two places: ["from_end", "to_end"]')
+        for i, name in enumerate(ends):
+            if name not in self.relationships:
+                return Refusal("join_ends_invalid", [*loc, "ends", i],
+                               f"{json.dumps(name)} is not a relationship this model declares in relationships, "
+                               "so no dataset would carry the links' ends")
+        if isinstance(body.get("sources"), list):
+            problem = self._check_filters(body["sources"], [*loc, "sources"], body["places"].get("set"), {})
+            if problem:
+                return problem
+        return None
+
     def _check_chance(self, constraint: dict[str, Any], at: Loc, identifier: str):
         """`chance` (version 2): the rule must hold in all but `epsilon` of the
         futures a stochastic solve samples -- one switch per future, at most
@@ -1248,9 +1332,9 @@ class _ShapeChecker:
                 "a chance is the share of futures the rule may fail in, strictly between 0 and 1: "
                 '{"epsilon": 0.1} holds it in 90% of them',
             )
-        if ("connected" in constraint or "route" in constraint or "place" in constraint
+        if ("connected" in constraint or "route" in constraint or "place" in constraint or "join" in constraint
                 or any(kind in constraint for kind in SCHEDULING_KEYS)):
-            return Refusal("chance_misplaced", loc, f"the constraint {identifier!r} is a scheduling, connected or route rule; a chance is on an expression rule")
+            return Refusal("chance_misplaced", loc, f"the constraint {identifier!r} is a scheduling, connected, route, place or join rule; a chance is on an expression rule")
         if constraint.get("severity") == "soft":
             return Refusal("chance_misplaced", loc, f"the constraint {identifier!r} is soft; a rule that may bend at a cost needs no chance -- make it hard")
         if "when" in constraint:
@@ -2407,6 +2491,11 @@ class _DomainChecker:
                 if problem:
                     return problem
                 continue
+            if "join" in constraint:
+                problem = self._join(constraint["join"], [*at, "join"])
+                if problem:
+                    return problem
+                continue
             if "place" in constraint:
                 inner = {}
                 for part in ("slots", "areas", "access"):
@@ -2446,6 +2535,40 @@ class _DomainChecker:
                 problem = self._term(term["expression"], ["objective", "terms", i, "expression"], {})
                 if problem:
                     return problem
+        return None
+
+    def _join(self, body: dict[str, Any], loc: Loc) -> Refusal | None:
+        """The links and places as bindings, each `ends` relationship from the links' type to the places' type,
+        and `sources` a 0/1 field of the places or fixed filters on their fields."""
+        scope: dict[str, str] = {}
+        for part in ("links", "places"):
+            problem = self._bindings([body[part]], [*loc, part], scope)
+            if problem:
+                return Refusal(problem.code, [*loc, part, *problem.loc[len(loc) + 2:]], problem.message)
+        links, places = body["links"]["set"], body["places"]["set"]
+        for i, name in enumerate(body["ends"]):
+            ends = self.world.relationship_ends[name]
+            if not (self.world.is_a(links, ends[0]) and self.world.is_a(places, ends[1])):
+                return Refusal(
+                    "join_ends_mismatch", [*loc, "ends", i],
+                    f"{name!r} joins {ends[0]} to {ends[1]}; a join rule's ends run from each link ({links}) to "
+                    f"one of its places ({places})")
+        if isinstance(body.get("sources"), list):
+            fixed = all(isinstance(f, dict) and "index" not in f and not isinstance(f.get("value"), dict)
+                        for f in body["sources"])
+            problem = self._domain_filters(
+                body["sources"], [*loc, "sources"], places, lambda attr: self.world.attributes.get((places, attr))
+            ) if fixed else Refusal("join_sources_invalid", [*loc, "sources"],
+                                    "sources picks the places by their own fields only (no index, no parameter)")
+            if problem:
+                return Refusal("join_sources_invalid", problem.loc, problem.message)
+        elif "sources" in body:
+            declared = self.world.attributes.get((places, body["sources"]))
+            if declared is None or declared.get("data_type") not in ("boolean", "integer", "number"):
+                return Refusal(
+                    "join_sources_invalid", [*loc, "sources"],
+                    f"{body['sources']!r} must be a yes/no or 0/1 field of {places} (where the network starts); "
+                    f"{places} " + ("has no such field" if declared is None else f"has it as {declared.get('data_type')}"))
         return None
 
     def _connected(self, body: dict[str, Any], loc: Loc) -> Refusal | None:

@@ -750,6 +750,8 @@ export const CONSTRAINT_KEYS: ReadonlySet<string> = new Set([
   "route",
   // Items placed on a drawing's free area (version 2, plan phase 1C), likewise.
   "place",
+  // Links built join places into one network, or into networks each reaching a source (version 2), likewise.
+  "join",
 ]);
 
 /** The two scheduling rules, and the keys each carries (`SCHEDULING_KEYS`
@@ -779,6 +781,10 @@ export const PLACE_KEYS: readonly string[] = [
 export const PLACE_REQUIRED: readonly string[] = [
   "areas", "chosen", "length", "origin", "shape", "slots", "step", "width", "x", "y",
 ];
+
+/** What a `join` rule names (`JOIN_KEYS`), and what it must name (`JOIN_REQUIRED`), in `app/ir/contract.py`. */
+export const JOIN_KEYS: readonly string[] = ["links", "build", "ends", "places", "use", "sources"];
+export const JOIN_REQUIRED: readonly string[] = ["build", "ends", "links", "places"];
 
 /** What an interval declaration names beyond `index` and `domain`. */
 export const INTERVAL_KEYS = ["start", "end", "size", "presence"] as const;

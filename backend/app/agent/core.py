@@ -1520,6 +1520,13 @@ chosen must join the source along the links"): one binary pick[place] and ONE ru
 "value":"exchange"}}]}}}} -- sources is the where list that picks the start (or a 0/1 field); the relationship is
 loaded from the two-column file of links (relationships_from_file). Never write it as "a picked place touches a used
 link" or "has a picked neighbour": that lets cut-off islands through. No variable per link is needed;
+when the LINKS THEMSELVES are the decision (which cables, roads or pipes to build, at a cost per link -- network
+design, a spanning tree): links are records with two relationships to their places (link -> place, one per end),
+one binary lay[link], and ONE rule {{"join": {{"links":{{"index":"l","set":"segment"}},"build":{{"var":"lay",
+"index":["l"]}},"ends":["seg_a","seg_b"],"places":{{"index":"p","set":"site"}}}}}} -- add "sources" (as above) to
+join every place to a source instead of to each other, and "use": {{"var":"serve","index":["p"]}} when only some
+places must be joined (a link is then built only between two served places); with every place joined and a goal
+that only adds up link costs it is solved exactly as a minimum spanning tree;
 SCHEDULING (operations on machines, steps in order, finish as early as possible): one record per operation --
 when no column is its key, join columns: "key": ["job","step"] (gives "Gear-1"), and load job and step as its
 fields; the order of steps is
