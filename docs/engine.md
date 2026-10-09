@@ -198,7 +198,10 @@ where HiGHS, after 60 s on the flow rows, has 7,410 against the optimum 5,747; 1
 in the network lane after the network and pairing checks, and when `networkx` is asked for by name; the solver
 string says `minimum spanning tree (Kruskal)`, `params.network_run.kind` is `spanning`. Every other model with one
 join rule gets the tree as a start (`params.join_start_run`); with `use`, a Steiner tree (NetworkX's
-approximation) joining the places forced in and the sources.
+approximation) joining the places forced in and the sources. With `demand` (and `capacity`, `supply`, `carry`), the rule
+also carries what each place takes from the sources; a demand alone keeps the spanning lane (the demand flow is set
+from each subtree's total), while capacities, supplies or a priced carry make it a capacitated network design for
+the MIP solver, started from the tree; `join_start_run.overloaded` counts the links that start sends over capacity.
 
 The Assistant's `run_python` has NetworkX too (paths, connectivity, components), e.g. to work out which
 cells of a layout reach a door before the model is written.

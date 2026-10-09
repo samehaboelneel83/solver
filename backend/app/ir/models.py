@@ -409,6 +409,12 @@ class JoinBody(_Model):
     places: Binding
     use: Optional[VarRef] = None
     sources: Optional[Union[Name, list[WhereEntry]]] = None
+    #: What each place takes from the sources (a number field), what a link carries at most, what a source sends
+    #: at most, and the variable holding what each link carries.
+    demand: Optional[Name] = None
+    capacity: Optional[Name] = None
+    supply: Optional[Name] = None
+    carry: Optional[VarRef] = None
 
 
 class Constraint(_Model):

@@ -1055,6 +1055,20 @@ class ShapeChecker {
       odd = "sources";
       what = "neither a field name nor a where list";
     }
+    if (odd === undefined) {
+      odd = ["demand", "capacity", "supply"].find((key) => key in body && !isName(body[key]));
+      what = "not a field name";
+    }
+    if (odd === undefined) {
+      const needs: [string, string, string][] = [
+        ["demand", "sources", "a demand is delivered from sources"],
+        ["capacity", "demand", "a capacity limits what the links carry of the demand"],
+        ["supply", "demand", "a supply limits what the sources send of the demand"],
+        ["carry", "demand", "carry is what a link carries of the demand"],
+      ];
+      const missing = needs.find(([key, need]) => key in body && !(need in body));
+      if (missing) return refusal("join_malformed", [...loc, missing[0]], `${missing[2]}: name ${missing[1]} too`);
+    }
     if (odd !== undefined) return refusal("join_malformed", [...loc, odd], `${words}; '${odd}' is ${what}`);
     for (const key of ["severity", "weight", "when", "chance"]) {
       if (key in constraint && (key !== "severity" || constraint[key] !== "hard")) {
@@ -1092,6 +1106,21 @@ class ShapeChecker {
       const declared = (this.ir.variables as Record<string, Json>)[ref.var as string];
       if (declared.domain !== "binary") {
         return refusal("join_not_binary", [...loc, key, "var"], `'${String(ref.var)}' must be binary: ${what}`);
+      }
+    }
+    if ("carry" in body) {
+      const ref = body.carry;
+      const index = (body.links as Json).index;
+      if (!isObject(ref) || Object.keys(ref).length !== 2 || !("var" in ref) || !Array.isArray(ref.index)
+        || ref.index.length !== 1 || ref.index[0] !== index) {
+        return refusal("join_index_mismatch", [...loc, "carry"], `carry is a variable read per link: {"var": "...", "index": ["${String(index)}"]}`);
+      }
+      const reference = this.reference(ref, [...loc, "carry"], scope, "var", this.variables);
+      if (reference) return reference;
+      const declared = (this.ir.variables as Record<string, Json>)[ref.var as string];
+      if (declared.domain !== "integer" && declared.domain !== "continuous") {
+        return refusal("join_carry_invalid", [...loc, "carry", "var"],
+          `'${String(ref.var)}' must be integer or continuous: it is the amount a link carries`);
       }
     }
     const ends = body.ends;

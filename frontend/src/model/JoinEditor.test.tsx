@@ -8,11 +8,15 @@ import { declaredRelationships, describeJoin, joinChoices, newJoinRule, type Con
 const CONTEXT: ModelContext = {
   sets: ["site", "segment"],
   setIds: {},
-  attributes: { site: [{ name: "is_exchange", data_type: "boolean" }, { name: "name", data_type: "text" }] },
+  attributes: {
+    site: [{ name: "is_exchange", data_type: "boolean" }, { name: "name", data_type: "text" }, { name: "homes", data_type: "integer" }],
+    segment: [{ name: "fibres", data_type: "integer" }],
+  },
   variables: {
     lay: { index: ["segment"], domain: "binary" },
     serve: { index: ["site"], domain: "binary" },
     flow: { index: ["segment"], domain: "integer" },
+    used: { index: ["site"], domain: "integer" },
   },
   parameters: {},
   relationships: [
@@ -65,5 +69,26 @@ describe("the join rule", () => {
     expect(screen.getByText(/join every site with serve = 1 to a source \(is_exchange\)/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Places to join"), { target: { value: "" } });
     expect(shown().join?.use).toBeUndefined();
+  });
+
+  it("carries what each place takes, within each link's capacity, once there are sources", () => {
+    render(<Harness start={newJoinRule("c_1", CONTEXT)!} />);
+    expect(screen.queryByLabelText("Each place takes")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Joined to (sources)"), { target: { value: "is_exchange" } });
+    fireEvent.change(screen.getByLabelText("Each place takes"), { target: { value: "homes" } });
+    fireEvent.change(screen.getByLabelText("A link carries at most"), { target: { value: "fibres" } });
+    fireEvent.change(screen.getByLabelText("What each link carries, in"), { target: { value: "flow" } });
+    const rule = shown();
+    expect(rule.join).toMatchObject({ demand: "homes", capacity: "fibres", carry: { var: "flow", index: ["s"] } });
+    expect(screen.getByText(/carrying each its homes within each link's fibres \(flow per link\)/)).toBeTruthy();
+    const ir = {
+      version: 2, sets: ["site", "segment"], relationships: declaredRelationships([rule], []), parameters: {},
+      variables: { lay: { index: ["segment"], domain: "binary" }, flow: { index: ["segment"], domain: "integer" } },
+      constraints: [rule], objective: { sense: "minimize", terms: [{ id: "o", weight: 1, expression: { const: 0 } }] },
+    };
+    expect(checkIrShape(ir)).toBeNull();
+    fireEvent.change(screen.getByLabelText("Joined to (sources)"), { target: { value: "" } });
+    expect(shown().join).not.toHaveProperty("demand");
+    expect(shown().join).not.toHaveProperty("carry");
   });
 });

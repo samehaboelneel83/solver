@@ -231,6 +231,11 @@ def readback(spec: dict[str, Any]) -> str:
             lines.append(f"- rule {c.get('id')}: the {links} with {build} = 1 (ends along {' and '.join(map(str, ends))}) "
                          + (f"join {which} to {start}" if start else f"join {which} into one network")
                          + (f"; a {links} is built only between two {places} with {use} = 1" if use else "")
+                         + (f"; each {places} takes its {body['demand']} from the sources"
+                            + (f", each {links} carries at most its {body['capacity']}" if body.get("capacity") else "")
+                            + (f", each source sends at most its {body['supply']}" if body.get("supply") else "")
+                            + (f", {(body.get('carry') or {}).get('var')} is what each {links} carries"
+                               if body.get("carry") else "") if body.get("demand") else "")
                          + " (hard)")
             continue
         lines.append(f"- rule {c.get('id')}: " + (f"for every {scope}: " if scope else "")

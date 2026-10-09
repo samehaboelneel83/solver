@@ -140,6 +140,12 @@ export type JoinBody = {
   use?: { var: string; index: string[] };
   /** A 0/1 field of the places, or fixed filters: every place joined to one of these instead of to each other. */
   sources?: string | unknown[];
+  /** What each place takes from the sources (a number field), what a link carries at most, what a source sends at
+   * most, and the variable holding what each link carries. */
+  demand?: string;
+  capacity?: string;
+  supply?: string;
+  carry?: { var: string; index: string[] };
 };
 
 /** A join rule in words, or null for any other rule. */
@@ -149,7 +155,10 @@ export function describeJoin(rule: { join?: unknown }): string | null {
   const places = j.places?.set || "places";
   const which = j.use ? `every ${places} with ${j.use.var} = 1` : `every ${places}`;
   const to = j.sources ? `to a source (${typeof j.sources === "string" ? j.sources : "fixed filters"})` : "into one network";
-  return `the ${j.links?.set || "links"} with ${j.build?.var || "?"} = 1 join ${which} ${to}`;
+  const carried = j.demand
+    ? `, carrying each its ${j.demand}${j.capacity ? ` within each link's ${j.capacity}` : ""}${j.supply ? ` and each source's ${j.supply}` : ""}${j.carry ? ` (${j.carry.var} per link)` : ""}`
+    : "";
+  return `the ${j.links?.set || "links"} with ${j.build?.var || "?"} = 1 join ${which} ${to}${carried}`;
 }
 
 /** What a join rule can read: binary variables over one set (the links), each with the pairs of relationships

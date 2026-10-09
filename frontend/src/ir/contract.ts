@@ -783,7 +783,11 @@ export const PLACE_REQUIRED: readonly string[] = [
 ];
 
 /** What a `join` rule names (`JOIN_KEYS`), and what it must name (`JOIN_REQUIRED`), in `app/ir/contract.py`. */
-export const JOIN_KEYS: readonly string[] = ["links", "build", "ends", "places", "use", "sources"];
+export const JOIN_KEYS: readonly string[] = [
+  "links", "build", "ends", "places", "use", "sources",
+  // What each place takes from the sources, carried along the built links (capacitated network design).
+  "demand", "capacity", "supply", "carry",
+];
 export const JOIN_REQUIRED: readonly string[] = ["build", "ends", "links", "places"];
 
 /** What an interval declaration names beyond `index` and `domain`. */

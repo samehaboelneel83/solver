@@ -28,6 +28,38 @@ export default function JoinEditor({
   const sourceFields = (context.attributes[body.places.set] ?? [])
     .filter((a) => ["integer", "number", "boolean"].includes(a.data_type)).map((a) => a.name);
 
+  const demandId = useId();
+  const capacityId = useId();
+  const supplyId = useId();
+  const carryId = useId();
+  const numbers = (set: string) => (context.attributes[set] ?? [])
+    .filter((a) => ["integer", "number"].includes(a.data_type)).map((a) => a.name);
+  const placeNumbers = numbers(body.places.set);
+  const linkNumbers = numbers(body.links.set);
+  const carries = Object.entries(context.variables)
+    .filter(([, v]) => ["integer", "continuous"].includes(v.domain) && v.index.length === 1 && v.index[0] === body.links.set)
+    .map(([name]) => name);
+
+  const fieldSelect = (id: string, key: "demand" | "capacity" | "supply", label: string, fields: string[], none: string) => (
+    <div>
+      <label htmlFor={id} className="block text-xs text-slate-600">{label}</label>
+      <select id={id} className="rounded border px-2 py-1" value={body[key] ?? ""}
+        onChange={(event) => {
+          const next: JoinBody = { ...body };
+          delete next[key];
+          if (key === "demand" && !event.target.value) {
+            delete next.capacity;
+            delete next.supply;
+            delete next.carry;
+          }
+          write(event.target.value ? { ...next, [key]: event.target.value } : next);
+        }}>
+        <option value="">{none}</option>
+        {fields.map((name) => <option key={name} value={name}>{name}</option>)}
+      </select>
+    </div>
+  );
+
   function write(next: JoinBody) {
     const { severity: _s, weight: _w, when: _when, chance: _c, ...rest } = constraint;
     onChange({ ...rest, join: next, severity: "hard" });
@@ -88,7 +120,10 @@ export default function JoinEditor({
             value={typeof body.sources === "string" ? body.sources : body.sources ? "(filters)" : ""}
             onChange={(event) => {
               const { sources: _old, ...rest } = body;
-              if (!event.target.value) write(rest);
+              if (!event.target.value) {
+                const { demand: _d, capacity: _c, supply: _s, carry: _k, ...unsourced } = rest;
+                write(unsourced);
+              }
               else if (event.target.value !== "(filters)") write({ ...rest, sources: event.target.value });
             }}>
             <option value="">each other: one network</option>
@@ -97,6 +132,26 @@ export default function JoinEditor({
           </select>
         </div>
       </div>
+      {body.sources ? (
+        <div className="flex flex-wrap items-end gap-3">
+          {fieldSelect(demandId, "demand", "Each place takes", placeNumbers, "nothing: only joined")}
+          {body.demand && fieldSelect(capacityId, "capacity", "A link carries at most", linkNumbers, "no limit")}
+          {body.demand && fieldSelect(supplyId, "supply", "A source sends at most", placeNumbers, "no limit")}
+          {body.demand && (
+            <div>
+              <label htmlFor={carryId} className="block text-xs text-slate-600">What each link carries, in</label>
+              <select id={carryId} className="rounded border px-2 py-1" value={body.carry?.var ?? ""}
+                onChange={(event) => {
+                  const { carry: _old, ...rest } = body;
+                  write(event.target.value ? { ...rest, carry: { var: event.target.value, index: [body.links.index] } } : rest);
+                }}>
+                <option value="">not kept</option>
+                {carries.map((name) => <option key={name} value={name}>{name}</option>)}
+              </select>
+            </div>
+          )}
+        </div>
+      ) : null}
       <p className="text-xs text-slate-500">
         A join rule is always required. With every {body.places.set || "place"} joined and a goal that only adds up the
         links' costs, it is solved exactly as a minimum spanning tree (or forest, with sources); otherwise that tree is

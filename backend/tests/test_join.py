@@ -338,6 +338,14 @@ def _domain_run(db, places, links, *, use=False, required=()):  # noqa: F811
     bad["constraints"][0]["join"]["sources"] = "is_exchange"
     refused = validate_ir(db, domain, bad)
     assert refused is not None and refused.code == "join_sources_invalid", refused
+    from tests.test_v1_problem_run import make_attribute_def
+
+    make_attribute_def(db, site, "is_exchange", "boolean")
+    make_attribute_def(db, site, "label_text", "text")
+    assert validate_ir(db, domain, bad) is None
+    bad["constraints"][0]["join"]["demand"] = "label_text"
+    refused = validate_ir(db, domain, bad)
+    assert refused is not None and refused.code == "join_field_invalid" and "as text" in refused.message, refused
     assert wrong
     version = make_model_version(db, make_problem(db, domain), ir)
     problem = db.execute(text("SELECT problem_id FROM model_version WHERE id = :v"), {"v": version}).scalar_one()
@@ -368,3 +376,145 @@ def test_a_run_choosing_its_places_starts_from_a_steiner_tree(db, empty_queue): 
     assert row["status"] == "optimal", row["error"]
     start = row["params"]["join_start_run"]
     assert start["used"] is True and start["how"].startswith("Steiner"), start
+
+
+# --- what each place takes, carried along the built links (capacitated network design) -------------------------
+
+
+def _capacitated(places, links, sources, need, cap, *, supply=None, unit=None):
+    """Sources feed every place its need along built links of limited capacity; a link costs to build and, with
+    `unit`, per unit carried (read through a carry variable)."""
+    ir, data = _model(places, links, sources=sources)
+    body = ir["constraints"][0]["join"]
+    body["demand"] = "need"
+    if cap is not None:
+        body["capacity"] = "cap"
+    if supply is not None:
+        body["supply"] = "supply"
+    for row in data["sets"]["site"]:
+        row["need"] = need.get(row["id"], 0)
+        if supply is not None and row["id"] in supply:
+            row["supply"] = supply[row["id"]]
+    for row in data["sets"]["segment"]:
+        if cap is not None:
+            row["cap"] = cap[row["id"]]
+    if unit is not None:
+        ir["variables"]["carry"] = {"index": ["segment"], "domain": "integer", "lower": 0, "upper": 1000}
+        body["carry"] = {"var": "carry", "index": ["l"]}
+        ir["parameters"]["unit"] = {"index": ["segment"]}
+        data["parameters"]["unit"] = [{"segment": l, "value": unit[l]} for l, *_ in links]
+        ir["objective"]["terms"].append({"id": "o_carry", "weight": 1, "expression": {
+            "sum": {"mul": [{"par": "unit", "index": ["l"]}, {"var": "carry", "index": ["l"]}]},
+            "over": [{"index": "l", "set": "segment"}]}})
+    return ir, data
+
+
+def _brute_capacitated(places, links, sources, need, cap, supply=None, unit=None):
+    """The cheapest set of links that joins every place to a source and can carry every need (a min-cost flow on
+    the links built), over every set of links."""
+    best = None
+    total = sum(need.get(p, 0) for p in places if p not in sources)
+    for k in range(len(links) + 1):
+        for chosen in itertools.combinations(links, k):
+            g = nx.Graph()
+            g.add_nodes_from(places)
+            g.add_edges_from((a, b) for _, a, b, _ in chosen)
+            if any(not (nx.node_connected_component(g, p) & sources) for p in places):
+                continue
+            flow = nx.DiGraph()
+            flow.add_node("S", demand=-total)
+            for p in places:
+                flow.add_node(p, demand=0 if p in sources else need.get(p, 0))
+            for s in sources:
+                flow.add_edge("S", s, capacity=(supply or {}).get(s, total), weight=0)
+            for l, a, b, _ in chosen:
+                if a == b:
+                    continue
+                for u, v in ((a, b), (b, a)):
+                    # one direction is enough at an optimum: a link's capacity shared both ways
+                    flow.add_edge(u, v, capacity=(cap or {}).get(l, total), weight=(unit or {}).get(l, 0)) \
+                        if not flow.has_edge(u, v) else None
+            try:
+                moved = nx.min_cost_flow_cost(flow) if unit else (nx.min_cost_flow(flow) and 0)
+            except nx.NetworkXUnfeasible:
+                continue
+            value = sum(c for *_, c in chosen) + moved
+            best = value if best is None else min(best, value)
+    return best
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_capacities_and_needs_agree_with_every_set_of_links(seed):
+    rnd = random.Random(seed)
+    places, links = _graph(6, 400 + seed, extra=0.3)
+    links = [(l, a, b, abs(c) + 1) for l, a, b, c in links[:9]]
+    sources = {"p0"} if seed % 3 else {"p0", "p5"}
+    need = {p: rnd.randint(0, 4) for p in places if p not in sources}
+    cap = {l: rnd.randint(2, 8) for l, *_ in links}
+    supply = {s: 6 + seed for s in sources} if seed % 2 else None
+    unit = {l: rnd.randint(0, 3) for l, *_ in links} if seed % 4 >= 2 else None
+    try:
+        compiled = compile_model(*_capacitated(places, links, sources, need, cap, supply=supply, unit=unit))
+    except Unsupported as refused:
+        pytest.skip(str(refused))  # a place no link reaches, or too little supply in all
+    assert "capacitated" in join.applies(compiled)
+    expected = _brute_capacitated(places, links, sources, need, cap, supply, unit)
+    result = _mip(compiled, "cp-sat" if seed % 2 else "highs")
+    if expected is None:
+        assert result.status == "infeasible"
+        return
+    assert result.status == "optimal" and round(float(result.objective)) == expected, (seed, result.objective, expected)
+    if unit:
+        flows = {k[1][1]: v for k, v in result.assignments.items() if k[0] == join.DEMAND}
+        assert flows  # the carry variable reads the demand flow
+        carried = {k[1][0]: v for k, v in result.assignments.items() if k[0] == "carry"}
+        for l, *_ in links:
+            both = sum(v for (rule, link, way), v in ((k[1], v) for k, v in result.assignments.items()
+                                                     if k[0] == join.DEMAND) if link == l)
+            assert round(float(carried[l])) == round(float(both))
+
+
+def test_needs_without_capacity_still_solve_as_a_spanning_forest():
+    places, links = _graph(9, 7)
+    sources = {"p0"}
+    need = {p: 2.5 for p in places if p != "p0"}
+    compiled = compile_model(*_capacitated(places, links, sources, need, None))
+    assert join.applies(compiled) is None
+    ours = join.solve(compiled).solution
+    assert ours.status == "optimal" and ours.objective == _nx_mst(places, links, sources)
+    assert _holds(compiled, ours.assignments)  # the demand flow (decimal) is set too
+
+
+def test_what_a_capacitated_rule_needs_is_said():
+    places, links = _graph(5, 3)
+    ir, data = _capacitated(places, links, {"p0"}, {"p1": 3}, {l: 1 for l, *_ in links})
+    assert check_shape(ir) is None
+    body = ir["constraints"][0]["join"]
+    for change, drop, code in (({}, "sources", "join_malformed"), ({}, "demand", "join_malformed"),
+                               ({"demand": 3}, None, "join_malformed"),
+                               ({"carry": {"var": "lay", "index": ["l"]}}, None, "join_carry_invalid"),
+                               ({"carry": {"var": "lay", "index": ["p"]}}, None, "join_index_mismatch")):
+        trial = {k: v for k, v in {**body, **change}.items() if k != drop}
+        ir["constraints"][0]["join"] = trial
+        refused = check_shape(ir)
+        assert refused is not None and refused.code == code, (change, drop, refused)
+    ir["constraints"][0]["join"] = body
+    data["sets"]["site"][1]["need"] = -1
+    with pytest.raises(Unsupported, match="0 or more"):
+        compile_model(ir, data)
+    data["sets"]["site"][1]["need"] = 3
+    for row in data["sets"]["site"]:
+        row["supply"] = 1
+    body["supply"] = "supply"
+    with pytest.raises(Unsupported, match="supply 1 in all"):
+        compile_model(ir, data)
+
+
+def test_the_start_of_a_capacitated_network_says_what_it_overloads():
+    places = ["s", "a", "b", "c"]
+    links = [("sa", "s", "a", 1), ("ab", "a", "b", 1), ("bc", "b", "c", 1), ("sc", "s", "c", 5)]
+    compiled = compile_model(*_capacitated(places, links, {"s"}, {"a": 1, "b": 1, "c": 1}, {l: 2 for l, *_ in links}))
+    hint, record = join.start(compiled)
+    assert record["how"] == "spanning forest" and record["overloaded"] == 1  # s-a would carry 3 of its 2
+    result = _mip(compiled)
+    assert result.status == "optimal" and round(float(result.objective)) == 7  # s-a, a-b and s-c

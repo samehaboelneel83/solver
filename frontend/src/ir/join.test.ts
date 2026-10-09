@@ -31,4 +31,16 @@ describe("join rule", () => {
     expect(checkIrShape({ ...IR, constraints: [{ ...IR.constraints[0], chance: { epsilon: 0.1 } }, ...IR.constraints.slice(1)] })?.code)
       .toBe("chance_misplaced");
   });
+
+  it("asks a demand for sources, and capacity, supply and carry for a demand", () => {
+    expect(checkIrShape(withJoin({ demand: "need" }))).toBeNull();
+    const { sources: _s, ...unsourced } = body;
+    const noSources = { ...IR, constraints: [{ ...IR.constraints[0], join: { ...unsourced, demand: "need" } }, ...IR.constraints.slice(1)] };
+    expect(checkIrShape(noSources)?.loc).toEqual(["constraints", 0, "join", "demand"]);
+    expect(checkIrShape(withJoin({ capacity: "cap" }))?.code).toBe("join_malformed");
+    expect(checkIrShape(withJoin({ demand: 3 }))?.code).toBe("join_malformed");
+    expect(checkIrShape(withJoin({ demand: "need", carry: { var: "lay", index: ["l"] } }))?.code).toBe("join_carry_invalid");
+    expect(checkIrShape(withJoin({ demand: "need", carry: { var: "lay", index: ["p"] } }))?.code).toBe("join_index_mismatch");
+    expect(checkIrShape(withJoin({ demand: "need", capacity: "cap", supply: "supply" }))).toBeNull();
+  });
 });

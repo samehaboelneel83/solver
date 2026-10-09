@@ -132,7 +132,12 @@ PLACE_REQUIRED: frozenset[str] = frozenset({"slots", "chosen", "x", "y", "length
 #: decision per place: only used places need joining, and a link is built only between two used places) and
 #: `sources` (a 0/1 field of the places, or a where list: every used place then reaches a source instead of all
 #: of them reaching each other).
-JOIN_KEYS: frozenset[str] = frozenset({"links", "build", "ends", "places", "use", "sources"})
+JOIN_KEYS: frozenset[str] = frozenset({"links", "build", "ends", "places", "use", "sources",
+                                       # What each place takes from the sources, carried along the built links:
+                                       # `demand` (a number field of the places; needs sources), `capacity` (of
+                                       # the links), `supply` (of the sources), `carry` (a variable per link: what
+                                       # it carries, for the goal and other rules to read).
+                                       "demand", "capacity", "supply", "carry"})
 JOIN_REQUIRED: frozenset[str] = frozenset({"links", "build", "ends", "places"})
 #: What an interval declaration names beyond `index` and `domain`.
 INTERVAL_KEYS: frozenset[str] = frozenset({"start", "end", "size", "presence"})

@@ -768,17 +768,29 @@ exactly by Kruskal in the network lane (`solve.network`), or by `networkx` asked
 tree (with `use`: a Steiner tree joining the places forced in and the sources) is the solver's start
 (`solve.connected_start`).
 
-Refusals, all `shape` but the last two:
+**Carrying what each place takes (capacitated network design).** With `sources`, `"demand": "homes"` (a number
+field of the places) makes the network carry each place's demand from the sources along the built links: a second
+flow beside the one that joins the places. `"capacity": "fibres"` (a number field of the links) limits what a built
+link carries, both ways together; `"supply": "max_out"` (a number field of the places) limits what each source
+sends; `"carry": {"var": "carried", "index": ["l"]}` names an integer or continuous variable over the links that
+holds what each link carries, so the goal can price it per unit and other rules can read it. A record with no value
+takes (or limits) nothing; a negative or non-numeric value is refused. Whole numbers keep the flow whole. A demand
+without a capacity, supply or carry is still a spanning forest; with any of them it is solved as a MIP, starting
+from the spanning tree (the run says how many links that start overloads).
+
+Refusals, all `shape` but the last three:
 
 | code | when |
 |---|---|
 | `join_needs_version_2` | the document is version 1 |
-| `join_malformed` | a key missing or unknown, `sources` neither a name nor a where list, `ends` not two names, the links and places read by one index, or the rule also carries an expression, another rule kind or a `forall` |
+| `join_malformed` | a key missing or unknown, `sources` neither a name nor a where list, `demand` without `sources` or `capacity`, `supply` or `carry` without `demand`, `ends` not two names, the links and places read by one index, or the rule also carries an expression, another rule kind or a `forall` |
 | `join_on_soft` | `severity` is not `hard`, or a `weight`, `when` or `chance` is given |
 | `join_index_mismatch` | `build` is not read `[links' index]`, or `use` not `[places' index]` |
 | `join_not_binary` | `build` or `use` is not binary |
+| `join_carry_invalid` | `carry` is not an integer or continuous variable |
 | `join_ends_invalid` | an `ends` relationship is not in `relationships` |
 | `join_ends_mismatch` (domain) | an `ends` relationship does not run from the links' entity type to the places' |
+| `join_field_invalid` (domain) | `demand` or `supply` is not a number field of the places, or `capacity` not one of the links |
 | `join_sources_invalid` (domain) | `sources` is not a yes/no or 0/1 field of the places, or its filters read an index or parameter |
 
 ### 4.5 `route` — vehicles round the stops (version 2, queue R15b)

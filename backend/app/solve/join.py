@@ -37,7 +37,7 @@ from typing import Any
 
 from app.solve.compile import Compiled, VarKey
 
-FLOW, ROOT = "__join_flow", "__join_root"
+FLOW, ROOT, DEMAND = "__join_flow", "__join_root", "__join_demand"
 #: The share of the run's time the start may take, and its ceiling in seconds.
 SHARE, CEILING = 0.2, 30.0
 #: The node standing for "any source": joined to every source at no cost, so a forest is one spanning tree.
@@ -75,6 +75,36 @@ def _ends(compiler: Any, body: dict[str, Any], links: list[str], known: set[str]
             continue
         ends[link] = (a[0], b[0])
     return ends, unusable
+
+
+def _field(row: dict[str, Any], name: str) -> Decimal | None:
+    """A record's number in `name`, or None when it has none."""
+    value = row.get(name)
+    if value is None and isinstance(row.get("attrs"), dict):
+        value = row["attrs"].get(name)
+    if value in (None, ""):
+        return None
+    try:
+        return Decimal(str(value))
+    except Exception:  # noqa: BLE001 -- a text in a number field is said by the caller
+        return Decimal("NaN")
+
+
+def _numbers(compiler: Any, rule: str, set_name: str, ids: list[str], name: str, what: str) -> dict[str, Decimal]:
+    """Each record's `name` (missing ones left out), refused when one is not a number of 0 or more."""
+    from app.solve.compile import Unsupported
+
+    rows = {str(r["id"]): r for r in compiler.sets.get(set_name, [])}
+    out: dict[str, Decimal] = {}
+    for i in ids:
+        value = _field(rows.get(i, {}), name)
+        if value is None:
+            continue
+        if value.is_nan() or value < 0:
+            raise Unsupported(f"{rule}: the {set_name} {i!r} has {name} = {rows[i].get(name)!r}; {what} is a number of "
+                              "0 or more")
+        out[i] = value
+    return out
 
 
 def _components(places: list[str], pairs) -> dict[str, int]:
@@ -184,11 +214,79 @@ def expand(compiler: Any, spec: dict[str, Any]) -> None:
         if root is not None:
             balance.add(Linear(coeffs={root[p]: n + one}))
         row({place_index: p}, balance, ">=")
+    demand = _demand(compiler, spec, places, links, ends, build, sources, x, row) if body.get("demand") else None
     compiler.connectivity.append(rule)
     compiler.joins.append({
         "rule": rule, "build": build, "use": use, "ends": ends, "places": places, "sources": sources,
         "flow": flow, "root": root, "unusable": len(unusable), "unreachable": len(unreachable),
+        **(demand or {"need": None, "dflow": {}, "capacity": {}, "supply": {}, "carry": None}),
     })
+
+
+def _demand(compiler: Any, spec: dict[str, Any], places, links, ends, build, sources, x, row) -> dict[str, Any]:
+    """What each place takes from the sources, carried along the built links: a second flow beside the one that
+    joins the places (a place that takes nothing must still be joined, which this flow alone would not see).
+
+    Every place but the sources takes in its `demand` more than it sends on (when used); a built link carries at
+    most its `capacity`, both ways together; a source sends at most its `supply`; `carry[link]`, when named, is what
+    the link carries -- the goal may price it and other rules may read it. Whole numbers keep the flow whole."""
+    from app.solve.compile import Linear, Unsupported, Variable
+
+    rule, body = spec["id"], spec["join"]
+    if sources is None:  # pragma: no cover -- the validator asks demand for sources
+        raise Unsupported(f"{rule}: a demand is delivered from sources; name the sources")
+    link_index, place_index = body["links"]["index"], body["places"]["index"]
+    place_set, link_set = body["places"]["set"], body["links"]["set"]
+    need = _numbers(compiler, rule, place_set, places, body["demand"], "a demand")
+    need = {p: need.get(p, Decimal(0)) for p in places if p not in sources}
+    cap = _numbers(compiler, rule, link_set, links, body["capacity"], "a capacity") if body.get("capacity") else {}
+    supply = _numbers(compiler, rule, place_set, sorted(sources), body["supply"], "a supply") \
+        if body.get("supply") else {}
+    total = sum(need.values(), Decimal(0))
+    if body.get("supply") and len(supply) == len(sources) and body.get("use") is None and sum(supply.values()) < total:
+        raise Unsupported(f"{rule}: the sources supply {sum(supply.values())} in all and the {place_set} records take "
+                          f"{total}; every one must be joined, so no network can feed them all")
+    whole = all(v == v.to_integral_value() for v in [*need.values(), *cap.values(), *supply.values()])
+    one, zero = Decimal(1), Decimal(0)
+    into: dict[str, Linear] = {p: Linear() for p in places}
+    dflow: dict[tuple[str, str, str], Any] = {}
+    carry = {link: (body["carry"]["var"], (link,)) for link in links} if body.get("carry") else None
+    if carry is not None:
+        missing = [k for k in carry.values() if k not in compiler.variables]
+        if missing:  # pragma: no cover -- the validator pins the index
+            raise Unsupported(f"{rule}: no variable {missing[0]}")
+    for link, (a, b) in ends.items():
+        carried = Linear()
+        if a != b:
+            limit = min(total, cap[link]) if link in cap else total
+            for u, v, way in ((a, b, "ab"), (b, a, "ba")):
+                key = (DEMAND, (rule, link, way))
+                compiler.variables[key] = Variable(key, "integer" if whole else "continuous", zero, limit)
+                dflow[(link, u, v)] = key
+                carried.add(Linear(coeffs={key: one}))
+                into[v].add(Linear(coeffs={key: one}))
+                into[u].add(Linear(coeffs={key: -one}))
+                if link not in cap:
+                    row({link_index: link}, Linear(coeffs={key: one, build[link]: -total}), "<=")
+            if link in cap:
+                row({link_index: link}, carried.copy().add(Linear(coeffs={build[link]: -cap[link]})), "<=")
+        if carry is not None:
+            row({link_index: link}, Linear(coeffs={carry[link]: one}).add(carried, factor=-1), "=")
+    if carry is not None:
+        for link in links:
+            if link not in ends:
+                row({link_index: link}, Linear(coeffs={carry[link]: one}), "=")
+    for p in places:
+        if p in sources:
+            if p in supply:
+                # What it sends on, less what it takes in, within its supply (and nothing when it is not used).
+                row({place_index: p}, into[p].copy().add(x(p), factor=supply[p]), ">=")
+            continue
+        if need[p]:
+            row({place_index: p}, into[p].copy().add(x(p), factor=-need[p]), ">=")
+        else:
+            row({place_index: p}, into[p].copy(), ">=")
+    return {"need": need, "dflow": dflow, "capacity": cap, "supply": supply, "carry": carry}
 
 
 # --- the exact graph lane: a minimum spanning tree or forest -------------------------------------------------
@@ -242,6 +340,9 @@ def _shape(compiled: Compiled):
     meta = joins[0]
     if meta["use"] is not None:
         return "the join rule has a use decision: which places to join is the model's choice (a Steiner network)"
+    if meta["capacity"] or meta["supply"] or meta["carry"] is not None:
+        return ("the join rule limits what links carry or sources send, or names what each link carries: a "
+                "capacitated network design, left to the solver")
     if compiled.objective_quadratic or compiled.objective_mode == "lex":
         return "the goal is not one linear sum"
     if compiled.pwl or compiled.functions or compiled.intervals or compiled.placements or compiled.routes \
@@ -251,7 +352,7 @@ def _shape(compiled: Compiled):
         return "the model has another connectivity rule"
     build_keys = set(meta["build"].values())
     for key in compiled.variables:
-        if key[0] not in (FLOW, ROOT) and key not in build_keys:
+        if key[0] not in (FLOW, ROOT, DEMAND) and key not in build_keys:
             return f"{key[0]!r} is a decision besides the links built"
     for key in compiled.objective.coeffs:
         if key not in build_keys:
@@ -326,13 +427,24 @@ def _flows(meta: dict[str, Any], tree: set[str]) -> dict[VarKey, int]:
                 up[q] = (p, link)
                 queue.append(q)
     size = {p: 1 for p in order}
-    values: dict[VarKey, int] = {k: 0 for k in meta["flow"].values()}
+    need = meta.get("need") or {}
+    taken = {p: need.get(p, Decimal(0)) for p in order}
+    values: dict[VarKey, Any] = {k: 0 for k in [*meta["flow"].values(), *meta.get("dflow", {}).values()]}
     for p in reversed(order):
         if up[p] is None:
             continue
         parent, link = up[p]
         size[parent] += size[p]
+        taken[parent] += taken[p]
         values[meta["flow"][(link, parent, p)]] = size[p]
+        if meta.get("dflow"):
+            amount = taken[p]
+            values[meta["dflow"][(link, parent, p)]] = int(amount) if amount == amount.to_integral_value() \
+                else float(amount)
+    if meta.get("carry") is not None:
+        for link, key in meta["carry"].items():
+            values[key] = sum(values.get(meta["dflow"].get((link, *ab), None), 0) or 0
+                              for ab in (meta["ends"].get(link, ("", "")), meta["ends"].get(link, ("", ""))[::-1]))
     if meta["root"] is not None:
         for p, key in meta["root"].items():
             values[key] = 1 if starts and p == starts[0] else 0
@@ -376,6 +488,14 @@ def solve(compiled: Compiled):
 
 
 # --- a start for every other model with one join rule --------------------------------------------------------
+
+
+def _overloaded(meta: dict[str, Any], hint: dict[VarKey, Any]) -> int:
+    """How many links the start sends more along than their capacity (the solver then mends it)."""
+    carried: dict[str, float] = {}
+    for (link, _, _), key in meta.get("dflow", {}).items():
+        carried[link] = carried.get(link, 0.0) + float(hint.get(key, 0) or 0)
+    return sum(1 for link, c in (meta.get("capacity") or {}).items() if carried.get(link, 0.0) > float(c) + 1e-9)
 
 
 def start_applies(compiled: Compiled) -> str | None:
@@ -426,6 +546,8 @@ def start(compiled: Compiled, *, seconds: float = CEILING) -> tuple[dict[VarKey,
         hint = {k: (1 if link in built else 0) for link, k in meta["build"].items()}
         hint.update(_flows(meta, tree))
         record.update(how="spanning " + ("forest" if meta["sources"] is not None else "tree"), built=len(built))
+        if meta.get("capacity"):
+            record["overloaded"] = _overloaded(meta, hint)
         return hint, {**record, "seconds": round(time.monotonic() - began, 3)}
 
     import networkx as nx
@@ -475,6 +597,8 @@ def start(compiled: Compiled, *, seconds: float = CEILING) -> tuple[dict[VarKey,
     if meta["root"] is not None:
         hint.update({k: 0 for k in meta["root"].values()})
     hint.update(flows)
+    if meta.get("capacity"):
+        record["overloaded"] = _overloaded(meta, hint)
     record.update(how="Steiner tree (NetworkX approximation)", terminals=len(must), used_places=len(used),
                   built=len(built))
     return hint, {**record, "seconds": round(time.monotonic() - began, 3)}

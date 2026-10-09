@@ -1526,7 +1526,9 @@ one binary lay[link], and ONE rule {{"join": {{"links":{{"index":"l","set":"segm
 "index":["l"]}},"ends":["seg_a","seg_b"],"places":{{"index":"p","set":"site"}}}}}} -- add "sources" (as above) to
 join every place to a source instead of to each other, and "use": {{"var":"serve","index":["p"]}} when only some
 places must be joined (a link is then built only between two served places); with every place joined and a goal
-that only adds up link costs it is solved exactly as a minimum spanning tree;
+that only adds up link costs it is solved exactly as a minimum spanning tree; with sources, "demand" (a number field
+of the places: what each takes), "capacity" (of the links), "supply" (of the sources) and "carry" (an integer or
+continuous variable per link, which the goal may price per unit) make it a capacitated network design;
 SCHEDULING (operations on machines, steps in order, finish as early as possible): one record per operation --
 when no column is its key, join columns: "key": ["job","step"] (gives "Gear-1"), and load job and step as its
 fields; the order of steps is

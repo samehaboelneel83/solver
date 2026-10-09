@@ -1261,6 +1261,18 @@ class _ShapeChecker:
         if odd is None and "sources" in body and not (_is_name(body["sources"]) or (
                 isinstance(body["sources"], list) and body["sources"])):
             odd, what = "sources", "neither a field name nor a where list"
+        if odd is None:
+            odd = next((k for k in ("demand", "capacity", "supply") if k in body and not _is_name(body[k])), None)
+            what = "not a field name"
+        if odd is None:
+            needs = (("demand", "sources", "a demand is delivered from sources"),
+                     ("capacity", "demand", "a capacity limits what the links carry of the demand"),
+                     ("supply", "demand", "a supply limits what the sources send of the demand"),
+                     ("carry", "demand", "carry is what a link carries of the demand"))
+            odd, what = next(((k, why) for k, need, why in needs if k in body and need not in body), (None, ""))
+            if odd is not None:
+                return Refusal("join_malformed", [*loc, odd], f"{what}: name {dict((k, n) for k, n, _ in needs)[odd]} "
+                                                               "too")
         if odd is not None:
             return Refusal("join_malformed", [*loc, odd], f"{words}; {odd!r} is {what}")
         for key in ("severity", "weight", "when", "chance"):
@@ -1293,6 +1305,17 @@ class _ShapeChecker:
                 return problem
             if self.ir["variables"][ref["var"]].get("domain") != "binary":
                 return Refusal("join_not_binary", [*loc, key, "var"], f"{ref['var']!r} must be binary: {what}")
+        if "carry" in body:
+            ref, index = body["carry"], body["links"]["index"]
+            if not isinstance(ref, dict) or set(ref) != {"var", "index"} or ref.get("index") != [index]:
+                return Refusal("join_index_mismatch", [*loc, "carry"],
+                               f'carry is a variable read per link: {{"var": "...", "index": ["{index}"]}}')
+            problem = self._reference(ref, [*loc, "carry"], scope, "var", self.variables)
+            if problem:
+                return problem
+            if self.ir["variables"][ref["var"]].get("domain") not in ("integer", "continuous"):
+                return Refusal("join_carry_invalid", [*loc, "carry", "var"],
+                               f"{ref['var']!r} must be integer or continuous: it is the amount a link carries")
         ends = body["ends"]
         if not (isinstance(ends, list) and len(ends) == 2 and all(isinstance(e, str) for e in ends)):
             return Refusal("join_malformed", [*loc, "ends"],
@@ -2553,6 +2576,14 @@ class _DomainChecker:
                     "join_ends_mismatch", [*loc, "ends", i],
                     f"{name!r} joins {ends[0]} to {ends[1]}; a join rule's ends run from each link ({links}) to "
                     f"one of its places ({places})")
+        for key, of in (("demand", places), ("supply", places), ("capacity", links)):
+            if key in body:
+                declared = self.world.attributes.get((of, body[key]))
+                if declared is None or declared.get("data_type") not in ("integer", "number"):
+                    return Refusal(
+                        "join_field_invalid", [*loc, key],
+                        f"{body[key]!r} must be a number field of {of} (its {key}); {of} "
+                        + ("has no such field" if declared is None else f"has it as {declared.get('data_type')}"))
         if isinstance(body.get("sources"), list):
             fixed = all(isinstance(f, dict) and "index" not in f and not isinstance(f.get("value"), dict)
                         for f in body["sources"])
