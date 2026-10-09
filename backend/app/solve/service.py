@@ -1315,13 +1315,20 @@ def _execute(
                         and allocation_rows.applies(solving_model) is None)
             # A model that is a network, solved as one: proven, by min-cost flow (setting
             # `solve.network`, app.solve.network, queue R15a).
-            # Whole-number networks only: on a continuous one an LP solver is nearly as quick and
-            # also gives shadow prices, which min-cost flow does not (bench/results/2026-09-25-network.md).
+            # Whole-number networks only: on a continuous one an LP solver is nearly as quick and gives the
+            # same shadow prices (the network now gives them too) and ranging (bench/results/2026-09-25-network.md).
             networked = (bool(params.get("network")) and not stochastic_wanted and not allocate
                          and any(v.is_integral for v in solving_model.variables.values())
                          and network_rows.applies(solving_model) is None)
+            # Not a network but a pairing any record may join: Edmonds' blossom, proven (NetworkX).
+            from app.solve import matching as matching_rows
+
+            matched = (bool(params.get("network")) and not stochastic_wanted and not allocate and not networked
+                       and any(v.is_integral for v in solving_model.variables.values())
+                       and network_rows.applies(solving_model) is not None
+                       and matching_rows.applies(solving_model) is None)
             horizon_plan = None
-            if params.get("rolling_horizon") and not stochastic_wanted and not networked:
+            if params.get("rolling_horizon") and not stochastic_wanted and not networked and not matched:
                 # Relax-and-fix over the model's time set (setting
                 # `solve.rolling_horizon`, app.solve.horizon, queue R9).
                 time_set = _time_set(db, run_id, solving_model)
@@ -1332,7 +1339,7 @@ def _execute(
                 else:
                     horizon_record = {"used": False, "why": why_not}
             if (params.get("separable") and not stochastic_wanted and horizon_plan is None and not allocate
-                    and not networked):
+                    and not networked and not matched):
                 # Independent blocks solved at once (setting `solve.separable`,
                 # app.solve.blocks) -- unless something ties them together.
                 refused = block_rows.refusal(
@@ -1355,6 +1362,9 @@ def _execute(
                     engine = "networkx" if backend.name == "networkx" else params.get("network_engine", "networkx")
                     networked_run = network_rows.solve(solving_model, engine=engine)
                     result, reason, network_record = networked_run.solution, None, networked_run.record
+                elif matched:
+                    matched_run = matching_rows.solve(solving_model)
+                    result, reason, network_record = matched_run.solution, None, matched_run.record
                 elif stochastic_wanted:
                     result, stochastic_record = sandbox.run(
                         "app.solve.sandbox:stochastic_in_child",

@@ -1313,3 +1313,14 @@ describe("goal values and a run's parts (operator trial F9 F26)", () => {
     expect(runSpan([3, 5])).toBe("runs 3, 5");
   });
 });
+
+describe("how a network or pairing run was solved", () => {
+  it("says it in words", async () => {
+    const { networkRunText } = await import("./Runs");
+    expect(networkRunText({ kind: "matching", records: 9, pairs: 22, chosen: 4 }))
+      .toBe("a pairing, by Edmonds' blossom (NetworkX): 9 records, 22 possible pairs, 4 chosen");
+    expect(networkRunText({ kind: "min-cost flow", engine: "networkx", nodes: 41, arcs: 420, scaled: { costs: 100, quantities: 1 },
+      shadow_prices: "from shortest paths" }))
+      .toBe("a network, by min-cost flow (NetworkX network simplex): 41 places, 420 arcs; decimals scaled exactly (costs ×100, quantities ×1); shadow prices from the network");
+  });
+});

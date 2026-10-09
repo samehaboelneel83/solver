@@ -17,8 +17,11 @@ shortest paths are all min-cost flows, so one algorithm serves them all.
   (multiplying by -1: the "supply" side of an assignment) in the one with +1
   (the flow arrives) and the other with -1 (it leaves). Turning round is a
   two-colouring, checked, not guessed;
-- every number whole: bounds, right-hand sides and goal coefficients (min-cost
-  flow works in integers; a fractional model is left to the solvers);
+- every number exact: min-cost flow works in integers, so a goal coefficient with
+  decimals is scaled to a whole number (exact: the cheapest flow is the same), and so
+  are bounds and right-hand sides with decimals -- when every decision may be
+  fractional (scaling quantities by 10^k keeps a flow's optimum, but a whole-number
+  decision would lose its meaning; such a model is left to the solvers);
 - every lower bound finite.
 
 A rule on a single decision (`flow[a] <= cap[a]`) is read as that decision's
@@ -32,7 +35,12 @@ unbounded. Behind the setting `solve.network` (on), and used only when some
 decision takes whole numbers: a MIP solver would branch there (CP-SAT runs
 out of memory on a 400 x 400 assignment this proves in a second), while on a
 continuous network an LP solver is nearly as quick and also gives shadow
-prices, which min-cost flow does not (bench/results/2026-09-25-network.md).
+prices -- though the network gives them too, now: each rule's shadow price is the
+cost of the cheapest way to bring one more unit to its place in the solved network
+(a shortest path over the arcs that can still change), the derivative of the goal
+by the rule's limit, valid for whole and continuous networks alike (a network's
+linear optimum is whole, so its prices are its whole optimum's)
+(bench/results/2026-09-25-network.md).
 
 **Two engines** walk the same network: NetworkX's network simplex
 (`networkx.network_simplex`, the default, setting `solve.network_engine`) and
@@ -81,13 +89,16 @@ def _shape(compiled: Compiled, ceilings: bool = False):
         return "the model has curves, functions or time intervals"
     if compiled.objective_mode == "lex":
         return "goals in order are solved one after another"
-    if any(not _whole(v) for v in compiled.objective.coeffs.values()):
-        return "a goal coefficient is fractional"
+    cost_scale = _scale(list(compiled.objective.coeffs.values()))
+    if cost_scale is None:
+        return "a goal coefficient has more than 9 decimals"
+    whole_decisions = any(v.is_integral for v in compiled.variables.values())
     # Bounds: declared, then tightened by every rule on a single decision (a capacity written as a rule).
     lower = {k: v.lower for k, v in compiled.variables.items()}
     upper = {k: (None if v.default_upper and not ceilings else v.upper) for k, v in compiled.variables.items()}
     broken: str | None = None
-    rows: list[tuple[dict[VarKey, int], str, int]] = []
+    rows: list[tuple[dict[VarKey, int], str, Decimal]] = []
+    row_ids: list[str] = []
     for c in compiled.constraints:
         if c.when is not None or getattr(c, "schedule", None) is not None or c.quadratic:
             return f"the rule {c.id!r} is not a plain linear rule"
@@ -113,14 +124,21 @@ def _shape(compiled: Compiled, ceilings: bool = False):
             continue
         if any(abs(v) != 1 for v in coeffs.values()):
             return f"the rule {c.id!r} weighs a decision by more than one"
-        if not _whole(rhs):
-            return f"the rule {c.id!r} has a fractional right-hand side"
-        rows.append(({k: int(v) for k, v in coeffs.items()}, c.relation, int(rhs)))
+        rows.append(({k: int(v) for k, v in coeffs.items()}, c.relation, rhs))
+        row_ids.append(c.id)
     for key in compiled.variables:
         if abs(lower[key]) >= Decimal("1e15"):
             return f"{key[0]!r} has no lower bound"
-        if not _whole(lower[key]) or (upper[key] is not None and not _whole(upper[key])):
-            return f"{key[0]!r} has a fractional bound"
+    quantities = [rhs for _, _, rhs in rows] + [v for k in compiled.variables for v in (lower[k], upper[k])
+                                                 if v is not None]
+    if whole_decisions and any(not _whole(Decimal(v)) for v in quantities):
+        # A whole-number decision on a scaled network would count tenths: left to the solvers.
+        culprit = next((row_ids[i] for i, (_, _, rhs) in enumerate(rows) if not _whole(rhs)), None)
+        return (f"the rule {culprit!r} has a fractional right-hand side" if culprit
+                else "a bound is fractional on a model with whole-number decisions")
+    qty_scale = _scale(quantities)
+    if qty_scale is None:
+        return "a limit or bound has more than 9 decimals"
     if not rows:
         return "no rule joins two decisions: there is no network to walk"
     columns: dict[VarKey, list[tuple[int, int]]] = {k: [] for k in compiled.variables}
@@ -154,8 +172,20 @@ def _shape(compiled: Compiled, ceilings: bool = False):
                     queue.append(b)
                 elif flip[b] != want:
                     return "its rules cannot all be read as flow in less flow out"
-    bounds = {k: (int(lower[k]), None if upper[k] is None else int(upper[k])) for k in compiled.variables}
-    return rows, flip, columns, bounds, broken
+    bounds = {k: (int(lower[k] * qty_scale), None if upper[k] is None else int(upper[k] * qty_scale))
+              for k in compiled.variables}
+    rows = [(coeffs, relation, int(rhs * qty_scale)) for coeffs, relation, rhs in rows]
+    return rows, flip, columns, bounds, broken, (cost_scale, qty_scale, row_ids)
+
+
+def _scale(values: list) -> int | None:
+    """The power of ten that makes every value whole (1 when they are), or None past 9 decimals."""
+    places = 0
+    for value in values:
+        exponent = Decimal(value).normalize().as_tuple().exponent
+        if isinstance(exponent, int) and exponent < 0:
+            places = max(places, -exponent)
+    return 10 ** places if places <= 9 else None
 
 
 def applies(compiled: Compiled, ceilings: bool = False) -> str | None:
@@ -184,7 +214,7 @@ def solve(compiled: Compiled, engine: str = "networkx", ceilings: bool = False) 
     shape = _shape(compiled, ceilings)
     if isinstance(shape, str):
         raise ValueError(shape)
-    rows, flip, columns, bounds, broken = shape
+    rows, flip, columns, bounds, broken, (cost_scale, qty_scale, row_ids) = shape
     if broken is not None:
         return _none(compiled, started, "infeasible", {"kind": "min-cost flow", "engine": engine, "why": f"the rule {broken!r} reads no decision and does not hold"}, name)
     outside = len(rows)
@@ -212,7 +242,7 @@ def solve(compiled: Compiled, engine: str = "networkx", ceilings: bool = False) 
         capacity = unbounded_cap if upper is None else upper - lower
         if capacity < 0:
             return _none(compiled, started, "infeasible", {"engine": engine, "why": f"{key[0]!r} has its upper bound below its lower"}, name)
-        arcs.append((key, tail, head, lower, capacity, sign * int(compiled.objective.coeffs.get(key, 0))))
+        arcs.append((key, tail, head, lower, capacity, sign * int(compiled.objective.coeffs.get(key, 0) * cost_scale)))
     for i, relation in enumerate(turned):
         # Slack: a `<=` rule may take in less (flow from outside), a `>=` rule more (flow to outside).
         if relation == "<=":
@@ -230,26 +260,108 @@ def solve(compiled: Compiled, engine: str = "networkx", ceilings: bool = False) 
             continue
         handles.append((tail, head, capacity, cost, key, lower))
     record = {"kind": "min-cost flow", "engine": engine, "nodes": len(rows) + 1, "arcs": len(handles) + len(loops),
-              "turned_rules": sum(flip.values())}
+              "turned_rules": sum(flip.values()),
+              **({"scaled": {"costs": cost_scale, "quantities": qty_scale}} if cost_scale > 1 or qty_scale > 1 else {})}
     walked = _walk_networkx(supply, handles) if engine == "networkx" else _walk_ortools(supply, handles)
     if isinstance(walked, str):
         return _none(compiled, started, walked, record if walked == "infeasible" else
                      {**record, "why": f"min-cost flow ended {walked}"}, name)
-    assignments: dict[VarKey, int] = {}
+    assignments: dict[VarKey, int | float] = {}
+
+    def unscaled(amount: int) -> int | float:
+        return amount if qty_scale == 1 else float(Decimal(amount) / qty_scale)
+
     for (tail, head, capacity, cost, key, lower), value in zip(handles, walked):
         if key is not None and bounds[key][1] is None and value >= unbounded_cap and cost < 0:
             return _none(compiled, started, "unbounded", {**record, "why": f"{key[0]!r} can grow without end"}, name)
         if key is not None:
-            assignments[key] = lower + value
+            assignments[key] = unscaled(lower + value)
     for key, lower, capacity, cost in loops:
         if cost < 0 and bounds[key][1] is None:
             return _none(compiled, started, "unbounded", {**record, "why": f"{key[0]!r} can grow without end"}, name)
-        assignments[key] = lower + (capacity if cost < 0 else 0)
+        assignments[key] = unscaled(lower + (capacity if cost < 0 else 0))
+    duals = _prices(handles, walked, supply_nodes=len(rows), outside=outside, flip=flip, row_ids=row_ids,
+                    sign=sign, cost_scale=cost_scale, qty_scale=qty_scale)
+    if duals is not None:
+        record["shadow_prices"] = "from shortest paths in the solved network"
     objective = float(compiled.objective.evaluated_at(assignments))
     value = int(objective) if objective == int(objective) else objective
     return Networked(Solution(status="optimal", optimal=True, objective=value, assignments=assignments,
                               wall_seconds=round(time.monotonic() - started, 3),
-                              solver=name, best_bound=value), record)
+                              solver=name, best_bound=value, duals=duals), record)
+
+
+#: Past this many arcs the shadow prices are not worked out (a shortest-path search per solve).
+PRICED_ARCS = 300_000
+
+
+def _prices(arcs: list[tuple], flows: list[int], *, supply_nodes: int, outside: int, flip: dict[int, int],
+            row_ids: list[str], sign: int, cost_scale: int, qty_scale: int) -> dict[str, float] | None:
+    """Each rule's shadow price: what one more unit of its limit does to the goal.
+
+    At an optimal flow the residual network -- each arc forward while it has room, backward while it carries
+    flow -- has no cycle of negative cost, so the cheapest path from the outside node to each place is well
+    defined; sending one more unit there costs exactly that (while the change stays small). A rule's limit is its
+    place's demand, read through the turn the rule was given and the goal's own direction. A place the outside
+    cannot reach more of has no price (one more unit there has no answer); the price of a rule whose instances
+    differ is the largest, as every solver reports (`fold_duals`)."""
+    from app.solve.result import fold_duals
+
+    if len(arcs) > PRICED_ARCS:
+        return None
+    nodes = supply_nodes + 1
+    forward: list[list[tuple[int, int]]] = [[] for _ in range(nodes)]
+    backward: list[list[tuple[int, int]]] = [[] for _ in range(nodes)]
+
+    def residual(a: int, b: int, cost: int) -> None:
+        forward[a].append((b, cost))
+        backward[b].append((a, cost))
+
+    for (tail, head, capacity, cost, _key, _lower), flow in zip(arcs, flows):
+        if flow < capacity:
+            residual(tail, head, cost)
+        if flow > 0:
+            residual(head, tail, -cost)
+    # One more unit INTO a place comes along the cheapest path from the outside; one more unit OUT of it goes
+    # along the cheapest path to the outside. They differ only where the answer is degenerate, and a rule's
+    # price is for +1 on its limit: into its place, unless the rule was turned round.
+    into, out_of = _cheapest(forward, outside), _cheapest(backward, outside)
+    if into is None or out_of is None:  # pragma: no cover -- a negative cycle: the flow was not optimal
+        return None
+    pairs = []
+    for i, rid in enumerate(row_ids):
+        moved = out_of[i] if flip[i] else into[i]
+        if moved == float("inf"):
+            continue  # one more unit there has no answer: no price
+        # The internal cost is `sign` times the goal; costs and quantities were scaled.
+        pairs.append((rid, float(sign * moved * qty_scale / cost_scale) + 0.0))
+    return fold_duals(pairs)
+
+
+def _cheapest(graph: list[list[tuple[int, int]]], source: int) -> list[float] | None:
+    """Cheapest path costs from `source` (arcs may cost less than nothing, cycles may not): a queue-based
+    Bellman-Ford. None if a negative cycle shows."""
+    inf = float("inf")
+    nodes = len(graph)
+    dist = [inf] * nodes
+    dist[source] = 0
+    queued = [False] * nodes
+    queue = deque([source])
+    queued[source] = True
+    relaxed, limit = 0, nodes * (sum(len(a) for a in graph) + 1)
+    while queue:
+        u = queue.popleft()
+        queued[u] = False
+        for v, cost in graph[u]:
+            if dist[u] + cost < dist[v]:
+                dist[v] = dist[u] + cost
+                relaxed += 1
+                if relaxed > limit:
+                    return None
+                if not queued[v]:
+                    queued[v] = True
+                    queue.append(v)
+    return dist
 
 
 def _walk_ortools(supply: list[int], arcs: list[tuple]) -> list[int] | str:

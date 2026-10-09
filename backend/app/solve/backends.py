@@ -646,12 +646,17 @@ def _networkx_solve(
 
     why = network.applies(compiled, ceilings=True)
     if why is not None:
+        from app.solve import matching
+
+        # Not a network, but a pairing any record may join (not two-sided): Edmonds' blossom, proven.
+        if matching.applies(compiled) is None:
+            return matching.solve(compiled).solution
         # Its class fits (a linear model), its shape does not: said, never answered as something else.
         raise Unsupported(
             "networkx solves a network -- every rule flow in less flow out (each coefficient +1 or -1, "
             "each decision in at most two rules), every number whole: transport, assignment, shortest "
-            f"path, maximum flow. This model is not one: {why}. Leave the solver unset and the rules "
-            "choose one that takes it.")
+            f"path, maximum flow -- or a matching (each record in at most, or exactly, one pair). This model is "
+            f"neither: {why}. Leave the solver unset and the rules choose one that takes it.")
     return network.solve(compiled, engine="networkx", ceilings=True).solution
 
 
@@ -677,8 +682,9 @@ NETWORKX = Backend(
     proves="global",
     is_available=_networkx_available,
     automatic=False,
-    note="NetworkX network simplex (min-cost flow, BSD licence); network models only -- transport, "
-         "assignment, shortest path, maximum flow -- proven optimal",
+    note="NetworkX (BSD licence): network simplex for network models -- transport, assignment, shortest path, "
+         "maximum flow -- and Edmonds' blossom for pairings any record may join; proven optimal, with shadow "
+         "prices for networks",
     planner_choice="A network solver will take this: min-cost flow, proven optimal.",
 )
 

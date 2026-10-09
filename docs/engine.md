@@ -150,7 +150,7 @@ rule on one decision read as its bound), and every number is whole. It builds th
 `networkx.network_simplex`: the optimum is **proven** (`optimality: global`), infeasible is a proof too, and
 an answer resting on a guard ceiling is reported unbounded with the reason, as for every solver.
 Continuous and whole-number networks both work (a network's LP optimum is whole). Anything else — a
-knapsack row, a product, a curve, a fractional cost — is refused before solving, with the reason, e.g.
+knapsack row, a product, a curve — is refused before solving, with the reason, e.g.
 *"networkx solves a network … This model is not one: the rule 'cap' weighs a decision by more than one"*.
 The rules never choose it unasked (`automatic=False`): the model class alone cannot tell a network from
 any other linear model.
@@ -162,11 +162,38 @@ times quicker on large networks: a 400 × 400 assignment in 0.1 s against 1.1 s)
 optimum. The run records the engine in `params.network_engine` and `params.network_run.engine`, and the
 solver string says which: `network (min-cost flow, NetworkX network simplex)`.
 
+**Numbers with decimals (9 October 2026).** Min-cost flow works in integers, so decimals are scaled exactly:
+goal coefficients always (the cheapest flow is the same), limits and bounds when every decision may be
+fractional (whole-number decisions on a scaled network would count tenths, so such a model is left to the
+solvers). The run records `network_run.scaled`. A fractional cost no longer sends a network to a MIP solver.
+
+**Shadow prices (9 October 2026).** Each rule's price is the goal's change per +1 on its limit, worked out from
+the solved network: one more unit into a place travels the cheapest path from the outside through the arcs
+that can still change (forward while an arc has room, backward while it carries flow), one more unit out of it
+the cheapest path back. A turned rule takes the second. Where an answer is degenerate the two sides differ and
+the price is the +1 side (an LP solver may report the other). Checked against re-solving with each limit moved
+a little. They are stored like any solver's (`constraint_result.dual`), for whole-number networks too (a
+network's linear optimum is whole, so its prices hold), up to 300,000 arcs. A rule whose limit cannot move alone -- an exact
+balance (`=`) in an assignment, a shortest path or a flow where every unit in must go out -- has no price:
+one more unit there has no answer (an LP solver reports a potential difference there instead). Timing: a
+12,000-arc transport solves and prices in 0.3 s (NetworkX) or 0.13 s (OR-Tools).
+
+**Pairings (9 October 2026): Edmonds' blossom.** When any record may pair with any other (room-mates,
+two-person teams, back-up pairs) the model is not a network: three records pairwise joined make an odd cycle,
+and its linear relaxation is fractional. `app/solve/matching.py` reads such a model -- every decision yes or
+no, every rule `sum <= 1` (or every one `sum = 1`, a perfect pairing) with +1 coefficients, each decision in
+two rules (or one: a record left on its own, when every rule is `<= 1`) -- and solves it with
+`networkx.max_weight_matching`, weights scaled to whole numbers. The optimum is proven, and a perfect pairing
+that cannot exist is a proven infeasibility. It runs when `networkx` is asked for by name and the model is not
+a network, and in the network lane (`solve.network`) after the network check. The solver string says
+`matching (Edmonds' blossom, NetworkX)`; `params.network_run.kind` is `matching`.
+
 The Assistant's `run_python` has NetworkX too (paths, connectivity, components), e.g. to work out which
 cells of a layout reach a door before the model is written.
 
-Code: `backend/app/solve/network.py` (`_walk_networkx`, `_walk_ortools`), the `NETWORKX` entry in
-`backend/app/solve/backends.py`. Tests: `backend/tests/test_network.py`, the `transport_network` case in
+Code: `backend/app/solve/network.py` (`_walk_networkx`, `_walk_ortools`, `_prices`),
+`backend/app/solve/matching.py`, the `NETWORKX` entry in `backend/app/solve/backends.py`. Tests:
+`backend/tests/test_network.py`, `backend/tests/test_matching.py`, the `transport_network` case in
 `test_golden.py`.
 
 

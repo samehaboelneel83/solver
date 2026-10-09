@@ -159,10 +159,64 @@ def test_rules_that_cannot_be_turned_consistently_are_refused():
     assert "cannot all be read as flow" in network.applies(compile_model(ir, NO_DATA))
 
 
-def test_a_fractional_number_is_left_to_the_solvers():
+def test_a_fractional_cost_is_scaled_exactly_and_agrees_with_highs():
     ir, data = families.transport("S")
-    data["parameters"]["cost"][0]["value"] = 1.5
-    assert "fractional" in network.applies(compile_model(ir, data))
+    for n, cell in enumerate(data["parameters"]["cost"]):
+        cell["value"] = cell["value"] + (n % 4) * 0.25 + 0.125
+    compiled = compile_model(ir, data)
+    assert network.applies(compiled) is None
+    ours, theirs = _both(compiled)
+    assert ours.status == theirs.status == "optimal"
+    assert float(ours.objective) == pytest.approx(float(theirs.objective))
+
+
+def test_a_fractional_quantity_is_scaled_when_every_decision_may_be_fractional():
+    ir, data = families.transport("S")
+    data["sets"]["plant"][0]["supply"] = data["sets"]["plant"][0]["supply"] + 0.5
+    whole = compile_model(ir, data)
+    if any(v.is_integral for v in whole.variables.values()):
+        # Tenths of a whole-number shipment would mean nothing: left to the solvers.
+        assert "fractional" in network.applies(whole)
+    ir["variables"]["ship"] = {**ir["variables"]["ship"], "domain": "continuous"}
+    compiled = compile_model(ir, data)
+    assert network.applies(compiled) is None
+    ours, theirs = _both(compiled)
+    assert ours.status == theirs.status
+    if ours.status == "optimal":
+        assert float(ours.objective) == pytest.approx(float(theirs.objective))
+
+
+def _bumped(ir: dict, rule: str, by: float) -> dict:
+    import copy
+
+    out = copy.deepcopy(ir)
+    for c in out["constraints"]:
+        if c["id"] == rule:
+            c["right"] = {"const": c["right"]["const"] + by}
+    return out
+
+
+def test_shadow_prices_are_the_goals_rate_per_unit_of_each_rules_limit():
+    """Checked by moving each limit a little and solving again: the goal moves by price x step."""
+    checked = 0
+    for seed in range(60):
+        ir = _random_network(seed)
+        for spec in ir["variables"].values():
+            spec["domain"] = "continuous"
+        compiled = compile_model(ir, NO_DATA)
+        if network.applies(compiled) is not None:
+            continue
+        solved = network.solve(compiled).solution
+        if solved.status != "optimal" or not solved.duals:
+            continue
+        for rule, price in solved.duals.items():
+            step = 0.001
+            again = network.solve(compile_model(_bumped(ir, rule, step), NO_DATA)).solution
+            if again.status != "optimal":
+                continue
+            assert (float(again.objective) - float(solved.objective)) / step == pytest.approx(price, abs=1e-6), (seed, rule)
+            checked += 1
+    assert checked >= 40
 
 
 def test_a_run_of_a_network_is_solved_as_one_and_proven(db, empty_queue):  # noqa: F811
@@ -182,6 +236,11 @@ def test_a_run_of_a_network_is_solved_as_one_and_proven(db, empty_queue):  # noq
     assert row["params"]["network"] is True and row["params"]["network_run"]["kind"] == "min-cost flow"
     expected = network.solve(compile_model(ir, NO_DATA)).solution.objective
     assert float(row["objective"]) == pytest.approx(float(expected))
+    # Its shadow prices, from the network itself (a whole-number model: no LP solver would give them).
+    priced = network.solve(compile_model(ir, NO_DATA)).solution.duals or {}
+    stored = dict(db.execute(text("SELECT constraint_id, dual FROM constraint_result WHERE run_id = :r"),
+                             {"r": run_id}).all())
+    assert priced and all(float(stored[rule]) == pytest.approx(price) for rule, price in priced.items())
 
 
 def _whole(ir: dict) -> dict:

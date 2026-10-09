@@ -329,6 +329,22 @@ export function statusNote(run: {
 
 /** A gap as a percentage a planner can read: two significant figures, and
  * "under 0.01%" rather than a string of zeros. */
+export type NetworkRunRecord = { kind?: string; engine?: string; nodes?: number; arcs?: number; records?: number;
+  pairs?: number; chosen?: number; perfect?: boolean; scaled?: { costs: number; quantities: number };
+  shadow_prices?: string; why?: string };
+
+/** How a network or pairing run was solved, in words. */
+export function networkRunText(r: NetworkRunRecord): string {
+  if (r.kind === "matching") {
+    return `a pairing, by Edmonds' blossom (NetworkX): ${r.records ?? "?"} records, ${r.pairs ?? "?"} possible pairs`
+      + `${r.chosen !== undefined ? `, ${r.chosen} chosen` : ""}${r.perfect ? ", everyone paired" : ""}${r.why ? ` (${r.why})` : ""}`;
+  }
+  const scaled = r.scaled ? `; decimals scaled exactly (costs ×${r.scaled.costs}, quantities ×${r.scaled.quantities})` : "";
+  return `a network, by min-cost flow (${r.engine === "ortools" ? "OR-Tools" : "NetworkX network simplex"}): `
+    + `${r.nodes ?? "?"} places, ${r.arcs ?? "?"} arcs${scaled}${r.shadow_prices ? "; shadow prices from the network" : ""}`
+    + `${r.why ? ` (${r.why})` : ""}`;
+}
+
 export function formatGap(gap: number): string {
   const percent = gap * 100;
   if (percent === 0) return "0%";
@@ -1186,6 +1202,7 @@ function RunDetail({
     routing_start_run?: RoutingStartRecord;
     computed_inputs?: (ComputedSource & { input: string; name: string })[];
     metaheuristic_run?: MetaheuristicRecord;
+    network_run?: NetworkRunRecord;
   };
   const unfinished = data.status === "queued" || data.status === "running";
   const stopping = data.cancel_requested || cancelRun.isPending;
@@ -1420,6 +1437,7 @@ function RunDetail({
           <Fact label="Solver" value={data.status === "queued" ? "chosen when it starts" : data.solver_version ?? data.solver} />
           <Fact label="Chosen because" value={String(params.why_solver ?? "—")} />
           <Fact label="Class" value={String(params.classified_as ?? "—")} />
+          {params.network_run && <Fact label="Solved as" value={networkRunText(params.network_run)} />}
           {params.selector && <Fact label={params.selector.acted ? "Learned selector (chose the solver)" : "Learned selector (not acting)"} value={selectorText(params.selector)} />}
           {params.structure && params.structure.blocks > 1 && (
             <Fact label="How it splits" value={structureText(params.structure)} />
