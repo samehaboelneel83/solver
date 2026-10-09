@@ -212,9 +212,13 @@ every row of the rule. On an 18×18 grid (324 places, 612 links, capacities and 
 by a Steiner tree; when that tree cannot carry their demand, by routing it at least cost through any places and
 adding the places the flow passes until none is new), places worth something in the goal are added along their
 cheapest path -- or routed, when that path cannot carry them -- while the design that feeds them costs less than
-they bring in; then places are taken out while that pays (`join_start_run.used_places`, `moves`). Each design is
+they bring in; then places are taken out while that pays, and one place out with another in together (`swaps`), the three
+moves repeated until none pays or the time is spent (`join_start_run.used_places`, `moves`, `swaps`). Places are
+tried in order of what they bring less what reaching them costs; routing round a full link (several flows) is
+kept for the three likeliest each round. Each design is
 the capacity-aware one above, so the start keeps every row. A 14×14 grid with prizes, capacities and four places
-that must be served: HiGHS alone found no answer in 60 s; the start gives one in 14 s and HiGHS keeps it. On a
+that must be served: HiGHS alone finds no answer in 60 s and CP-SAT -707; the start gives -1,033 in 19 s, and
+CP-SAT from it reaches -1,148. On a
 9×9 grid HiGHS with the start ends at -1,190 against -1,177 without. Without sources, the Steiner start (with
 `overloaded`) is kept. Before
 any of this, a maximum flow with every link built checks that the demand can be carried at all: when it cannot,

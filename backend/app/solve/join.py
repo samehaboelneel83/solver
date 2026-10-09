@@ -631,45 +631,78 @@ def _choose(compiled: Compiled, meta: dict[str, Any], cost: dict[str, Decimal], 
                     break
             else:
                 return None
-    moves = 0
-    improved = True
-    while improved and time.monotonic() < deadline:
-        improved = False
-        start_from = (used | sources) & set(graph.nodes)
+    moves, swaps = 0, 0
+
+    def reach_paths(network: set[str]):
+        start_from = (network | sources) & set(graph.nodes)
         if not start_from:
-            break
-        _, paths = nx.multi_source_dijkstra(graph, start_from, weight="weight")
-        for p in sorted((p for p in meta["places"] if p not in used and gain[p] > 0 and p in paths),
-                        key=lambda p: (-gain[p], p)):
+            return {}, {}
+        return nx.multi_source_dijkstra(graph, start_from, weight="weight")
+
+    def joining(network: set[str], p: str, path: set[str], route: bool = True):
+        """The places that join p to the network: its cheapest path, or -- when that cannot carry it -- its
+        demand routed through any places (and the places that flow passes)."""
+        tried = value(network | path)
+        if tried is not None or not route:
+            return network | path, tried
+        found = routed(network | {p})
+        if not found:
+            return None, None
+        return found[0], value(found[0])
+
+    def add_one() -> bool:
+        nonlocal used, best, moves
+        dist, paths = reach_paths(used)
+        # The likeliest to pay first: what a place brings less what reaching it costs.
+        ranked = sorted((p for p in meta["places"] if p not in used and gain[p] > 0 and p in paths),
+                        key=lambda p: (-(float(gain[p]) - dist[p]), p))
+        for i, p in enumerate(ranked):
             if time.monotonic() > deadline:
-                break
-            for path in [set(paths[p]), lambda: routed(used | {p})]:
-                if callable(path):  # the shortest path cannot carry it: route it through any places instead
-                    found = path()
-                    if not found:
-                        break
-                    path = found[0]
-                tried = value(used | path)
-                if tried is not None and tried[0] < best[0]:
-                    used, best, moves, improved = used | path, tried, moves + 1, True
-                    break
-                if tried is not None:
-                    break  # it carries, and does not pay: a dearer path would not either
-            if improved:
-                break  # the paths change with the network: find them again
-    taken_out = True
-    while taken_out and time.monotonic() < deadline:
-        taken_out = False
+                return False
+            # Routing round a full link costs several flows: kept for the few likeliest places.
+            trial, tried = joining(used, p, set(paths[p]), route=i < 3)
+            if tried is not None and tried[0] < best[0]:
+                used, best, moves = trial, tried, moves + 1
+                return True
+        return False
+
+    def drop_one() -> bool:
+        nonlocal used, best, moves
         for p in sorted(used - must - sources, key=lambda p: (gain[p], p)):
             if time.monotonic() > deadline:
-                break
+                return False
             tried = value(used - {p})
             if tried is not None and tried[0] < best[0]:
-                used, best, moves, taken_out = used - {p}, tried, moves + 1, True
+                used, best, moves = used - {p}, tried, moves + 1
+                return True
+        return False
+
+    def swap_one() -> bool:
+        """One place out and another in, together: what neither move alone finds (a place in the way of a
+        better one, a branch worth moving)."""
+        nonlocal used, best, moves, swaps
+        for out in sorted(used - must - sources, key=lambda p: (gain[p], p))[:12]:
+            rest = used - {out}
+            dist, paths = reach_paths(rest)
+            ranked = sorted((p for p in meta["places"] if p not in used and gain[p] > 0 and p in paths),
+                            key=lambda p: (-(float(gain[p]) - dist[p]), p))[:6]
+            for p in ranked:
+                if time.monotonic() > deadline:
+                    return False
+                trial, tried = joining(rest, p, set(paths[p]), route=False)
+                if tried is not None and tried[0] < best[0]:
+                    used, best, moves, swaps = trial, tried, moves + 1, swaps + 1
+                    return True
+        return False
+
+    while time.monotonic() < deadline:
+        if add_one() or drop_one() or swap_one():
+            continue
+        break
     final = value(used, full=True) or best
     hint, made = final[1]
     made.update(how="places chosen by their worth, each fed by a capacity-aware design", used_places=len(used),
-                moves=moves)
+                moves=moves, swaps=swaps)
     return hint, made
 
 
