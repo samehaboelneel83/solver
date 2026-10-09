@@ -84,3 +84,91 @@ def test_a_run_records_the_rows_it_added(db, empty_queue):  # noqa: F811
     assert row["status"] == "optimal"
     record = row["params"]["strengthen_run"]
     assert record["added"] > 0 and record["bound_after"] >= record["bound_before"], record
+
+
+# --- flow balances found in any model, and their cut-sets ---------------------------------------------------
+
+
+def _flipped(ir):
+    """The same model with every balance written the other way round (what goes out, less what comes in)."""
+    import copy
+
+    ir = copy.deepcopy(ir)
+    for c in ir["constraints"]:
+        if c["id"].startswith("c_balance"):
+            c["left"], c["right"] = c["right"], c["left"]
+    return ir
+
+
+@pytest.mark.parametrize("seed", range(4))
+@pytest.mark.parametrize("written", ["as is", "turned round"])
+def test_lot_sizing_balances_are_found_and_their_cuts_close_the_gap(seed, written):
+    from app.solve.flowcuts import Flows
+
+    ir = _lot_sizing(seed, periods=20)
+    compiled = compile_model(_flipped(ir) if written == "turned round" else ir, {})
+    flows = Flows(compiled, strengthen.tightest(compiled))
+    assert flows.ok and len(flows.demand) == 20 and len(flows.sink) == 20
+    stronger, record = strengthen.strengthen(compiled, seconds=10)
+    best = float(_solve(compiled).objective)
+    assert float(_solve(stronger).objective) == pytest.approx(best)
+    # Uncapacitated lot sizing: the (l, S) cut-sets describe its hull -- the relaxation reaches the optimum.
+    assert record["flow_cuts"] > 0 and record["bound_after"] == pytest.approx(best, rel=1e-6), record
+
+
+def _multi_item(seed: int, items: int = 4, periods: int = 8):
+    rnd = random.Random(seed)
+    v = lambda n: {"var": n, "index": []}  # noqa: E731
+    demand = {(i, t): rnd.choice([0, rnd.randint(5, 30)]) for i in range(items) for t in range(periods)}
+    cap = int(1.5 * sum(demand.values()) / periods) + 1
+    variables, rules, terms = {}, [], []
+    for i in range(items):
+        big = sum(demand[i, t] for t in range(periods))
+        for t in range(periods):
+            variables[f"y{i}_{t}"] = {"index": [], "domain": "binary"}
+            variables[f"x{i}_{t}"] = {"index": [], "domain": "continuous", "lower": 0, "upper": big}
+            variables[f"s{i}_{t}"] = {"index": [], "domain": "continuous", "lower": 0, "upper": big}
+            before = [v(f"s{i}_{t - 1}")] if t else []
+            rules.append({"id": f"b{i}_{t}", "severity": "hard", "relation": "=",
+                          "left": {"add": [*before, v(f"x{i}_{t}")]},
+                          "right": {"add": [{"const": demand[i, t]}, v(f"s{i}_{t}")]}})
+            rules.append({"id": f"u{i}_{t}", "severity": "hard", "relation": "<=", "left": v(f"x{i}_{t}"),
+                          "right": {"mul": [{"const": big}, v(f"y{i}_{t}")]}})
+            terms += [{"mul": [{"const": rnd.randint(50, 200)}, v(f"y{i}_{t}")]},
+                      {"mul": [{"const": rnd.randint(1, 3)}, v(f"s{i}_{t}")]}]
+    for t in range(periods):
+        rules.append({"id": f"cap{t}", "severity": "hard", "relation": "<=",
+                      "left": {"add": [v(f"x{i}_{t}") for i in range(items)]}, "right": {"const": cap}})
+    return {"version": 2, "sets": [], "parameters": {}, "variables": variables, "constraints": rules,
+            "objective": {"sense": "minimize", "terms": [{"id": "o", "weight": 1, "expression": {"add": terms}}]}}
+
+
+@pytest.mark.parametrize("seed", range(4))
+def test_shared_capacity_is_a_supply_and_the_optimum_stays(seed):
+    from app.solve.flowcuts import Flows
+
+    compiled = compile_model(_multi_item(seed), {})
+    flows = Flows(compiled, strengthen.tightest(compiled))
+    supplies = [i for i, d in flows.demand.items() if d < 0]
+    assert len(supplies) == 8 and not set(supplies) & flows.sink  # each period's capacity sends, never keeps
+    stronger, record = strengthen.strengthen(compiled, seconds=10)
+    before, after = _solve(compiled), _solve(stronger)
+    assert before.status == after.status == "optimal"
+    assert float(after.objective) == pytest.approx(float(before.objective))
+    assert record["bound_after"] > record["bound_before"]
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_a_network_design_written_by_the_join_rule_gets_its_cut_sets_without_it(seed, monkeypatch):
+    from app.solve import join
+    from tests.test_join import _capacitated, _graph
+
+    monkeypatch.setattr(join, "CUTS", False)  # the rule's own cuts off: only what is read off the rows
+    rnd = random.Random(seed)
+    places, links = _graph(7, 900 + seed, extra=0.4)
+    links = [(l, a, b, abs(c) + 3) for l, a, b, c in links]
+    need = {p: rnd.randint(1, 4) for p in places if p != "p0"}
+    compiled = compile_model(*_capacitated(places, links, {"p0"}, need, {l: rnd.choice([5, 9, 30]) for l, *_ in links}))
+    stronger, record = strengthen.strengthen(compiled, seconds=10)
+    assert record["flow_cuts"] > 0 and record["bound_after"] > record["bound_before"], record
+    assert float(_solve(stronger).objective) == pytest.approx(float(_solve(compiled).objective))

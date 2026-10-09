@@ -134,6 +134,19 @@ def candidates(compiled: Compiled):
     return single, covers
 
 
+def tightest(compiled: Compiled) -> dict[VarKey, tuple[VarKey, Decimal]]:
+    """Each limited quantity's tightest on/off limit: (on, most it may be while on)."""
+    limits = _limits(compiled)
+    upper = _upper_bounds(compiled, {i for i, *_ in limits})
+    out: dict[VarKey, tuple[VarKey, Decimal]] = {}
+    for _, on, limited, m in limits:
+        for x, a in limited.items():
+            most = min(m / a, upper[x])
+            if x not in out or most < out[x][1]:
+                out[x] = (on, most)
+    return out
+
+
 def strengthen(compiled: Compiled, *, seconds: float = CEILING) -> tuple[Compiled, dict[str, Any]]:
     """The model with the rows its relaxation breaks added, and what was added (runs in the HiGHS worker)."""
     from dataclasses import replace
@@ -162,9 +175,16 @@ def strengthen_in_process(compiled: Compiled, *, seconds: float) -> tuple[list[C
 
     began = time.monotonic()
     deadline = began + max(1.0, seconds)
+    from app.solve.flowcuts import Flows
+
     single, covers = candidates(compiled)
+    flows = Flows(compiled, tightest(compiled))
     record: dict[str, Any] = {"limits": len(single), "covers": len(covers), "rounds": 0, "added": 0,
+                              "flow_nodes": len(flows.demand) if flows.ok else 0, "flow_cuts": 0,
                               "bound_before": None, "bound_after": None}
+    if not single and not covers and not flows.ok:
+        # Nothing the limits imply beyond themselves: no relaxation is worth its time.
+        return [], {**record, "why": "the on/off limits imply no row beyond themselves"}
     solver = highspy.Highs()
     solver.setOptionValue("output_flag", False)
     solver.setOptionValue("threads", 1)
@@ -213,14 +233,21 @@ def strengthen_in_process(compiled: Compiled, *, seconds: float) -> tuple[list[C
     lows = np.array([low for *_, low in pool], dtype=np.float64)
     live = np.ones(len(pool), dtype=bool)
     values = first[0]
+    watched = sorted({*flows.arcs, *(on for on, _ in flows.limits.values())}, key=str) if flows.ok else []
     while time.monotonic() < deadline and len(chosen) < MOST:
-        short = lows - matrix @ values
+        short = lows - matrix @ values if len(pool) else np.zeros(0)
         short[~live] = 0.0
         broken = np.nonzero(short > 1e-6 * np.maximum(1.0, np.abs(lows)))[0]
-        if not len(broken):
-            break
         take_idx = broken[np.argsort(-short[broken])][:PER_ROUND]
         take = [pool[i] for i in take_idx]
+        if flows.ok and time.monotonic() < deadline:
+            # Cut-sets of the balances, at this relaxation (built afresh each round).
+            at = {k: float(values[position[k]]) for k in watched}
+            cuts = flows.separate(at, PER_ROUND // 2, deadline=deadline)
+            take += [(row, coeffs, low) for _, row, coeffs, low in cuts]
+            record["flow_cuts"] += len(cuts)
+        if not take:
+            break
         add(take)
         chosen.extend(item[0] for item in take)
         live[take_idx] = False
@@ -230,5 +257,16 @@ def strengthen_in_process(compiled: Compiled, *, seconds: float) -> tuple[list[C
             break
         values = again[0]
         record["bound_after"] = again[1]
+    # Only the rows the last relaxation holds tight are kept: the others did their work in the rounds before (the
+    # relaxation moved off them) and would only make each of the solver's own relaxations larger. Measured
+    # (lot sizing, 20 items x 30 periods): all 4,653 rows made HiGHS take 22 s instead of 5.
+    if chosen and values is not None:
+        kept = []
+        for row in chosen:
+            have = sum(float(v) * values[position[k]] for k, v in row.left.coeffs.items())
+            if have - float(row.right.const) <= 1e-6 * max(1.0, abs(float(row.right.const))):
+                kept.append(row)
+        record["dropped_slack"] = len(chosen) - len(kept)
+        chosen = kept
     record["added"] = len(chosen)
     return chosen, record

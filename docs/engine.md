@@ -178,6 +178,24 @@ to 15 s or 10% of the run; setting `strengthen`, on):
 - **covers**: a rule needing at least `d` of quantities each behind a limit needs enough of them on:
   `sum(min(allowed, d) * on) >= d`.
 
+- **cut-sets of flow balances** (`app/solve/flowcuts.py`): rules over quantities with +1 and -1 only (what
+  comes in less what goes out equals, or is at least, what a place keeps) are read as nodes, each turned the way
+  round that makes the quantities in two of them arcs (+1 at the head, -1 at the tail); a node that sends (a
+  shared capacity: `sum(x) <= C` is a supply of C) is never inside a set. For a set U, the arcs into it must
+  bring D(U), each at most `min(M, D_a)` while on (D_a: the demand it can reach inside U) or its flow:
+  `sum(min(M_a, D_a) * on_a  or  x_a) >= D(U)`. Every node's own set is checked each round, and sets are grown
+  from the 20 most broken (up to 40 nodes) by the node sending most into them. That is the (l, S) inequality of
+  lot sizing, the cut-set of network design and the cover of facility location -- found in any model with those
+  rows, none named.
+
+Measured with HiGHS (60 s): uncapacitated lot sizing -- the relaxation reaches the optimum (the (l, S) cut-sets
+are its hull); an 18×18 network design compiled by the join rule with the rule's own cuts off -- bound 15,524 to
+17,277 and 22,612–23,857 found (the rule's own cuts still do better there: 20,280); multi-item capacitated lot
+sizing (20 × 30) -- the relaxation rises from 5,952 to 34,796, but HiGHS's own flow covers already prove it in
+4.5 s, and with the rows it takes 5.8 s: modern solvers find these cuts themselves on models this regular, so the
+rows pay off where the solver's own do not (facility location, network design). Rows the last relaxation does not
+hold tight are dropped before the solve (they made HiGHS take 22 s instead of 5 on the lot-sizing case).
+
 All candidates are checked against the relaxation as one sparse product per round; up to 2,000 are added a
 round, in the HiGHS worker on one model. Uncapacitated facility location, 100 sites × 400 customers: the
 relaxation's bound goes from 17,876 to 35,695 -- the optimum -- in 3.9 s, and HiGHS then proves it in 1.5 s
