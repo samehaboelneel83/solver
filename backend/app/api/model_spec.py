@@ -484,3 +484,30 @@ def build_from_spec(
     return {"ok": True, "dry_run": False, "domain_id": domain_id, "domain_created": made_domain,
             "problem_id": problem.id, "model_version_id": version_id, "scenario_id": scenario.id,
             "created": counts}
+
+
+class DraftCheck(BaseModel):
+    ir: dict[str, Any] = Field(description="the draft model, as the editor holds it")
+    trial: bool = Field(default=False, description="also solve it once, briefly, on the domain's data")
+
+
+@router.post("/problems/{problem_id}/draft-check")
+def check_draft(problem_id: int, body: DraftCheck, db: Session = Depends(get_db),
+                user: UserAccount = Depends(requires("model.publish"))) -> dict[str, Any]:
+    """What `check_spec` gives the Assistant, for a draft in the model editor (owner, 9 October 2026: everything
+    without the Assistant): the platform's refusal if any, the model read back in plain words, and -- with
+    `trial` -- one short solve on the domain's own data. Nothing is kept."""
+    from app.agent.readback import readback
+
+    problem = db.get(Problem, problem_id)
+    if problem is None:
+        raise HTTPException(status_code=404, detail="problem not found")
+    refusal = validate_ir(db, problem.domain_id, body.ir)
+    out: dict[str, Any] = {
+        "refusal": {"code": refusal.code, "loc": refusal.loc, "message": refusal.message} if refusal else None,
+        "readback": readback({"ir": body.ir}).split("\n")[1:],
+    }
+    if body.trial and refusal is None:
+        out["trial"] = _trial(db, problem.domain_id, body.ir)
+        db.rollback()
+    return out

@@ -46,6 +46,7 @@ const OpsQueue = lazy(() => import("./pages/OpsQueue"));
 const OpsAudit = lazy(() => import("./pages/OpsAudit"));
 const OpsBackups = lazy(() => import("./pages/OpsBackups"));
 const Settings = lazy(() => import("./pages/Settings"));
+const Organizations = lazy(() => import("./pages/Organizations"));
 const Help = lazy(() => import("./pages/Help"));
 const ModelEditor = lazy(() => import("./pages/ModelEditor"));
 const Scenarios = lazy(() => import("./pages/Scenarios"));
@@ -160,6 +161,7 @@ export default function App() {
         <Route path="settings" element={<Settings />} />
         <Route path="administration/access" element={<NavigationHub kind="access" />} />
         <Route path="administration/people" element={<People />} />
+        <Route path="administration/organizations" element={<Organizations />} />
         <Route path="inputs" element={<LegacyProblemRedirect page="inputs" fallback={<AliasRedirect to="/domains" />} />} />
         <Route path="data" element={<LegacyDomainRedirect page="data" />} />
         <Route path="structure" element={<LegacyDomainRedirect page="structure" />} />

@@ -902,3 +902,27 @@ describe("TermBuilder and a function", () => {
     expect(screen.getAllByRole("alert")[0]).toHaveTextContent(/multiplies decisions together inside exp/i);
   });
 });
+
+describe("a prediction, started from the picker", () => {
+  it("is offered once a trained model exists, with an input per one it takes", () => {
+    const withModel: ModelContext = { ...CONTEXT, predictors: { demand_model: { inputs: 2 }, price_model: { inputs: 1 } } };
+    function Harness() {
+      const [value, setValue] = useState<Term>({ const: 0 });
+      return <><TermBuilder value={value} onChange={setValue} context={withModel} bound={BOUND} />
+        <output data-testid="term">{JSON.stringify(value)}</output></>;
+    }
+    render(<Harness />);
+    const kinds = screen.getAllByLabelText("Kind of term")[0] as HTMLSelectElement;
+    expect(Array.from(kinds.options).map((o) => o.value)).toContain("predict");
+    fireEvent.change(kinds, { target: { value: "predict" } });
+    expect(JSON.parse(screen.getByTestId("term").textContent!)).toEqual({ predict: "demand_model", of: [{ const: 0 }, { const: 0 }] });
+    fireEvent.change(screen.getByLabelText(/Trained model/), { target: { value: "price_model" } });
+    expect(JSON.parse(screen.getByTestId("term").textContent!)).toEqual({ predict: "price_model", of: [{ const: 0 }] });
+  });
+
+  it("is not offered when no trained model exists", () => {
+    renderTerm({ const: 0 });
+    const kinds = screen.getAllByLabelText("Kind of term")[0] as HTMLSelectElement;
+    expect(Array.from(kinds.options).map((o) => o.value)).not.toContain("predict");
+  });
+});

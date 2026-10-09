@@ -192,9 +192,12 @@ export function newRouteRule(id: string, context: ModelContext): Constraint | nu
 export type ConnectedBody = {
   assign: { var: string; index: string[] };
   units: { index: string; set: string };
-  groups: { index: string; set: string };
+  /** Optional when `sources` is given: then one network, rooted at the sources, over the chosen units. */
+  groups?: { index: string; set: string };
   via: string;
   empty?: "forbidden" | "allowed";
+  /** Where the network starts: a 0/1 field of the units, or a `where` list of fixed filters on them. */
+  sources?: string | unknown[];
 };
 
 /** `each zone is one connected piece of cell over adjacent`, or null for
@@ -203,19 +206,22 @@ export function describeConnected(rule: { connected?: unknown }): string | null 
   const c = rule.connected as Partial<ConnectedBody> | undefined;
   if (!c) return null;
   const empty = c.empty === "allowed" ? " (or empty)" : "";
-  return `each ${c.groups?.set || "group"} is one connected piece of ${c.units?.set || "units"}${empty} over ${c.via || "?"}`;
+  const from = c.sources ? ` reached from a source (${typeof c.sources === "string" ? c.sources : "fixed filters"})` : "";
+  if (!c.groups) return `the chosen ${c.units?.set || "units"} are one network${from} over ${c.via || "?"}`;
+  return `each ${c.groups.set || "group"} is one connected piece of ${c.units?.set || "units"}${empty}${from} over ${c.via || "?"}`;
 }
 
 /** The binary variables a connected rule can read -- indexed by exactly two
  * sets, the first joined to itself by a relationship -- with those
  * relationships. */
 export function connectedChoices(context: ModelContext): { variable: string; units: string; groups: string; vias: string[] }[] {
+  // Over units then groups; or over units alone (`groups` ""), which a rule with sources reads: one network from them.
   return Object.entries(context.variables)
-    .filter(([, v]) => v.domain === "binary" && v.index.length === 2 && v.index[0] !== v.index[1])
+    .filter(([, v]) => v.domain === "binary" && ((v.index.length === 2 && v.index[0] !== v.index[1]) || v.index.length === 1))
     .map(([variable, v]) => ({
       variable,
       units: v.index[0],
-      groups: v.index[1],
+      groups: v.index[1] ?? "",
       vias: context.relationships.filter((r) => r.from === v.index[0] && r.to === v.index[0]).map((r) => r.name),
     }));
 }
@@ -227,6 +233,7 @@ export function connectedBody(
   empty: "forbidden" | "allowed" = "forbidden"
 ): ConnectedBody {
   const u = seedForSet(choice.units);
+  if (!choice.groups) return { assign: { var: choice.variable, index: [u] }, units: { index: u, set: choice.units }, via, empty };
   let z = seedForSet(choice.groups);
   if (z === u) z = `${z}2`;
   return {
@@ -240,7 +247,7 @@ export function connectedBody(
 
 /** A new connected rule over the first admissible variable and relationship, or null when there is none. */
 export function newConnectedRule(id: string, context: ModelContext): Constraint | null {
-  const choice = connectedChoices(context).find((c) => c.vias.length > 0);
+  const choice = connectedChoices(context).find((c) => c.vias.length > 0 && c.groups);
   if (!choice) return null;
   return { id, connected: connectedBody(choice, choice.vias[0]), severity: "hard" } as Constraint;
 }
@@ -379,10 +386,12 @@ export function emptyTerm(kind: TermKind, context: ModelContext, bound: Binding[
       const numeric = Object.keys(context.variables).some((n) => context.variables[n].domain !== "interval");
       return { fn: "exp", of: numeric ? emptyTerm("var", context, bound) : { const: 0 } };
     }
-    case "predict":
-      // A prediction names a predictor the model declares; the editor keeps
-      // one it is given and does not mint one (the kind picker hides it).
-      return { predict: "", of: [{ const: 0 }] };
+    case "predict": {
+      // The first trained predictor of the workspace (or the document), with an input per one it takes; the
+      // ones a model calls are declared when it is saved (`model/predictors`).
+      const [name, declared] = Object.entries(context.predictors ?? {})[0] ?? ["", { inputs: 1 }];
+      return { predict: name, of: Array.from({ length: Math.max(1, declared.inputs) }, () => ({ const: 0 })) };
+    }
     default:
       return { mul: [{ const: 1 }, { const: 0 }] };
   }

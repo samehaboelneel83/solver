@@ -92,6 +92,46 @@ class Target:
 class LoadBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     validation_id: int = Field(gt=0)
+    #: Keep what this load wrote bound to its source, so a refresh (now, or on the schedule) brings the source's
+    #: changes in -- as a plan the Assistant builds from a source is (migration 0114).
+    keep_refreshed: bool = False
+
+
+def binding_of(db: Session, mapping: "Mapping") -> tuple[dict | None, str]:
+    """The refresh binding a clean load makes -- its kind, target and the file-style mapping a refresh reads
+    (`app.integrations.refresh`, as `*_from_file`) -- or None and why it cannot be kept refreshed."""
+    by_target = {target: source for source, target in mapping.columns.items()}
+    entry: dict = {"sheet": mapping.table} if mapping.table else {}
+    kind, identity = mapping.target
+    if kind == "entity_type":
+        entity_type = db.get(EntityType, identity)
+        if not by_target.get("key"):
+            return None, "only rows with a key column can be matched again on a refresh"
+        entry["key"] = by_target["key"]
+        if by_target.get("label"):
+            entry["label"] = by_target["label"]
+        entry["attrs"] = {t: src for t, src in by_target.items() if t not in ("key", "label")}
+        return {"kind": "entities", "target": entity_type.name, "mapping": entry}, ""
+    if kind == "relationship_type":
+        rel = db.get(RelationshipType, identity)
+        if not (by_target.get("from") and by_target.get("to")):
+            return None, "a link is matched again by both its ends"
+        if set(by_target) - {"from", "to"}:
+            return None, "a refresh brings in links by their ends only, not the values on them"
+        ends = {t.id: t.name for t in db.query(EntityType).filter(EntityType.id.in_([rel.from_type_id, rel.to_type_id]))}
+        entry["from"] = [ends[rel.from_type_id], by_target["from"]]
+        entry["to"] = [ends[rel.to_type_id], by_target["to"]]
+        return {"kind": "relationships", "target": rel.name, "mapping": entry}, ""
+    parameter = db.get(ParameterDef, identity)
+    _columns, heads = bulk._parameter_columns(db, parameter)
+    names = {t.id: t.name for t in db.query(EntityType).filter(EntityType.id.in_(parameter.index_type_ids))}
+    if any(not by_target.get(h) for h in heads) or not by_target.get("value"):
+        return None, "a value is matched again by every index column and its value column"
+    if parameter.value_type_id:
+        return None, "a refresh brings in numbers; values that name records are loaded once"
+    entry["entities"] = [[names[t], by_target[h]] for t, h in zip(parameter.index_type_ids, heads)]
+    entry["value"] = by_target["value"]
+    return {"kind": "parameter_values", "target": parameter.name, "mapping": entry}, ""
 
 
 def _job(db: Session, job_id: int, organization_id) -> dict:
@@ -361,6 +401,18 @@ def load(job_id: int, body: LoadBody, request: Request, db: Session = Depends(ge
         # The domain changed since validation (a key taken, a rule added): nothing was written.
         raise HTTPException(409, detail={"message": "The rows no longer load cleanly; nothing was written.",
                                          "faults": [f.model_dump() for f in report.faults]})
-    return {"load_id": loaded["id"], "rows_written": report.written, "target": target.as_dict(), "noun": target.noun,
+    kept: dict = {}
+    if body.keep_refreshed:
+        from app.integrations.refresh import record_bindings
+
+        binding, why = binding_of(db, mapping)
+        if binding is None:
+            kept = {"kept_refreshed": False, "not_kept": why}
+        else:
+            record_bindings(db, job["domain_id"], [{**binding, "connection_id": job["connection_id"],
+                                                    "job_id": job_id, "sha256": validation["artifact_sha256"]}])
+            db.commit()
+            kept = {"kept_refreshed": True}
+    return {**kept, "load_id": loaded["id"], "rows_written": report.written, "target": target.as_dict(), "noun": target.noun,
             **({"entity_type": target.name} if target.kind == "entity_type" else {}),
             "artifact_sha256": validation["artifact_sha256"], "mapping_hash": validation["mapping_hash"]}

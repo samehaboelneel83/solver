@@ -525,6 +525,28 @@ describe("Runs", () => {
     expect(JSON.parse(write.mock.calls[0][1].body)).toEqual(expect.objectContaining({ pareto_steps: 10 }));
   });
 
+  it("sends the seed, the futures, no reuse and the trade-off points the person set", async () => {
+    const write = vi.fn().mockResolvedValue({ ...RUN_DETAIL, id: 32, status: "queued" });
+    const twoGoals = {
+      id: 2, problem_id: 1, version: 2, ir_hash: "h", note: null, created_at: "2026-09-20T09:00:00Z",
+      ir: {
+        constraints: [{ id: "c_cover", left: { const: 0 }, relation: "<=", right: { const: 1 }, severity: "hard" }],
+        objective: { sense: "minimize", terms: [{ id: "o_cost", weight: 1 }, { id: "o_time", weight: 1 }] },
+      },
+    };
+    stub({ write, version: twoGoals });
+    renderPage();
+    fireEvent.click(await screen.findByText("More run options"));
+    fireEvent.change(screen.getByLabelText(/Seed/), { target: { value: "7" } });
+    fireEvent.click(screen.getByLabelText(/answer from an identical earlier run/));
+    fireEvent.change(screen.getByLabelText(/Sampled futures/), { target: { value: "40" } });
+    fireEvent.change(screen.getByLabelText(/Trade-off points/), { target: { value: "20" } });
+    fireEvent.click(await screen.findByRole("button", { name: /show the trade-off between its two goals/i }));
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    expect(JSON.parse(write.mock.calls[0][1].body)).toEqual(expect.objectContaining({
+      seed: 7, reuse: false, futures: 40, pareto_steps: 20 }));
+  });
+
   it("asks for alternatives further apart on a model of bounded whole numbers", async () => {
     const write = vi.fn().mockResolvedValue({ ...RUN_DETAIL, id: 31, status: "queued" });
     const wholeNumbers = {

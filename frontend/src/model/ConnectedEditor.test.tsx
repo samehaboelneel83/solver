@@ -112,3 +112,35 @@ describe("ConnectedEditor", () => {
     expect(describeConnected({})).toBeNull();
   });
 });
+
+describe("a connected rule reached from sources (layouts' access, networks from depots)", () => {
+  const WAYS: ModelContext = {
+    ...CONTEXT,
+    attributes: { cell: [{ name: "entrance", data_type: "integer" }, { name: "zone", data_type: "text" }] },
+    variables: { ...CONTEXT.variables, way: { index: ["cell"], domain: "binary" } },
+  };
+
+  function Sourced({ start }: { start: Constraint }) {
+    const [rule, setRule] = useState<Constraint>(start);
+    return <><ConnectedEditor constraint={rule} onChange={setRule} context={WAYS} />
+      <output data-testid="rule">{JSON.stringify(rule)}</output></>;
+  }
+
+  it("starts networks from a 0/1 field, then may read a decision over the units alone", () => {
+    render(<Sourced start={newConnectedRule("c_access", WAYS)!} />);
+    fireEvent.change(screen.getByLabelText("Reached from (sources)"), { target: { value: "entrance" } });
+    expect(shown().connected).toMatchObject({ sources: "entrance", groups: { set: "zone" } });
+    fireEvent.change(screen.getByLabelText("Assignment"), { target: { value: "way" } });
+    const rule = shown();
+    expect(rule.connected).toEqual({ assign: { var: "way", index: ["c"] }, units: { index: "c", set: "cell" },
+      via: "adjacent", empty: "forbidden", sources: "entrance" });
+    expect(describeConnected(rule)).toBe("the chosen cell are one network reached from a source (entrance) over adjacent");
+    const ir = { version: 2, sets: ["cell", "zone"], relationships: ["adjacent"], parameters: {},
+      variables: { way: { index: ["cell"], domain: "binary" } }, constraints: [rule] };
+    expect(checkIrShape(ir)).toBeNull();
+    // Without sources it goes back to a rule over groups.
+    fireEvent.change(screen.getByLabelText("Reached from (sources)"), { target: { value: "" } });
+    expect(shown().connected).toMatchObject({ assign: { var: "assign" }, groups: { set: "zone" } });
+    expect((shown().connected as Record<string, unknown>).sources).toBeUndefined();
+  });
+});

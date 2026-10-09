@@ -97,6 +97,125 @@ export function changeLines(b: BindingChange): string[] {
   ];
 }
 
+type KeptSheet = { name: string; columns: string[]; rows: unknown[][] };
+
+/** The mapping a refresh reads (an `*_from_file` entry), from the wizard's column -> target mapping. */
+export function fileMapping(kind: TargetKind, chosen: EntityType | RelationshipType | ParameterDef, mapping: Record<string, string>,
+  types: EntityType[], sheet: string | null): Record<string, unknown> {
+  const byTarget = Object.fromEntries(Object.entries(mapping).filter(([, t]) => t).map(([s, t]) => [t, s]));
+  const name = (id: number) => types.find((t) => t.id === id)?.name ?? `type_${id}`;
+  const out: Record<string, unknown> = sheet ? { sheet } : {};
+  if (kind === "entity_type") {
+    out.key = byTarget.key;
+    if (byTarget.label) out.label = byTarget.label;
+    out.attrs = Object.fromEntries(Object.entries(byTarget).filter(([t]) => t !== "key" && t !== "label"));
+  } else if (kind === "relationship_type") {
+    const rel = chosen as RelationshipType;
+    out.from = [name(rel.from_type_id), byTarget.from];
+    out.to = [name(rel.to_type_id), byTarget.to];
+  } else {
+    const parameter = chosen as ParameterDef;
+    const heads = parameterHeads(parameter, types);
+    out.entities = parameter.index_type_ids.map((id, i) => [name(id), byTarget[heads[i]]]);
+    out.value = byTarget.value;
+  }
+  return out;
+}
+
+/** A kept file's table loaded into records, links or values, and kept refreshed from the file (no Assistant needed). */
+function LoadKeptFile({ domainId, file, onDone }: { domainId: string; file: KeptFile; onDone: () => void }) {
+  const client = useQueryClient();
+  const sheetsOf = useQuery({ queryKey: ["workspace-file", domainId, file.name, file.latest],
+    queryFn: () => apiFetch<{ sheets: KeptSheet[] }>(`/api/v1/domains/${domainId}/files/${encodeURIComponent(file.name)}`) });
+  const types = useEntityTypes(Number(domainId), { limit: 500 });
+  const relationships = useRelationshipTypes(Number(domainId), { limit: 500 });
+  const parameters = useParameters(Number(domainId), { limit: 500 });
+  const [sheetName, setSheetName] = useState<string | null>(null);
+  const [kind, setKind] = useState<TargetKind>("entity_type");
+  const [typeId, setTypeId] = useState<number | null>(null);
+  const [mapping, setMapping] = useState<Record<string, string>>({});
+  const typeItems = types.data?.items ?? [];
+  const options: (EntityType | RelationshipType | ParameterDef)[] = kind === "entity_type" ? typeItems.filter((t) => !t.is_abstract)
+    : kind === "relationship_type" ? relationships.data?.items ?? [] : parameters.data?.items ?? [];
+  const chosen = options.find((t) => t.id === typeId) ?? null;
+  const { columns: targets, required } = targetColumns(kind, chosen, typeItems);
+  const sheets = sheetsOf.data?.sheets ?? [];
+  const sheet = sheets.find((s) => s.name === sheetName) ?? sheets[0];
+  const columns = sheet?.columns ?? [];
+  const missing = required.filter((column) => !Object.values(mapping).includes(column));
+  const bind = useMutation({
+    mutationFn: async () => {
+      await post(`/api/v1/domains/${domainId}/source-bindings`, {
+        file_name: file.name, kind: { entity_type: "entities", relationship_type: "relationships", parameter: "parameter_values" }[kind],
+        target: chosen!.name, mapping: fileMapping(kind, chosen!, mapping, typeItems, sheets.length > 1 ? sheet.name : null),
+      });
+      return post<RefreshReport>(`/api/v1/domains/${domainId}/sources/refresh`, { files: { [file.name]: file.latest }, apply: true });
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ["source-bindings", domainId] });
+    },
+  });
+  if (!sheetsOf.data) return <p role="status" className="text-sm">Reading {file.name}…</p>;
+  return <div role="group" aria-label={`Load ${file.name}`} className="mt-2 space-y-2 rounded border border-slate-200 p-3">
+    {sheets.length > 1 && <label className="block">Sheet{" "}
+      <select className="rounded border px-2 py-1" value={sheet?.name} onChange={(e) => { setSheetName(e.target.value); setMapping({}); }}>
+        {sheets.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}</select></label>}
+    <label className="block">The rows become{" "}
+      <select className="rounded border px-2 py-1" value={kind} onChange={(e) => { setKind(e.target.value as TargetKind); setTypeId(null); setMapping({}); }}>
+        <option value="entity_type">records</option><option value="relationship_type">links</option><option value="parameter">values of a parameter</option>
+      </select>{" "}
+      <select aria-label="Of" className="rounded border px-2 py-1" value={typeId ?? ""} onChange={(e) => {
+        const id = Number(e.target.value) || null;
+        setTypeId(id);
+        const next = options.find((t) => t.id === id) ?? null;
+        setMapping(guessMapping(columns, targetColumns(kind, next, typeItems).columns));
+      }}>
+        <option value="">choose…</option>
+        {options.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+      </select></label>
+    {chosen && <table className="text-sm"><tbody>{columns.map((column) => <tr key={column}>
+      <td className="pr-2 font-mono text-xs">{column}</td>
+      <td><select aria-label={`${column} becomes`} className="rounded border px-2 py-1" value={mapping[column] ?? ""}
+        onChange={(e) => setMapping({ ...Object.fromEntries(Object.entries(mapping).filter(([, t]) => t !== e.target.value)), [column]: e.target.value })}>
+        <option value="">(not loaded)</option>
+        {targets.map((t) => <option key={t} value={t}>{t}</option>)}
+      </select></td></tr>)}</tbody></table>}
+    {chosen && missing.length > 0 && <p className="text-amber-800">Choose a column for: {missing.join(", ")}.</p>}
+    <div className="flex gap-2">
+      <button type="button" className="rounded bg-blue-700 px-3 py-1.5 text-white disabled:opacity-50"
+        disabled={!chosen || missing.length > 0 || bind.isPending || bind.isSuccess} onClick={() => bind.mutate()}>
+        {bind.isPending ? "Loading…" : "Load and keep refreshed"}</button>
+      <button type="button" className="rounded border px-3 py-1.5" onClick={onDone}>Close</button>
+    </div>
+    {bind.isError && <p role="alert" className="text-red-800">{formatApiError(bind.error)}</p>}
+    {bind.data && <p role="status" className="text-green-800">Loaded: {bind.data.bindings.map((b) =>
+      `${b.counts.added} added, ${b.counts.changed} changed`).join("; ")}. Kept refreshed from {file.name}.</p>}
+  </div>;
+}
+
+/** A source's password, token or client secret replaced -- what a failed sign-in asks for -- never shown back. */
+function ReplaceCredential({ sourceId, kind }: { sourceId: number; kind: string }) {
+  const [value, setValue] = useState("");
+  const id = useId();
+  const save = useMutation({
+    mutationFn: () => apiFetch(`/api/v1/connections/${sourceId}/credential`, { method: "PUT", body: JSON.stringify({ password: value }) }),
+    onSuccess: () => setValue(""),
+  });
+  if (kind === "none") return null;
+  const what = kind === "bearer" ? "token" : kind === "oauth_client" ? "client secret" : "password";
+  return <details className="text-sm">
+    <summary className="cursor-pointer py-1 text-slate-700">Replace the {what}</summary>
+    <form className="mt-1 flex flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+      <label htmlFor={id}>New {what}</label>
+      <input id={id} type="password" autoComplete="new-password" className="rounded border border-slate-300 px-2 py-1"
+        value={value} onChange={(e) => setValue(e.target.value)} />
+      <button type="submit" className="rounded border px-3 py-1 disabled:opacity-50" disabled={!value || save.isPending}>Save</button>
+    </form>
+    {save.isError && <p role="alert" className="text-red-700">{formatApiError(save.error)}</p>}
+    {save.isSuccess && <p role="status" className="text-green-800">Replaced. It is encrypted on the server and never shown again.</p>}
+  </details>;
+}
+
 /** Files kept in this workspace (by version): add next week's file as a new version, then check for changes. */
 function KeptFiles({ domainId }: { domainId: string }) {
   const { can } = useCapabilities();
@@ -111,16 +230,21 @@ function KeptFiles({ domainId }: { domainId: string }) {
     },
     onSuccess: () => void client.invalidateQueries({ queryKey: ["workspace-files", domainId] }),
   });
-  if (!kept.data?.items.length) return null;
+  const [loading, setLoading] = useState<string | null>(null);
+  if (!kept.data?.items.length && !can("domain.edit")) return null;
   return <section aria-labelledby="kept-files" className="rounded-xl border border-slate-200 bg-white p-4">
     <h2 id="kept-files" className="text-lg font-semibold">Files kept in this workspace</h2>
-    <p className="text-sm text-slate-600">Files a problem was built from, every version kept. Add a newer copy under the same
-      file name, then use <em>Check for changes</em> below to see and apply what it changes.</p>
-    <ul className="my-2 text-sm">{kept.data.items.map(f => <li key={f.name}>
+    <p className="text-sm text-slate-600">Table files (CSV, Excel, JSON), every version kept. Load a file into records, links or
+      values to keep them refreshed from it; later, add a newer copy under the same file name, then use <em>Check for changes</em>
+      below to see and apply what it changes.</p>
+    <ul className="my-2 text-sm">{(kept.data?.items ?? []).map(f => <li key={f.name}>
       <span className="font-medium">{f.name}</span> <span className="text-slate-500">· version {f.latest} of {f.versions} · {f.rows} rows · {new Date(f.updated_at).toLocaleString()}</span>
+      {can("domain.edit") && <button type="button" className="ml-2 text-xs text-blue-700 underline"
+        onClick={() => setLoading(loading === f.name ? null : f.name)}>Load into…</button>}
+      {loading === f.name && <LoadKeptFile domainId={domainId} file={f} onDone={() => setLoading(null)} />}
     </li>)}</ul>
     {can("domain.edit") && <>
-      <label htmlFor={input} className="text-sm">Add a new version (same file name): </label>
+      <label htmlFor={input} className="text-sm">{kept.data?.items.length ? "Keep a file, or a new version of one (same file name): " : "Keep a file: "}</label>
       <input id={input} type="file" accept=".csv,.tsv,.xlsx,.xls,.json" className="text-sm" disabled={add.isPending}
         onChange={e => { const f = e.target.files?.[0]; if (f) add.mutate(f); e.target.value = ""; }} />
     </>}
@@ -231,24 +355,37 @@ function BuiltFromSources({ domainId }: { domainId: string }) {
   const bound = useQuery({ queryKey: ["source-bindings", domainId],
     queryFn: () => apiFetch<{ items: Binding[] }>(`/api/v1/domains/${domainId}/source-bindings`) });
   const [report, setReport] = useState<RefreshReport | null>(null);
-  const check = useMutation({ mutationFn: () => post<RefreshReport>(`/api/v1/domains/${domainId}/sources/refresh`, {}), onSuccess: setReport });
+  // Records a source no longer has are set inactive unless the person keeps them (`remove_missing`).
+  const [keepMissing, setKeepMissing] = useState(false);
+  const check = useMutation({ mutationFn: () => post<RefreshReport>(`/api/v1/domains/${domainId}/sources/refresh`,
+    keepMissing ? { remove_missing: false } : {}), onSuccess: setReport });
   const apply = useMutation({
     mutationFn: ({ r, solve }: { r: RefreshReport; solve: boolean }) => post<RefreshReport>(`/api/v1/domains/${domainId}/sources/refresh`, {
-      apply: true, solve,
+      apply: true, solve, ...(keepMissing ? { remove_missing: false } : {}),
       jobs: Object.fromEntries(r.bindings.filter(b => b.connection_id != null).map(b => [b.connection_id, b.job_id])),
       files: Object.fromEntries(r.bindings.filter(b => b.file_name).map(b => [b.file_name, b.version])),
     }),
     onSuccess: (r) => { setReport(r); void client.invalidateQueries({ queryKey: ["source-bindings", domainId] }); },
   });
+  const unbind = useMutation({
+    mutationFn: (id: number) => apiFetch(`/api/v1/domains/${domainId}/source-bindings/${id}`, { method: "DELETE" }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ["source-bindings", domainId] }),
+  });
   if (!bound.data?.items.length) return null;
   return <section aria-labelledby="built-from" className="rounded-xl border border-slate-200 bg-white p-4">
-    <h2 id="built-from" className="text-lg font-semibold">Built from these sources</h2>
-    <p className="text-sm text-slate-600">Data loaded from a source when a problem was built. Check compares each source&rsquo;s latest
+    <h2 id="built-from" className="text-lg font-semibold">Kept refreshed from these sources</h2>
+    <p className="text-sm text-slate-600">Data loaded from a source and kept refreshed from it. Check compares each source&rsquo;s latest
       extraction with what the domain holds; run an extraction first for today&rsquo;s data. Records a source no longer has are set inactive, not deleted.</p>
     <ul className="my-2 text-sm">{bound.data.items.map(b => <li key={b.id}>
       {b.file_name ? `File ${b.file_name}` : b.connection} → {KIND_TEXT[b.kind] ?? b.kind} <span className="font-medium">{b.target}</span>
-      <span className="text-slate-500">{b.job_id ? ` · from extraction #${b.job_id}` : b.file_version ? ` · from version ${b.file_version}` : ""}{b.refreshed_at ? `, ${new Date(b.refreshed_at).toLocaleString()}` : ""}</span>
+      <span className="text-slate-500">{b.job_id ? ` · from extraction #${b.job_id}` : b.file_version ? ` · from version ${b.file_version}` : " · not loaded yet: apply a check"}{b.refreshed_at ? `, ${new Date(b.refreshed_at).toLocaleString()}` : ""}</span>
+      {can("domain.edit") && <button type="button" className="ml-2 text-xs text-red-700 underline" disabled={unbind.isPending}
+        onClick={() => unbind.mutate(b.id)}>Stop keeping refreshed</button>}
     </li>)}</ul>
+    {unbind.isError && <p role="alert" className="text-red-800">{formatApiError(unbind.error)}</p>}
+    <label className="mb-2 block text-sm"><input type="checkbox" className="mr-1" checked={keepMissing}
+      onChange={(e) => { setKeepMissing(e.target.checked); setReport(null); }} />
+      Keep records, links and values a source no longer has (otherwise records are set inactive and the rest removed)</label>
     <button type="button" className="rounded border px-3 py-1.5 text-sm" disabled={check.isPending} onClick={() => check.mutate()}>
       {check.isPending ? "Checking…" : "Check for changes"}</button>
     {(check.error || apply.error) && <p role="alert" className="mt-2 text-red-800">{formatApiError(check.error ?? apply.error)}</p>}
@@ -498,6 +635,8 @@ function JobHistory({ domainId, source, canManage, onChanged }: { domainId: stri
         Read only what changed</button>}
       {canManage && source.enabled && <button type="button" className="rounded border border-red-300 px-3 py-1.5 text-red-800" onClick={() => disable.mutate()}>Disable source</button>}
     </div>
+    {canManage && <ReplaceCredential sourceId={source.id} kind={source.config?.kind === "http"
+      ? (source.config as { auth?: string }).auth ?? "none" : "database"} />}
     {run.isError && <p role="alert" className="text-red-700">{formatApiError(run.error)}</p>}
     {jobs.isError ? <LoadFailure subject="The extraction history" error={jobs.error} retry={() => void jobs.refetch()} />
       : jobs.isLoading ? <p role="status">Loading extractions…</p>
@@ -595,9 +734,13 @@ export function ImportWizard() {
       ...(table ? { table } : {}) }),
     onSuccess: setReport,
   });
+  // Kept refreshed by default, as a plan built from a source is: the source's later extractions come in through
+  // "Check for changes" or the schedule.
+  const [keep, setKeep] = useState(true);
   const load = useMutation({
-    mutationFn: () => post<{ load_id: number; rows_written: number; entity_type?: string; target?: Target }>(
-      `/api/v1/ingestion-jobs/${jobId}/load`, { validation_id: report?.validation_id }),
+    mutationFn: () => post<{ load_id: number; rows_written: number; entity_type?: string; target?: Target;
+      kept_refreshed?: boolean; not_kept?: string }>(
+      `/api/v1/ingestion-jobs/${jobId}/load`, { validation_id: report?.validation_id, keep_refreshed: keep }),
   });
   const noun = NOUN[kind];
   const back = `/domains/${domainId}/data/sources`;
@@ -706,6 +849,11 @@ export function ImportWizard() {
 
     <section aria-labelledby="step-load">
       <h2 id="step-load" className="mb-2 text-lg font-semibold">4. Load</h2>
+      <label className="mb-2 block text-sm">
+        <input type="checkbox" className="mr-1" checked={keep} disabled={load.isSuccess}
+          onChange={(event) => setKeep(event.target.checked)} />
+        Keep them refreshed from this source (its later extractions show as changes to apply, by hand or on a schedule)
+      </label>
       <button type="button" className="rounded bg-green-700 px-3 py-2 text-sm text-white disabled:opacity-50"
         disabled={!report?.ok || load.isPending || load.isSuccess} onClick={() => load.mutate()}>
         {load.isPending ? "Loading…" : report?.ok ? `Load ${report.would_write} ${report.noun ?? "records"}` : "Load"}
@@ -714,7 +862,10 @@ export function ImportWizard() {
       {load.isSuccess && report && <p role="status" className="mt-2 text-green-800">
         Loaded {load.data.rows_written} {load.data.target?.name ?? load.data.entity_type} {report.noun ?? "records"} (import {load.data.load_id}). They carry this extraction&rsquo;s fingerprint
         ({report.artifact_sha256.slice(0, 12)}…) and the mapping&rsquo;s ({report.mapping_hash.slice(0, 12)}…); the next run freezes them in its dataset.
+        {load.data.kept_refreshed ? " Kept refreshed from this source: see Sources, Check for changes." : ""}
       </p>}
+      {load.isSuccess && load.data.not_kept && <p role="note" className="mt-1 text-amber-800">
+        Not kept refreshed: {load.data.not_kept}.</p>}
     </section>
   </div>;
 }

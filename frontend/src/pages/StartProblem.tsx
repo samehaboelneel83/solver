@@ -30,8 +30,9 @@ import { exampleWords } from "../lib/examples";
 import { suggest } from "../lib/describeProblem";
 import { keepWords, keptWords } from "../model/draftFromWords";
 import { parseRouteId } from "../lib/routeId";
+import { LayoutFromDrawing } from "../components/LayoutFromDrawing";
 
-type Way = "example" | "sheet" | "scratch";
+type Way = "example" | "sheet" | "drawing" | "scratch";
 
 const INPUT = "rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900";
 const PRIMARY = "rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50";
@@ -78,6 +79,7 @@ function Start({ domainId }: { domainId: Id }) {
   const ways: [Way, string, string][] = [
     ["example", "From a ready example", "A working problem with its data and model, to solve at once and change."],
     ["sheet", "From a spreadsheet", "Your own data from Excel or CSV: each sheet becomes a kind of record."],
+    ["drawing", "From a drawing", "Lay items out on a plan (DXF and other drawings): beds, desks, stalls, panels."],
     ["scratch", "From scratch", "An empty problem: add the data and say what to decide."],
   ];
   return (
@@ -92,7 +94,7 @@ function Start({ domainId }: { domainId: Id }) {
         <input className={`${INPUT} w-72`} value={name} onChange={(event) => setName(event.target.value)}
           placeholder={way === "example" ? "the example's name" : "Weekly rota"} />
       </label>
-      <div role="radiogroup" aria-label="Start from" className="grid gap-3 md:grid-cols-3">
+      <div role="radiogroup" aria-label="Start from" className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
         {ways.map(([key, title, says]) => (
           // Named by its title, its line a description (benchmark round 4: "From scratch" could not be
           // found by name -- the whole card's text was its name).
@@ -107,6 +109,7 @@ function Start({ domainId }: { domainId: Id }) {
       <InWords domainId={domainId} />
       {way === "example" && <FromExample domainId={domainId} name={name} onMade={land} />}
       {way === "sheet" && <FromSheet domainId={domainId} name={name} setName={setName} onMade={land} />}
+      {way === "drawing" && <LayoutFromDrawing domainId={domainId} name={name} onMade={(problemId) => land(problemId)} />}
       {way === "scratch" && <FromScratch domainId={domainId} name={name} onMade={land} />}
     </div>
   );

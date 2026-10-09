@@ -226,7 +226,7 @@ export function strandedBy(
       isNamed(constraint.when?.var) ||
       (constraint.connected !== undefined &&
         (isNamed(constraint.connected.assign.var) ||
-          ranges([constraint.connected.units, constraint.connected.groups]))) ||
+          ranges([constraint.connected.units, ...(constraint.connected.groups ? [constraint.connected.groups] : [])]))) ||
       (schedule !== undefined &&
         (isNamed(schedule.interval.var) ||
           ranges(schedule.over) ||

@@ -39,6 +39,7 @@ import FormulaField from "../components/FormulaField";
 import LinkedTotalField from "../components/LinkedTotalField";
 import LinkedValueField from "../components/LinkedValueField";
 import LinkByField from "../components/LinkByField";
+import { RecordTotals } from "../components/RecordTotals";
 
 // Lazy, like the graph's filter bar. The builder is the only module that
 // imports react-querybuilder, which Task 14c measured at +47.6 kB gz on a
@@ -175,6 +176,7 @@ function ForDomain({ domainId }: { domainId: Id }) {
       )}
       {/* Queue R17b: the type's numbers and places as a picture. */}
       {selected && <EntityPicture key={`picture-${selected.id}`} type={selected} />}
+      {selected && !selected.is_abstract && <RecordTotals key={`totals-${selected.id}`} type={selected} />}
     </>
   );
 }

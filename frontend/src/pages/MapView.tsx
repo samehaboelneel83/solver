@@ -25,6 +25,7 @@ import { useCapabilities } from "../hooks/useCapability";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { useDomain } from "../hooks/useDomain";
 import { draw, extentOf, hit, prepare, type Prepared } from "../lib/gisDraw";
+import { CopyMapData } from "../components/CopyMapData";
 
 const KIND_WORDS: Record<string, string> = { point: "points", line: "lines", polygon: "areas", text: "texts" };
 const HIDDEN_PROPS = new Set(["layer_id"]);
@@ -141,6 +142,7 @@ function Viewer({ dataset }: { dataset: GisDataset }) {
           {dataset.placement.kind === "epsg" ? dataset.placement.name ?? `EPSG:${dataset.placement.code}` : "local coordinates"}
         </span>
         <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
+          {can("domain.edit") && <CopyMapData datasetId={dataset.id} fromDomain={dataset.domain_id} name={dataset.name} />}
           <select value={basemap.chosen?.id ?? "none"} onChange={(e) => basemap.choose(e.target.value)} aria-label="Background"
             className="rounded border border-slate-300 bg-white px-1 py-1">
             {basemap.options.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}

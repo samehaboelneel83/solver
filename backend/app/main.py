@@ -10,6 +10,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import TimeoutError as PoolTimeout
 
 from app.api.agent import router as agent_router
+from app.api.agent import explanation_router
 from app.api.model_spec import router as model_spec_router
 from app.api.api_keys import router as api_keys_router
 from app.api.auth import router as auth_router
@@ -52,6 +53,8 @@ from app.api.runs import router as runs_router
 from app.api.approvals import router as approvals_router
 from app.api.drafts import router as drafts_router
 from app.api.layouts import router as layouts_router
+from app.api.drawing_layouts import router as drawing_layouts_router
+from app.api.organizations import router as organizations_router
 from app.api.integrations import router as integrations_router
 from app.api.imports import router as imports_router
 from app.api.notices import router as notices_router
@@ -262,6 +265,8 @@ app.include_router(runs_router)
 app.include_router(approvals_router)
 app.include_router(drafts_router)
 app.include_router(layouts_router)
+app.include_router(drawing_layouts_router)
+app.include_router(organizations_router)
 app.include_router(integrations_router)
 app.include_router(imports_router)
 app.include_router(source_refresh_router)
@@ -305,4 +310,5 @@ app.include_router(graph_router)
 app.include_router(start_router)
 app.include_router(people_router)
 app.include_router(agent_router)
+app.include_router(explanation_router)
 app.include_router(crud_router)

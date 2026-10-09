@@ -15,7 +15,7 @@ import { useDomainProblem } from "../hooks/useDomainProblem";
 import { formatApiError } from "../api/errors";
 import RecordPicker from "../components/RecordPicker";
 import LimitSweep from "../components/LimitSweep";
-import { ruleLimit, type RuleSides } from "../model/ruleLimit";
+import { ruleLimit, ruleLimitParam, type RuleSides } from "../model/ruleLimit";
 export { ruleLimit };
 import {
   solveProblem,
@@ -475,6 +475,10 @@ function ScenarioForm({
                     />
                   </label>
                 )}
+                {ruleLimitParam(constraint) !== null && current !== "disable" && (
+                  <LimitByData rule={constraint} onAdd={(item) => setDataChanges({
+                    ...dataChanges, set_param: [...(dataChanges.set_param ?? []), item] })} />
+                )}
                 {constraint.note && <p className="mt-1 text-xs text-slate-500">{constraint.note}</p>}
               </li>
             );
@@ -827,5 +831,33 @@ export function describePatch(patch: ScenarioPatch): string {
 function Note({ children }: { children: React.ReactNode }) {
   return (
     <div className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">{children}</div>
+  );
+}
+
+/** A rule whose limit is a data value: change that value for one instance, as a data change of this scenario. */
+function LimitByData({ rule, onAdd }: {
+  rule: RuleSides & { forall?: { index: string; set: string }[] };
+  onAdd: (item: { param: string; index: string[]; value: number }) => void;
+}) {
+  const found = ruleLimitParam(rule)!;
+  const [keys, setKeys] = useState<Record<string, string>>({});
+  const [value, setValue] = useState("");
+  const index = found.at.map((a) => ("key" in a ? a.key : keys[a.index] ?? ""));
+  const ready = index.every((k) => k.trim()) && value.trim() !== "" && !Number.isNaN(Number(value));
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-slate-600">
+      its limit is the data value {found.param}; for
+      {found.at.map((a) => ("key" in a ? <span key={a.key} className="font-mono">{a.key}</span> : (
+        <input key={a.index} aria-label={`${rule.id}: which ${a.set}`} placeholder={`${a.set} key`}
+          className={`${INPUT_CLASS} w-24 text-xs`} value={keys[a.index] ?? ""}
+          onChange={(event) => setKeys({ ...keys, [a.index]: event.target.value })} />
+      )))}
+      make it
+      <input aria-label={`${rule.id}: new value of ${found.param}`} inputMode="decimal" className={`${INPUT_CLASS} w-24 text-xs`}
+        value={value} onChange={(event) => setValue(event.target.value)} />
+      <button type="button" className="rounded border px-2 py-0.5 disabled:opacity-50" disabled={!ready}
+        onClick={() => { onAdd({ param: found.param, index: index.map((k) => k.trim()), value: Number(value) }); setValue(""); }}>
+        Add as a data change</button>
+    </div>
   );
 }

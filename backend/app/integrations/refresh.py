@@ -402,8 +402,9 @@ def run_refresh(db: Session, domain_id: int, organization_id, *, jobs: dict | No
              if (not connections and not files) or (connections and b["connection_id"] in connections)
              or (files and b["file_name"] in files)]
     if not bound:
-        raise RefreshRefused("Nothing in this workspace was built from a data source, so there is nothing to refresh. "
-                             "Data loaded from a source with use_source and *_from_file is bound to it.")
+        raise RefreshRefused("Nothing in this workspace is kept refreshed from a data source, so there is nothing to "
+                             "refresh. Load a source's rows with 'Keep refreshed', or load a kept file into records "
+                             "(Sources page); a plan the Assistant builds from a source is kept refreshed too.")
     sheets: dict[Any, dict] = {}
     for name in {b["file_name"] for b in bound if b["file_name"]}:
         found = file_sheet(db, domain_id, name, (files or {}).get(name))

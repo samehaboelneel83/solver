@@ -159,6 +159,22 @@ describe("sources and extractions (Epic UX, U-4)", () => {
       columns: ["project", "cost"], token_url: "https://login.internal/oauth/token", client_id: "planner", client_auth: "post", scope: "read:projects" });
   });
 
+  it("replaces a source's password, never showing it back", async () => {
+    const base = vi.mocked(apiFetch).getMockImplementation()!;
+    vi.mocked(apiFetch).mockImplementation(async (path, init) =>
+      String(path) === "/api/v1/connections/4/credential" ? null : base(path, init));
+    mount("/domains/7/data/sources");
+    fireEvent.click(await screen.findByRole("button", { name: "Extractions" }));
+    fireEvent.click(await screen.findByText("Replace the password"));
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "n3w" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText(/Replaced. It is encrypted/)).toBeInTheDocument();
+    const [, init] = vi.mocked(apiFetch).mock.calls.find(([p]) => p === "/api/v1/connections/4/credential")!;
+    expect((init as RequestInit).method).toBe("PUT");
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({ password: "n3w" });
+    expect(screen.getByLabelText("New password")).toHaveValue("");
+  });
+
   it("offers no source form to an account that may only run extractions", async () => {
     access.capabilities = ["integration.run"];
     mount("/domains/7/data/sources");
@@ -244,6 +260,26 @@ describe("the import wizard", () => {
     await screen.findByRole("table", { name: "Problems found" });
     const body = JSON.parse(String((vi.mocked(apiFetch).mock.calls.find(([p]) => String(p).endsWith("/validate"))![1] as RequestInit).body));
     expect(body).toEqual({ entity_type_id: 9, columns: { id: "key", hours: "hours" }, table: "sites" });
+  });
+
+  it("loads clean rows and keeps them refreshed from the source unless told not to", async () => {
+    const base = vi.mocked(apiFetch).getMockImplementation()!;
+    vi.mocked(apiFetch).mockImplementation(async (path, init) => {
+      const p = String(path);
+      if (p.endsWith("/validate")) return { validation_id: 6, ok: true, rows: 2, would_write: 2, entity_type: "nurse", noun: "records",
+        artifact_sha256: "ab".repeat(32), mapping_hash: "cd".repeat(32), faults: [], defaults: [] };
+      if (p.endsWith("/load")) return { load_id: 8, rows_written: 2, entity_type: "nurse", kept_refreshed: true };
+      return base(path, init);
+    });
+    mount("/domains/7/data/sources/4/jobs/12/import");
+    await screen.findByRole("table", { name: "Extracted rows" });
+    fireEvent.change(await screen.findByLabelText("The rows become records of"), { target: { value: "9" } });
+    fireEvent.click(screen.getByRole("button", { name: "Check the rows" }));
+    expect(screen.getByLabelText(/Keep them refreshed from this source/)).toBeChecked();
+    fireEvent.click(await screen.findByRole("button", { name: "Load 2 records" }));
+    expect(await screen.findByText(/Kept refreshed from this source/)).toBeInTheDocument();
+    const body = JSON.parse(String((vi.mocked(apiFetch).mock.calls.find(([p]) => String(p).endsWith("/load"))![1] as RequestInit).body));
+    expect(body).toEqual({ validation_id: 6, keep_refreshed: true });
   });
 
   it("names a parameter's index columns as its template does", async () => {

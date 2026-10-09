@@ -84,9 +84,8 @@ export default function TermBuilder({
       : TERM_KINDS.filter((option) => option !== "sum")
   )
     .filter((option) => option !== "pwl" || kind === "pwl" || numericVariables(context).length > 0)
-    // A prediction names a predictor the model declares (Epic ML); one is
-    // kept and edited here, not minted from the picker.
-    .filter((option) => option !== "predict" || kind === "predict");
+    // A prediction names a trained predictor (Epic ML): offered once the workspace or the model has one.
+    .filter((option) => option !== "predict" || kind === "predict" || Object.keys(context.predictors ?? {}).length > 0);
   const name = label ?? TERM_LABELS[kind];
   const kindSelect = (
     <>
@@ -203,6 +202,21 @@ function Body({
     const term = value as { predict: string; of: Term[] };
     return (
       <div className="space-y-2">
+        {Object.keys(context.predictors ?? {}).length > 0 && (
+          <label className="block text-xs text-slate-600">Trained model{" "}
+            <select className={`${INPUT_CLASS} w-auto text-xs`} value={term.predict}
+              onChange={(event) => {
+                const inputs = Math.max(1, context.predictors?.[event.target.value]?.inputs ?? term.of.length);
+                onChange({ predict: event.target.value,
+                  of: Array.from({ length: inputs }, (_, i) => term.of[i] ?? { const: 0 }) });
+              }}>
+              {!context.predictors?.[term.predict] && <option value={term.predict}>{term.predict || "choose…"}</option>}
+              {Object.entries(context.predictors ?? {}).map(([name, p]) => (
+                <option key={name} value={name}>{name} ({p.inputs} input{p.inputs === 1 ? "" : "s"})</option>
+              ))}
+            </select>
+          </label>
+        )}
         <p role="note" className="text-xs text-slate-600">
           The trained model <span className="font-mono">{term.predict}</span>, applied to its inputs in order. Of
           decisions, it is written as rows with a yes-or-no choice per leaf, so the decisions it reads need upper

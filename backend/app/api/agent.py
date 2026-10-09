@@ -575,3 +575,16 @@ def result(run_id: int, db: Session = Depends(get_db), user: UserAccount = Depen
             rec["front"].append({"seq": seq, "first": first, "second": second, "status": status,
                                  "run_id": point_run, "chosen": chosen})
     return {"text": agent_result.summary(rec), "facts": agent_result.facts(rec)}
+
+
+#: The same read-back, under the runs it belongs to: a person reads it on the run's page without the Assistant
+#: (owner, 9 October 2026).
+explanation_router = APIRouter(prefix="/api/v1/runs", tags=["runs"])
+
+
+@explanation_router.get("/{run_id}/explanation")
+def explanation(run_id: int, db: Session = Depends(get_db), user: UserAccount = Depends(get_current_user)) -> dict:
+    """A run's answer in words: the goal and its parts, what each decision chose with its records' names and
+    numbers, per-record totals, room left and busy time, rules held / tight / broken, what a change of a number
+    would do while the plan stays the same, routes and layouts -- what the Assistant reads (`read_result`)."""
+    return result(run_id, db, user)

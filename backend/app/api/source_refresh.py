@@ -12,7 +12,7 @@ all of it in one transaction (nothing on any refusal) and marks the bindings wit
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
@@ -85,6 +85,64 @@ def get_file(domain_id: int, name: str, version: int | None = Query(None, ge=1),
 def list_bindings(domain_id: int, db: Session = Depends(get_db), user=Depends(requires("integration.run"))) -> dict:
     _domain(db, domain_id, user.organization_id)
     return {"items": refresh.bindings(db, domain_id)}
+
+
+class BindingBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    file_name: str = Field(min_length=1, max_length=255, description="a file kept in this workspace")
+    kind: Literal["entities", "relationships", "parameter_values"]
+    target: str = Field(min_length=1, max_length=200, description="the kind of record, relationship type or parameter")
+    mapping: dict[str, Any] = Field(description="as an *_from_file entry: sheet, key, label, attrs; from, to; "
+                                                "entities, value")
+
+
+def _target_exists(db: Session, domain_id: int, kind: str, target: str) -> bool:
+    table = {"entities": "entity_type", "relationships": "relationship_type", "parameter_values": "parameter_def"}[kind]
+    return db.execute(text(f"SELECT 1 FROM {table} WHERE domain_id = :d AND name = :n"),
+                      {"d": domain_id, "n": target}).first() is not None
+
+
+@router.post("/domains/{domain_id}/source-bindings", status_code=201)
+def bind_file(domain_id: int, body: BindingBody, request: Request, db: Session = Depends(get_db),
+              user=Depends(requires("domain.edit"))) -> dict:
+    """Load a kept file's table into records, links or values and keep them refreshed from it -- what a plan
+    built from a file does, without the Assistant (owner, 9 October 2026). The mapping is checked against the
+    file's latest version now; nothing is written until a refresh applies it (its first one loads every row)."""
+    _domain(db, domain_id, user.organization_id)
+    sheet = refresh.file_sheet(db, domain_id, body.file_name)
+    if sheet is None:
+        raise HTTPException(404, "No such file in this workspace; keep it first")
+    if not _target_exists(db, domain_id, body.kind, body.target):
+        raise HTTPException(422, detail=[{"loc": ["target"], "msg": f"{body.target!r} is not one of this domain's "
+                                          + {"entities": "kinds of record", "relationships": "relationship types",
+                                             "parameter_values": "parameters"}[body.kind]}])
+    mapping = {k: v for k, v in body.mapping.items() if k not in ("file", "type", "parameter")}
+    try:
+        made = refresh._wanted({"kind": body.kind, "target": body.target, "mapping": mapping,
+                                "connection": body.file_name}, sheet)
+    except refresh.RefreshRefused as exc:
+        raise HTTPException(422, detail=[{"loc": ["mapping"], "msg": str(exc)}]) from None
+    refresh.record_bindings(db, domain_id, [{"file_name": body.file_name, "file_version": None, "sha256": None,
+                                             "kind": body.kind, "target": body.target, "mapping": mapping}])
+    audit.write(db, user, request, action="domain.source.bind", object_type="domain", object_id=domain_id,
+                after={"file": body.file_name, "kind": body.kind, "target": body.target})
+    db.commit()
+    return {"bound": True, "rows": len(made)}
+
+
+@router.delete("/domains/{domain_id}/source-bindings/{binding_id}", status_code=204, response_class=Response)
+def unbind(domain_id: int, binding_id: int, request: Request, db: Session = Depends(get_db),
+           user=Depends(requires("domain.edit"))) -> Response:
+    """Stop keeping data refreshed from a source; what it loaded stays."""
+    _domain(db, domain_id, user.organization_id)
+    gone = db.execute(text("DELETE FROM source_binding WHERE id = :b AND domain_id = :d RETURNING kind, target"),
+                      {"b": binding_id, "d": domain_id}).first()
+    if gone is None:
+        raise HTTPException(404, "No such binding in this domain")
+    audit.write(db, user, request, action="domain.source.unbind", object_type="domain", object_id=domain_id,
+                after={"binding": binding_id, "kind": gone[0], "target": gone[1]})
+    db.commit()
+    return Response(status_code=204)
 
 
 @router.post("/domains/{domain_id}/sources/refresh")

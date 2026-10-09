@@ -96,6 +96,9 @@ import { ApiError } from "../api/client";
 import ContextMismatch from "../components/ContextMismatch";
 import ProblemReadiness from "../components/ProblemReadiness";
 import { generatedSets } from "../ir/generate";
+import { IrTextEditor } from "../model/IrTextEditor";
+import { GeneratedSetsEditor } from "../model/GeneratedSetsEditor";
+import { DraftCheck } from "../model/DraftCheck";
 
 /**
  * Writing a model: its constraints and its objective.
@@ -717,7 +720,7 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       )}
       {!simple && <details className="mb-4 text-sm text-slate-600">
         <summary className="cursor-pointer py-2">Advanced views</summary>
-        <p className="my-2">Blocks edits the same draft. Exact IR is read-only. Legacy visualizations show published model versions.</p>
+        <p className="my-2">Blocks edits the same draft. Exact IR edits it as JSON, for anything the forms do not draw. Legacy visualizations show published model versions.</p>
         <Link className="inline-block py-2 text-blue-700 underline" to={`/domains/${domainId}/data/explore?mode=model&problem=${problemId}`}>Open legacy visualizations</Link>
       </details>}
 
@@ -741,7 +744,10 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
       {view === "review" && draft ? <ModelReview draft={draft}
         units={Object.fromEntries((parameters.data?.items ?? []).map((parameter) => [parameter.name, parameter.unit]))}
         planner={classification.data?.planner ?? []} wouldSolve={classification.data?.would_solve ?? null} />
-      : view === "ir" ? <section aria-label="Exact IR" className="mb-6"><p className="mb-2 text-sm text-slate-600">Read-only current draft. Use Guided Form or Blocks to edit.</p><pre className="max-h-[32rem] overflow-auto rounded-lg bg-slate-50 p-4 text-sm">{JSON.stringify(workingIr, null, 2)}</pre></section>
+      : null}
+      {view === "review" && draft && canEdit && <DraftCheck problemId={Number(problemId)} ir={nextIr as Record<string, unknown> | null} />}
+      {view === "review" && draft ? null
+      : view === "ir" && workingIr ? <IrTextEditor ir={workingIr} canEdit={canEdit} refusal={refusal} onApply={setIr} />
       : view === "blocks" && workingIr && canEdit ? (
         <div className="mb-6">
           <BlocksEditor
@@ -835,6 +841,16 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
         attributes={context?.attributes ?? {}}
         units={Object.fromEntries((parameters.data?.items ?? []).map((parameter) => [parameter.name, parameter.unit]))}
       />
+      {!simple && workingIr && (!stepByStep || step === "sets") && <GeneratedSetsEditor
+        generate={(Array.isArray(workingIr.generate) ? workingIr.generate : []) as Record<string, unknown>[]}
+        sets={draft.sets}
+        relationships={(relationshipTypes.data?.items ?? []).map((rel) => rel.name)}
+        types={(entityTypes.data?.items ?? []).map((type) => ({ name: type.name, attributes: type.attributes ?? [] }))}
+        canEdit={canEdit}
+        onChange={(next) => {
+          const { generate: _old, ...rest } = workingIr;
+          setIr(next.length ? { ...rest, generate: next } : rest);
+        }} />}
 
       </div>
       <section hidden={(focusedPart !== undefined && focusedPart !== "rules") || (stepByStep && step !== "rules")} id="constraints-editor" tabIndex={-1} aria-labelledby="constraints-heading" className="mb-6">
@@ -2269,7 +2285,7 @@ function PlaceSummary({ body }: { body: PlaceBody }) {
       </p>
       <p className="mt-1 text-xs text-slate-600">
         Laid out by the placement solver, without a list of positions. To change the areas, sizes or aisle, lay the
-        drawing out again with the Assistant.
+        drawing out again (Start a problem, From a drawing), or edit the rule in the Exact IR tab.
       </p>
     </div>
   );

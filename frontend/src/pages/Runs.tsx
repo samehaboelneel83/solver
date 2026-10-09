@@ -60,6 +60,8 @@ import RunOutputs, { CompareMap } from "../components/RunOutputs";
 import { ruleSentence } from "../model/ruleSentence";
 import type { Constraint } from "../model/terms";
 import SolveEffort, { useSolveSeconds } from "../components/SolveEffort";
+import { AnswerExplained } from "../components/AnswerExplained";
+import { KeepAsCase } from "../components/KeepAsCase";
 
 /**
  * Solving, and what came of it.
@@ -562,6 +564,8 @@ function ScenarioRuns({
   const alternativesRefusal: string | null = null;
   const solvers = useSolvers();
   const [solver, setSolver] = useState<string>("");
+  // More run options (owner, 9 October 2026: every option the API takes, without the Assistant).
+  const [more, setMore] = useState({ seed: "", reuse: true, futures: "", steps: "10", alternatives: String(ALTERNATIVES), within: "5" });
   // Before a run (Epic UX, U-5): what would stop it, which solvers fit, whether a worker is there.
   const preflightQuery = usePreflight(scenarioId);
   const moveScenario = useUpdateScenario();
@@ -656,11 +660,14 @@ function ScenarioRuns({
         body: {
           time_limit_s: seconds,
           ...(solver ? { solver } : {}),
-          ...(how === "front" ? { pareto_steps: 10 } : {}),
+          ...(more.seed.trim() ? { seed: Number(more.seed) } : {}),
+          ...(more.reuse ? {} : { reuse: false }),
+          ...(more.futures.trim() ? { futures: Number(more.futures) } : {}),
+          ...(how === "front" ? { pareto_steps: Math.min(50, Math.max(2, Number(more.steps) || 10)) } : {}),
           ...(how === "robust" ? { robust: true } : {}),
           ...(how === "alternatives" ? {
-            alternatives: ALTERNATIVES,
-            alternatives_within: 0.05,
+            alternatives: Math.min(20, Math.max(1, Number(more.alternatives) || ALTERNATIVES)),
+            alternatives_within: Math.min(1, Math.max(0, (Number(more.within) || 5) / 100)),
             ...(Number(apart) > 1 ? { alternatives_min_changes: Math.min(50, Number(apart)) } : {}),
           } : {}),
         },
@@ -804,6 +811,31 @@ function ScenarioRuns({
               ))}
           </select>
         </label>
+        )}
+        {!simple && can("run.submit") && (
+          <details className="w-full text-sm text-slate-700">
+            <summary className="cursor-pointer py-1">More run options</summary>
+            <div className="mt-2 flex flex-wrap items-end gap-4">
+              <label>Seed (same seed, same answer){" "}
+                <input className="w-24 rounded border border-slate-300 px-2 py-1" inputMode="numeric" value={more.seed}
+                  placeholder="any" onChange={(e) => setMore({ ...more, seed: e.target.value.replace(/[^0-9]/g, "") })} /></label>
+              <label><input type="checkbox" className="mr-1" checked={more.reuse}
+                onChange={(e) => setMore({ ...more, reuse: e.target.checked })} />
+                answer from an identical earlier run, when proven best</label>
+              <label>Sampled futures (uncertain data){" "}
+                <input className="w-20 rounded border border-slate-300 px-2 py-1" inputMode="numeric" value={more.futures}
+                  placeholder="setting" onChange={(e) => setMore({ ...more, futures: e.target.value.replace(/[^0-9]/g, "") })} /></label>
+              <label>Trade-off points{" "}
+                <input className="w-16 rounded border border-slate-300 px-2 py-1" inputMode="numeric" value={more.steps}
+                  onChange={(e) => setMore({ ...more, steps: e.target.value.replace(/[^0-9]/g, "") })} /></label>
+              <label>Other plans{" "}
+                <input className="w-16 rounded border border-slate-300 px-2 py-1" inputMode="numeric" value={more.alternatives}
+                  onChange={(e) => setMore({ ...more, alternatives: e.target.value.replace(/[^0-9]/g, "") })} /></label>
+              <label>within (% of the best){" "}
+                <input className="w-16 rounded border border-slate-300 px-2 py-1" inputMode="decimal" value={more.within}
+                  onChange={(e) => setMore({ ...more, within: e.target.value.replace(/[^0-9.]/g, "") })} /></label>
+            </div>
+          </details>
         )}
         {can("run.submit") && (
           <span className="text-sm text-slate-500">
@@ -1375,6 +1407,9 @@ function RunDetail({
           </div>
         )}
 
+      {data.objective !== null && <AnswerExplained runId={data.id} />}
+      {data.objective !== null && can("model.publish") && runScenario.data?.problem_id != null && (data.status === "optimal" || data.status === "feasible") &&
+        <KeepAsCase problemId={Number(runScenario.data.problem_id)} runId={data.id} />}
       <details className="mt-6 text-sm">
         <summary className="cursor-pointer font-semibold text-slate-900">Technical</summary>
         <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">

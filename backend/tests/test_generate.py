@@ -277,5 +277,7 @@ def test_a_generated_plan_builds_runs_and_reports_through_the_platform(tmp_path,
                            " WHERE t.domain_id = :d"), {"d": domain}).scalar_one() == 2
     result = client.get(f"/api/v1/agent/result/{run_id}", headers=tenants["a"]).json()
     assert result["facts"]["goal"] == outcome.objective
+    # The same words on the run's page, without the Assistant.
+    assert client.get(f"/api/v1/runs/{run_id}/explanation", headers=tenants["a"]).json() == result
     sheet = client.get(f"/api/v1/runs/{run_id}/export?format=csv", headers=tenants["a"])
     assert sheet.status_code == 200 and "bed_" in sheet.text

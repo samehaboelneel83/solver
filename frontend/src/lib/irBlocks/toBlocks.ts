@@ -300,7 +300,9 @@ export function irToBlocks(
       Object.keys(rule).every((k) => ["id", "note", "severity", "connected"].includes(k)) && rule.severity === "hard" &&
       shaped(c, ["assign", "units", "groups", "via"], CONNECTED_KEYS) && isRef(c.assign) && isName(c.via) &&
       shaped(c.units, ["index", "set"]) && shaped(c.groups, ["index", "set"]) &&
-      (c.empty === undefined || c.empty === "forbidden" || c.empty === "allowed");
+      (c.empty === undefined || c.empty === "forbidden" || c.empty === "allowed") &&
+      // A rule with sources has no block of its own: it is kept as it is, never drawn without them.
+      c.sources === undefined;
     if (!fits) return null;
     const units = c.units as { index: string; set: string };
     const groups = c.groups as { index: string; set: string };

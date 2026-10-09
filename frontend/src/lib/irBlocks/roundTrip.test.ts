@@ -122,3 +122,13 @@ describe("a model with generated sets (plan 1B)", () => {
     expect(checkIrShape(out)).toBeNull();
   });
 });
+
+describe("a connected rule with sources", () => {
+  it("is kept through Blocks as it is, never drawn without its sources", () => {
+    const ir = { version: 2, sets: ["cell"], relationships: ["next_to"], parameters: {},
+      variables: { way: { index: ["cell"], domain: "binary" } },
+      constraints: [{ id: "c_access", severity: "hard", connected: { assign: { var: "way", index: ["k"] },
+        units: { index: "k", set: "cell" }, via: "next_to", sources: "entrance" } }] };
+    expect(throughWorkspace(ir).ir.constraints).toEqual(ir.constraints);
+  });
+});

@@ -784,3 +784,47 @@ def delete_attribute(
     else:
         db.delete(attribute)
     _commit(db, "attribute_def")
+
+
+#: The most groups a totals table returns.
+TOTALS_GROUPS = 500
+#: A text that reads as a number (a total adds only these).
+_NUMERIC = r"^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$"
+
+
+@router.get("/entity-types/{entity_type_id}/totals")
+def entity_totals(
+    entity_type_id: int,
+    by: str | None = Query(default=None, max_length=128, description="a field to group by (key, label or an attribute)"),
+    totals: list[str] = Query(default=[], alias="sum", description="numeric attributes to add up per group"),
+    db: Session = Depends(get_db),
+    _: UserAccount = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Exact counts and totals over a kind of record's active records -- grouped by a field when one is named --
+    what the Assistant's `query_file` computes, for anyone (owner, 9 October 2026). Only declared fields may be
+    named; a value that is not a number counts toward the rows, not the total."""
+    entity_type = _get_entity_type(db, entity_type_id)
+    declared = {a.name: a.data_type for a in db.query(AttributeDef).filter(AttributeDef.entity_type_id == entity_type.id)}
+    if by is not None and by not in ("key", "label") and by not in declared:
+        raise HTTPException(status_code=422, detail=f"{by!r} is not a field of {entity_type.name}")
+    for name in totals:
+        if declared.get(name) not in ("integer", "number"):
+            raise HTTPException(status_code=422, detail=f"{name!r} is not a number field of {entity_type.name}")
+    group = ("e.key" if by == "key" else "coalesce(e.label, e.key)" if by == "label"
+             else "e.attrs ->> :by" if by else "NULL")
+    added = "".join(f", sum(CASE WHEN e.attrs ->> :s{i} ~ :num THEN (e.attrs ->> :s{i})::numeric END)"
+                    for i in range(len(totals)))
+    params: dict[str, Any] = {"t": entity_type.id, "by": by, "num": _NUMERIC, "lim": TOTALS_GROUPS + 1,
+                              **{f"s{i}": name for i, name in enumerate(totals)}}
+    rows = db.execute(text(
+        f"SELECT {group} AS grp, count(*){added} FROM entity e WHERE e.entity_type_id = :t AND e.active"
+        " GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT :lim"), params).all()
+    groups = [{"group": r[0], "rows": int(r[1]),
+               "sums": {name: (float(r[2 + i]) if r[2 + i] is not None else None) for i, name in enumerate(totals)}}
+              for r in rows[:TOTALS_GROUPS]]
+    whole = {"rows": sum(g["rows"] for g in groups)}
+    for name in totals:
+        values = [g["sums"][name] for g in groups if g["sums"][name] is not None]
+        whole[name] = sum(values) if values else None
+    return {"entity_type": entity_type.name, "by": by, "groups": groups, "truncated": len(rows) > TOTALS_GROUPS,
+            "total": whole}

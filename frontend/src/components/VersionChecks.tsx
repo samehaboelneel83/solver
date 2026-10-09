@@ -1,4 +1,6 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { apiFetch } from "../api/client";
 import { formatApiError } from "../api/errors";
 import { useCheckVersion, useGateOverride, useVersionChecks, type Id } from "../api/v1";
 import { useToast } from "./ToastProvider";
@@ -31,6 +33,12 @@ export default function VersionChecks({ versionId }: { versionId: Id }) {
   const override = useGateOverride();
   const toast = useToast();
   const [reason, setReason] = useState("");
+  const client = useQueryClient();
+  const removeCase = useMutation({
+    mutationFn: (caseId: Id) => apiFetch(`/api/v1/suite-cases/${caseId}`, { method: "DELETE" }),
+    onSuccess: () => void client.invalidateQueries(),
+    onError: (error) => toast.error(formatApiError(error)),
+  });
   if (!checks.data) return null;
   const { state, cases } = checks.data;
   return (
@@ -62,6 +70,8 @@ export default function VersionChecks({ versionId }: { versionId: Id }) {
               )}{" "}
               <span className="font-medium text-slate-900">{c.name}</span>
               {c.reasons.length > 0 && <span className="text-red-800"> — {c.reasons.join("; ")}</span>}
+              <button type="button" className="ml-2 text-xs text-red-700 underline" disabled={removeCase.isPending}
+                onClick={() => removeCase.mutate(c.case_id)}>Remove case</button>
             </li>
           ))}
         </ul>

@@ -26,8 +26,13 @@ export default function ConnectedEditor({
 }) {
   const variableId = useId();
   const viaId = useId();
+  const sourcesId = useId();
   const body = constraint.connected as ConnectedBody;
-  const choices = connectedChoices(context);
+  // A decision over the units alone is a choice only with sources: one network rooted at them.
+  const choices = connectedChoices(context).filter((c) => c.groups || body.sources);
+  // The units' 0/1 fields (whole-number or yes/no) may say which units are sources.
+  const sourceFields = (context.attributes[body.units.set] ?? [])
+    .filter((a) => ["integer", "number", "boolean"].includes(a.data_type)).map((a) => a.name);
   const chosen = choices.find((c) => c.variable === body.assign.var);
   const empty = body.empty === "allowed" ? "allowed" : "forbidden";
 
@@ -50,13 +55,16 @@ export default function ConnectedEditor({
             value={body.assign.var}
             onChange={(event) => {
               const next = choices.find((c) => c.variable === event.target.value);
-              if (next) write(connectedBody(next, next.vias.includes(body.via) ? body.via : next.vias[0] ?? "", empty));
+              if (next) {
+                const made = connectedBody(next, next.vias.includes(body.via) ? body.via : next.vias[0] ?? "", empty);
+                write(body.sources ? { ...made, sources: body.sources } : made);
+              }
             }}
           >
             {!chosen && <option value={body.assign.var}>{body.assign.var} (not a yes-or-no over two sets)</option>}
             {choices.map((c) => (
               <option key={c.variable} value={c.variable}>
-                {c.variable} ({c.units} × {c.groups})
+                {c.variable} ({c.groups ? `${c.units} × ${c.groups}` : c.units})
               </option>
             ))}
           </select>
@@ -84,16 +92,47 @@ export default function ConnectedEditor({
           </select>
         </div>
       </div>
+      <div>
+        <label htmlFor={sourcesId} className="block text-xs text-slate-600">
+          Reached from (sources)
+        </label>
+        <select
+          id={sourcesId}
+          className="rounded border px-2 py-1"
+          value={typeof body.sources === "string" ? body.sources : body.sources ? "(filters)" : ""}
+          onChange={(event) => {
+            const { sources: _old, ...rest } = body;
+            if (!event.target.value) {
+              // Without sources a rule needs its groups: back to the first choice that has them.
+              if (rest.groups) write(rest);
+              else {
+                const grouped = connectedChoices(context).find((c) => c.groups && c.units === body.units.set) ?? connectedChoices(context).find((c) => c.groups);
+                if (grouped) write(connectedBody(grouped, grouped.vias[0] ?? body.via, empty));
+              }
+            } else if (event.target.value !== "(filters)") write({ ...rest, sources: event.target.value });
+          }}
+        >
+          <option value="">nowhere: each group is one piece</option>
+          {Array.isArray(body.sources) && <option value="(filters)">fixed filters (edit in Exact IR)</option>}
+          {sourceFields.map((name) => (
+            <option key={name} value={name}>
+              {body.units.set || "units"} whose {name} is 1
+            </option>
+          ))}
+        </select>
+        {!sourceFields.length && <p className="text-xs text-slate-500">
+          Give {body.units.set || "the units"} a 0/1 field (doors, entrances, depots) to start networks from them.</p>}
+      </div>
       <label className="flex items-center gap-2">
         <input
           type="checkbox"
           checked={empty === "allowed"}
           onChange={(event) => write({ ...body, empty: event.target.checked ? "allowed" : "forbidden" })}
         />
-        A {body.groups.set || "group"} may be left with no {body.units.set || "units"}
+        A {body.groups?.set || "group"} may be left with no {body.units.set || "units"}
       </label>
       <p className="text-xs text-slate-500">
-        A connected rule is always required: a {body.groups.set || "group"} in two pieces is not a nearly-kept rule.
+        A connected rule is always required: a {body.groups?.set || "group"} in two pieces is not a nearly-kept rule.
       </p>
     </div>
   );

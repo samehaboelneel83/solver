@@ -54,6 +54,7 @@ export default function NavigationHub({ kind }: { kind: Hub }) {
         { title: "Roles & permissions", description: "Review roles and their granted capabilities.", to: "/iam/role", capability: "iam.manage" },
         { title: "Platform settings", description: "Configure platform defaults and policies.", to: "/settings", capability: "settings.edit" },
         { title: "API keys", description: "Manage programmatic credentials.", to: "/api-keys", capability: "iam.manage" },
+        { title: "Organizations and sign-in", description: "Single sign-on, directory sync, limits; and, for the operator, every organization: start, quota, export, delete.", to: "/administration/organizations", capability: "iam.manage" },
         { title: "Organizations", description: "Review tenant organizations.", to: "/iam/organization", capability: "domain.edit" },
         { title: "Audit", description: "Review recorded changes.", to: "/ops/audit", capability: "iam.manage" },
       ],

@@ -26,6 +26,8 @@ const IR_22 = {
   constraints: [
     { id: "c_cover_demand", note: "each day/shift is staffed", severity: "hard" },
     { id: "c_max_hours", note: "weekly hours", severity: "hard", left: { var: "h" }, relation: "<=", right: { const: 40 } },
+    { id: "c_demand", note: "meet each month's demand", severity: "hard", forall: [{ index: "m", set: "month" }],
+      left: { var: "make", index: ["m"] }, relation: ">=", right: { par: "demand", index: ["m"] } },
   ],
 };
 // Version 1 has a rule version 2 does not: choosing it must drop a choice
@@ -195,6 +197,21 @@ describe("Scenarios", () => {
     fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
     await waitFor(() => expect(write).toHaveBeenCalled());
     expect(JSON.parse(write.mock.calls[0][1].body).patch).toEqual({ set_limit: { c_max_hours: 48 } });
+  });
+
+  it("changes a limit that is a data value through that value, for the instance chosen", async () => {
+    const write = vi.fn().mockResolvedValue({ id: 9 });
+    stub({ write });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /new scenario/i }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "more_in_march" } });
+    fireEvent.change(await screen.findByLabelText("c_demand: which month"), { target: { value: "2026-03" } });
+    fireEvent.change(screen.getByLabelText("c_demand: new value of demand"), { target: { value: "220" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add as a data change" }));
+    fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    expect(JSON.parse(write.mock.calls[0][1].body).patch).toEqual({
+      set_param: [{ param: "demand", index: ["2026-03"], value: 220 }] });
   });
 
   it("drops a choice that the newly chosen version does not have", async () => {

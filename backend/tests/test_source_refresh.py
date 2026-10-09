@@ -270,3 +270,62 @@ def test_a_source_of_two_tables_is_two_sheets_and_each_can_be_previewed(extracte
     first = client.get(f"/api/v1/ingestion-jobs/{staff}/preview", headers=tenants["a"]).json()
     assert first["source_object"] == "staff"
     assert client.get(f"/api/v1/ingestion-jobs/{staff}/preview?table=nowhere", headers=tenants["a"]).status_code == 409
+
+
+def test_a_load_from_the_sources_page_can_be_kept_refreshed(extracted, db):  # noqa: F811
+    """Without the Assistant (owner, 9 October 2026): the import wizard's load binds what it wrote to its source."""
+    client, tenants, connection, person, job, _ = extracted
+    domain = db.execute(text("SELECT domain_id FROM integration_connection WHERE id = :c"), {"c": connection}).scalar_one()
+    first = job(FIRST)
+    mapping = {"entity_type_id": person, "columns": {"staff_id": "key", "full_name": "label", "hours": "hours"}}
+    report = client.post(f"/api/v1/ingestion-jobs/{first}/validate", json=mapping, headers=tenants["a"]).json()
+    loaded = client.post(f"/api/v1/ingestion-jobs/{first}/load", json={"validation_id": report["validation_id"],
+                                                                      "keep_refreshed": True}, headers=tenants["a"])
+    assert loaded.status_code == 200, loaded.text
+    assert loaded.json()["kept_refreshed"] is True
+    bound = client.get(f"/api/v1/domains/{domain}/source-bindings", headers=tenants["a"]).json()["items"]
+    mine = [b for b in bound if b["connection_id"] == connection]
+    assert [(b["kind"], b["mapping"]) for b in mine] == [
+        ("entities", {"key": "staff_id", "label": "full_name", "attrs": {"hours": "hours"}})]
+    later = job(LATER)
+    url = f"/api/v1/domains/{domain}/sources/refresh"
+    changes = client.post(url, json={"connections": [connection], "jobs": {str(connection): later}},
+                          headers=tenants["a"]).json()
+    assert changes["bindings"][0]["counts"] == {"added": 1, "changed": 2, "removed": 1, "unchanged": 0}
+    # Stopped: what it loaded stays, and the next refresh has nothing of it.
+    assert client.delete(f"/api/v1/domains/{domain}/source-bindings/{mine[0]['id']}",
+                         headers=tenants["a"]).status_code == 204
+    left = client.get(f"/api/v1/domains/{domain}/source-bindings", headers=tenants["a"]).json()["items"]
+    assert not [b for b in left if b["connection_id"] == connection]
+
+
+def test_a_kept_file_is_loaded_into_records_and_kept_refreshed_without_the_assistant(tenants, db):  # noqa: F811
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    client, domain = TestClient(app), tenants["domain_a"]
+    kind = f"crew_{uuid4().hex[:6]}"
+    made = client.post("/api/v1/entity-types", headers=tenants["a"], json={
+        "domain_id": domain, "name": kind, "role": "resource"})
+    assert made.status_code in (200, 201), made.text
+    type_id = made.json()["id"]
+    assert client.post(f"/api/v1/entity-types/{type_id}/attributes", headers=tenants["a"],
+                       json={"name": "size", "data_type": "number"}).status_code in (200, 201)
+    name = f"crews_{uuid4().hex[:6]}.csv"
+    kept = client.post(f"/api/v1/domains/{domain}/files", headers=tenants["a"],
+                       json={"file": agent_files.parse(name, b"crew,size\nA,4\nB,6\n")})
+    assert kept.status_code == 201, kept.text
+    url = f"/api/v1/domains/{domain}/source-bindings"
+    bad = client.post(url, headers=tenants["a"], json={"file_name": name, "kind": "entities", "target": kind,
+                                                         "mapping": {"key": "crew", "attrs": {"size": "weight"}}})
+    assert bad.status_code == 422 and "weight" in bad.text
+    bound = client.post(url, headers=tenants["a"], json={"file_name": name, "kind": "entities", "target": kind,
+                                                           "mapping": {"key": "crew", "attrs": {"size": "size"}}})
+    assert bound.status_code == 201 and bound.json()["rows"] == 2
+    first = client.post(f"/api/v1/domains/{domain}/sources/refresh", headers=tenants["a"],
+                        json={"files": {name: 1}, "apply": True}).json()
+    assert first["applied"] and first["bindings"][0]["counts"]["added"] == 2
+    rows = db.execute(text("SELECT e.key, e.attrs->>'size' FROM entity e JOIN entity_type t ON t.id = e.entity_type_id"
+                           " WHERE t.name = :k ORDER BY e.key"), {"k": kind}).all()
+    assert [(k, float(s)) for k, s in rows] == [("A", 4.0), ("B", 6.0)]
