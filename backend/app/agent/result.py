@@ -487,8 +487,9 @@ def _front(rec: dict[str, Any], params: dict[str, Any], sets: dict[str, dict[str
     if not front:
         return []
     terms = (params.get("pareto") or {}).get("terms") or ["first goal", "second goal"]
-    out = [f"\nTRADE-OFF FRONT ({len(front)} points; {terms[0]} against {terms[1]}; each point is a full answer in its "
-           "own run, and none can improve one goal without the other getting worse -- report them as given):"]
+    against = " against ".join(terms) if len(terms) <= 2 else ", ".join(terms[:-1]) + " and " + terms[-1]
+    out = [f"\nTRADE-OFF FRONT ({len(front)} points; {against}; each point is a full answer in its own run, and none "
+           "can improve one goal without another getting worse -- report them as given):"]
     variables = (rec.get("ir") or {}).get("variables") or {}
     for p in front:
         # The chosen records' fields added up, per point (the council test: the reply gave "999" as the cost of
@@ -502,7 +503,9 @@ def _front(rec: dict[str, Any], params: dict[str, Any], sets: dict[str, dict[str
                     totals.append(f"{f} {_amount(sum(float((rows.get(k) or {}).get(f) or 0) for k in keys))}")
         chosen = "; ".join(f"{var}: {', '.join(keys[:30])}" + (f" (+{len(keys) - 30} more)" if len(keys) > 30 else "")
                            for var, keys in (p.get("chosen") or {}).items())
-        out.append(f"- point {p['seq']}: {terms[0]} {_amount(p['first'])}, {terms[1]} {_amount(p['second'])}"
+        values = p.get("values") or [p["first"], p["second"]]
+        said = ", ".join(f"{terms[i] if i < len(terms) else f'goal {i + 1}'} {_amount(v)}" for i, v in enumerate(values))
+        out.append(f"- point {p['seq']}: {said}"
                    + ("" if p.get("status") == "optimal" else f" ({p.get('status')})")
                    + (f"; run {p['run_id']}" if p.get("run_id") else "") + (f"; chooses {chosen}" if chosen else "")
                    + (f"; totals of the chosen: {', '.join(totals)}" if totals else ""))

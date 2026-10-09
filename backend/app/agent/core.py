@@ -303,9 +303,9 @@ WHATIF_TOOL: dict[str, Any] = {"type": "function", "function": {
         "futures": {"type": "integer", "description": "Plan for this many sampled futures of the numbers declared "
                     "uncertain (e.g. 50) instead of their given values; alone, it re-solves the scenario as is "
                     "for those futures"},
-        "front": {"type": "integer", "description": "The trade-off between the goal's TWO terms instead of one "
-                  "answer: this many steps (2-50, e.g. 10) between the two ends; alone, it re-solves the scenario "
-                  "as is. Each point is a full answer with what it chooses"}},
+        "front": {"type": "integer", "description": "The trade-off between the goal's terms (two to six) instead "
+                  "of one answer: about this many points plus one (2-50, e.g. 10) spread over the front; alone, it "
+                  "re-solves the scenario as is. Each point is a full answer with what it chooses"}},
         "required": ["scenario_id", "name"]}}}
 HANDOVER_TOOL: dict[str, Any] = {"type": "function", "function": {
     "name": "hand_to_describe",
@@ -1318,7 +1318,7 @@ patterns, demand scenarios and month links each cost several rounds or a wrong a
 - every way to fill a roll, bin or truck -> "patterns_that_fit";
 - an uncertain number ("anything from 100 to 300", "might be 30% higher") -> "uncertainty" on the parameter plus
   "stage" on the decisions, then what_if "futures" -- NEVER a set of scenario records;
-- a trade-off between two goals -> what_if "front".
+- a trade-off between two goals or more (up to six) -> what_if "front".
 
 PHASE 1 - UNDERSTAND. This is most of the conversation. Do not just accept what you are told.
 - LOOK FIRST: call describe_workspace before your first question, and read the attached files. Never ask for what

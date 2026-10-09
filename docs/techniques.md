@@ -75,7 +75,8 @@ Rules are held by Deb's feasibility order; every answer is checked on every comp
 | Technique | Where | When |
 |---|---|---|
 | Epsilon-constraint Pareto front (exact) | `pareto.py` | two linear goals |
-| NSGA-II (non-dominated sorting, crowding, SBX) | `evolve.py` (`nsga2`), `pareto.py` | two goals where one multiplies decisions |
+| Augmented epsilon-constraint front (AUGMECON: payoff table, grid of bounds, lexicographic sum, early exit) | `pareto.py` (`many_front`) | three to six linear goals |
+| NSGA-II (non-dominated sorting, crowding, SBX) | `evolve.py` (`nsga2`), `pareto.py` | two to six goals where one multiplies decisions |
 | Lexicographic goals | `compile.py` | goals ranked in order |
 | Two-stage stochastic programming (sample average approximation), chance rules | `stochastic.py` | uncertain data |
 | Robust optimisation (Bertsimas–Sim budget, Soyster), exact linear rewrite | `robust.py` | robust runs |
@@ -99,4 +100,3 @@ Rules are held by Deb's feasibility order; every answer is checked on every comp
   solver), since an option must never change what a solver may answer.
 - QUBO export for annealing hardware, and quantum-inspired solvers.
 - Constraint learning from data (rules inferred from past plans).
-- Many-objective fronts (three goals or more) on the run page: NSGA-II computes them, the chart draws two.

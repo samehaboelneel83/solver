@@ -80,7 +80,7 @@ class RunRequest(BaseModel):
     #: data, patch and deciding settings, proven optimal -- is answered from
     #: that run without a solve (migration 0042). False solves it again.
     reuse: bool = True
-    #: Ask for the trade-off front between the goal's two terms instead of
+    #: Ask for the trade-off front between the goal's terms (two to six) instead of
     #: one answer: the ends and this many steps between (`app.solve.pareto`).
     pareto_steps: Annotated[int, Field(ge=2, le=50)] | None = None
     #: Solve the robust counterpart: every rule that reads a parameter
@@ -180,6 +180,8 @@ class ParetoPoint(BaseModel):
     seq: int
     first: float
     second: float
+    #: Every goal's value in the goal's order (a front between three goals or more); null on older runs.
+    values: list[float] | None = None
     epsilon: float | None
     status: str
     run_id: int | None
@@ -882,7 +884,7 @@ def _shapes(db: Session, run_id: int) -> tuple[dict[str, str], dict[str, str], d
 def _front(db: Session, run: Run) -> dict[str, Any]:
     rows = db.execute(
         text(
-            "SELECT seq, first_value, second_value, epsilon, status, point_run_id"
+            "SELECT seq, first_value, second_value, epsilon, status, point_run_id, goal_values"
             "  FROM pareto_point WHERE run_id = :r ORDER BY seq"
         ),
         {"r": run.id},
@@ -891,7 +893,8 @@ def _front(db: Session, run: Run) -> dict[str, Any]:
         return {}
     return {
         "pareto": [
-            ParetoPoint(seq=r[0], first=r[1], second=r[2], epsilon=r[3], status=r[4], run_id=r[5]) for r in rows
+            ParetoPoint(seq=r[0], first=r[1], second=r[2], epsilon=r[3], status=r[4], run_id=r[5],
+                        values=r[6] if isinstance(r[6], list) else [r[1], r[2]]) for r in rows
         ],
         "pareto_terms": (run.params or {}).get("pareto", {}).get("terms"),
     }

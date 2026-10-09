@@ -508,7 +508,7 @@ describe("Runs", () => {
     ).toBeInTheDocument();
   });
 
-  it("offers a trade-off front only for a goal of two terms, and asks for one", async () => {
+  it("offers a trade-off front for a goal of two terms, and asks for one", async () => {
     const write = vi.fn().mockResolvedValue({ ...RUN_DETAIL, id: 30, status: "queued" });
     const twoGoals = {
       id: 2, problem_id: 1, version: 2, ir_hash: "h", note: null, created_at: "2026-09-20T09:00:00Z",
@@ -599,6 +599,46 @@ describe("Runs", () => {
     expect(screen.getByRole("button", { name: "Point 3: o_cost 9, o_time 1 (not proven)" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Point 2: o_cost 6, o_time 6" }));
     expect(await screen.findByText(/one point of run \d+.s trade-off front/i)).toBeInTheDocument();
+  });
+
+  it("draws a front between three goals as lines across their axes, and any two against each other", async () => {
+    const front = {
+      ...RUN_DETAIL,
+      pareto_terms: ["o_cost", "o_time", "o_risk"],
+      pareto: [
+        { seq: 1, first: 1, second: 9, values: [1, 9, 5], epsilon: null, status: "optimal", run_id: 21 },
+        { seq: 2, first: 5, second: 5, values: [5, 5, 9], epsilon: null, status: "optimal", run_id: 22 },
+        { seq: 3, first: 6, second: 6, values: [6, 6, 1], epsilon: null, status: "feasible", run_id: 23 },
+      ],
+    };
+    const point = { ...RUN_DETAIL, id: 22, params: { ...RUN_DETAIL.params, pareto_of: RUN_DETAIL.id } };
+    stub({ run: (path?: string) => (String(path ?? "").endsWith("/22") ? point : front) });
+    renderPage();
+
+    expect(await screen.findByRole("img", { name: "Trade-off front between 3 goals, 3 points" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "The trade-off between o_cost, o_time and o_risk" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "o_cost against o_time" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("up"), { target: { value: "2" } });
+    expect(screen.getByRole("img", { name: "o_cost against o_risk" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Point 3: o_cost 6, o_time 6, o_risk 1 (not proven)" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Point 2: o_cost 5, o_time 5, o_risk 9" }));
+    expect(await screen.findByText(/one point of run \d+.s trade-off front/i)).toBeInTheDocument();
+  });
+
+  it("offers the trade-off between three goals", async () => {
+    const write = vi.fn().mockResolvedValue({ ...RUN_DETAIL, id: 30, status: "queued" });
+    const threeGoals = {
+      id: 2, problem_id: 1, version: 2, ir_hash: "h", note: null, created_at: "2026-09-20T09:00:00Z",
+      ir: {
+        constraints: [{ id: "c_cover", left: { const: 0 }, relation: "<=", right: { const: 1 }, severity: "hard" }],
+        objective: { sense: "minimize", terms: [{ id: "o_cost", weight: 1 }, { id: "o_time", weight: 1 }, { id: "o_risk", weight: 1 }] },
+      },
+    };
+    stub({ write, version: threeGoals });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /show the trade-off between its three goals/i }));
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    expect(JSON.parse(write.mock.calls[0][1].body)).toEqual(expect.objectContaining({ pareto_steps: 10 }));
   });
 
   it("reports what a robust answer protects and what it costs", async () => {

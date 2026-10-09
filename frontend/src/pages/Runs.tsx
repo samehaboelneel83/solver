@@ -562,9 +562,10 @@ function ScenarioRuns({
     ((version.data?.ir as { parameters?: Record<string, { uncertainty?: { kind?: string } }> } | undefined)
       ?.parameters ?? {})
   ).some((spec) => spec.uncertainty?.kind === "interval");
-  // A trade-off front needs a goal of exactly two terms (app.solve.pareto).
-  const twoGoals =
-    ((version.data?.ir as { objective?: { terms?: unknown[] } } | undefined)?.objective?.terms ?? []).length === 2;
+  // A trade-off front needs a goal of two to six terms (app.solve.pareto, MAX_GOALS).
+  const goalCount =
+    ((version.data?.ir as { objective?: { terms?: unknown[] } } | undefined)?.objective?.terms ?? []).length;
+  const twoGoals = goalCount >= 2 && goalCount <= 6;
   // Alternatives are told apart by yes-or-no and bounded whole-number
   // decisions (app.solve.alternatives).
   const hasChoices = Object.values(
@@ -764,7 +765,7 @@ function ScenarioRuns({
               aria-describedby={frontRefusal ? "front-refusal" : undefined}
               className="rounded-md border border-blue-600 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-60"
             >
-              Show the trade-off between its two goals
+              Show the trade-off between its {GOAL_COUNT_WORDS[goalCount] ?? String(goalCount)} goals
             </button>
           )}
           {!simple && hasChoices && (
@@ -1779,6 +1780,7 @@ export function Robustness({ report, objective }: { report: RobustReport; object
 }
 
 const FRONT = { width: 420, height: 240, pad: 44 };
+const GOAL_COUNT_WORDS: Record<number, string> = { 2: "two", 3: "three", 4: "four", 5: "five", 6: "six" };
 
 /**
  * What a planner should know before solving (Epic UX, U-5): anything that would stop the run,
@@ -1916,6 +1918,9 @@ export function TradeOff({
   terms: string[];
   onOpen?: (id: Id) => void;
 }) {
+  if (terms.length > 2 && points.every((p) => (p.values?.length ?? 0) === terms.length)) {
+    return <ManyGoalFront points={points} terms={terms} onOpen={onOpen} />;
+  }
   const xs = points.map((p) => p.first);
   const ys = points.map((p) => p.second);
   const span = (values: number[]) => {
@@ -1976,6 +1981,131 @@ export function TradeOff({
       <ol className="mt-2 space-y-1 text-sm">
         {points.map((p) => (
           <li key={p.seq}>
+            {onOpen && p.run_id != null ? (
+              <button type="button" className="text-blue-700 underline" onClick={() => onOpen(p.run_id as number)}>
+                {say(p)}
+              </button>
+            ) : (
+              say(p)
+            )}
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+/**
+ * A front between three goals or more (app.solve.pareto.many_front): each goal an upright axis, best at the
+ * top, and each point a line across them -- where lines cross, one goal is bought with another. Under it, any
+ * two goals against each other, and every point with all its values. Each point opens its own run.
+ */
+export function ManyGoalFront({
+  points,
+  terms,
+  onOpen,
+}: {
+  points: ParetoPoint[];
+  terms: string[];
+  onOpen?: (id: Id) => void;
+}) {
+  const [picked, setPicked] = useState<number | null>(null);
+  const [pair, setPair] = useState<[number, number]>([0, 1]);
+  const values = (p: ParetoPoint) => p.values ?? [p.first, p.second];
+  const spans = terms.map((_, i) => {
+    const column = points.map((p) => values(p)[i]);
+    const low = Math.min(...column);
+    const high = Math.max(...column);
+    return { low, high, width: high - low || 1 };
+  });
+  const shown = (value: number) => String(Number(value.toPrecision(6)));
+  const say = (p: ParetoPoint) =>
+    `Point ${p.seq}: ${terms.map((t, i) => `${t} ${shown(values(p)[i])}`).join(", ")}${p.status === "optimal" ? "" : " (not proven)"}`;
+  const open = (p: ParetoPoint) => p.run_id != null && onOpen?.(p.run_id);
+  const colour = (p: ParetoPoint) => (p.status === "optimal" ? "#2563eb" : "#f59e0b");
+
+  // Parallel axes. The front's values are as each goal reads, so "best" is not known here: the axis runs low
+  // to high, labelled at both ends.
+  const width = Math.max(FRONT.width, 120 * terms.length);
+  const inner = { w: width - 2 * FRONT.pad, h: FRONT.height - 2 * FRONT.pad };
+  const ax = (i: number) => FRONT.pad + (terms.length === 1 ? 0 : (i / (terms.length - 1)) * inner.w);
+  const ay = (i: number, v: number) => FRONT.pad + (1 - (v - spans[i].low) / spans[i].width) * inner.h;
+
+  // Any two goals against each other.
+  const [gx, gy] = pair;
+  const px = (v: number) => FRONT.pad + ((v - spans[gx].low) / spans[gx].width) * (FRONT.width - 2 * FRONT.pad);
+  const py = (v: number) => FRONT.pad + (1 - (v - spans[gy].low) / spans[gy].width) * (FRONT.height - 2 * FRONT.pad);
+
+  return (
+    <section className="mb-4 rounded-md border border-slate-200 p-3">
+      <h3 className="mb-1 text-sm font-semibold text-slate-900">
+        The trade-off between {terms.slice(0, -1).join(", ")} and {terms[terms.length - 1]}
+      </h3>
+      <p className="mb-2 text-sm text-slate-700">
+        Each line is an answer where no goal can get better without another getting worse; where lines cross, one
+        goal is bought with another. Choose a line or a point to open its answer.
+      </p>
+      <svg role="img" aria-label={`Trade-off front between ${terms.length} goals, ${points.length} points`}
+        viewBox={`0 0 ${width} ${FRONT.height}`} className="w-full max-w-2xl">
+        {terms.map((t, i) => (
+          <g key={t}>
+            <line x1={ax(i)} y1={FRONT.pad} x2={ax(i)} y2={FRONT.height - FRONT.pad} stroke="#94a3b8" />
+            <text x={ax(i)} y={FRONT.height - 8} textAnchor="middle" fontSize="11" fill="#475569">{t}</text>
+            <text x={ax(i)} y={FRONT.pad - 8} textAnchor="middle" fontSize="10" fill="#64748b">{shown(spans[i].high)}</text>
+            <text x={ax(i)} y={FRONT.height - FRONT.pad + 14} textAnchor="middle" fontSize="10" fill="#64748b">{shown(spans[i].low)}</text>
+          </g>
+        ))}
+        {points.map((p) => (
+          <polyline
+            key={p.seq}
+            fill="none"
+            stroke={colour(p)}
+            strokeWidth={picked === p.seq ? 4 : 2}
+            strokeOpacity={picked === null || picked === p.seq ? 0.9 : 0.25}
+            points={values(p).map((v, i) => `${ax(i)},${ay(i, v)}`).join(" ")}
+            className={onOpen && p.run_id != null ? "cursor-pointer" : undefined}
+            onMouseEnter={() => setPicked(p.seq)}
+            onMouseLeave={() => setPicked(null)}
+            onClick={() => open(p)}
+          >
+            <title>{say(p)}</title>
+          </polyline>
+        ))}
+      </svg>
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-700">
+        <label className="inline-flex items-center gap-1">
+          Across
+          <select className="rounded border border-slate-300 px-1 py-0.5" value={gx}
+            onChange={(e) => setPair([Number(e.target.value), gy])}>
+            {terms.map((t, i) => <option key={t} value={i}>{t}</option>)}
+          </select>
+        </label>
+        <label className="inline-flex items-center gap-1">
+          up
+          <select className="rounded border border-slate-300 px-1 py-0.5" value={gy}
+            onChange={(e) => setPair([gx, Number(e.target.value)])}>
+            {terms.map((t, i) => <option key={t} value={i}>{t}</option>)}
+          </select>
+        </label>
+      </div>
+      <svg role="img" aria-label={`${terms[gx]} against ${terms[gy]}`} viewBox={`0 0 ${FRONT.width} ${FRONT.height}`}
+        className="w-full max-w-md">
+        <line x1={FRONT.pad} y1={FRONT.height - FRONT.pad} x2={FRONT.width - FRONT.pad} y2={FRONT.height - FRONT.pad} stroke="#94a3b8" />
+        <line x1={FRONT.pad} y1={FRONT.pad} x2={FRONT.pad} y2={FRONT.height - FRONT.pad} stroke="#94a3b8" />
+        <text x={FRONT.width / 2} y={FRONT.height - 8} textAnchor="middle" fontSize="11" fill="#475569">{terms[gx]}</text>
+        <text x={12} y={FRONT.height / 2} textAnchor="middle" fontSize="11" fill="#475569"
+          transform={`rotate(-90 12 ${FRONT.height / 2})`}>{terms[gy]}</text>
+        {points.map((p) => (
+          <circle key={p.seq} cx={px(values(p)[gx])} cy={py(values(p)[gy])} r={picked === p.seq ? 8 : 6}
+            fill={colour(p)} className={onOpen && p.run_id != null ? "cursor-pointer" : undefined}
+            onMouseEnter={() => setPicked(p.seq)} onMouseLeave={() => setPicked(null)} onClick={() => open(p)}>
+            <title>{say(p)}</title>
+          </circle>
+        ))}
+      </svg>
+      <ol className="mt-2 space-y-1 text-sm">
+        {points.map((p) => (
+          <li key={p.seq} onMouseEnter={() => setPicked(p.seq)} onMouseLeave={() => setPicked(null)}>
             {onOpen && p.run_id != null ? (
               <button type="button" className="text-blue-700 underline" onClick={() => onOpen(p.run_id as number)}>
                 {say(p)}

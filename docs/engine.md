@@ -254,6 +254,22 @@ best answer keeping every rule is the run's (`metaheuristic_run.raced`). A two-g
 decisions, which no exact epsilon-constraint solve takes, is drawn by NSGA-II (`evolve.nsga2`), each point
 `feasible`. The full map of techniques is `docs/techniques.md`.
 
+## Fronts between three goals or more (10 October 2026)
+
+A trade-off front is drawn between two to six goals (`app.solve.pareto.MAX_GOALS`). Two goals keep the
+epsilon-constraint sweep. Three or more linear goals use the augmented epsilon-constraint method
+(`many_front`): a payoff table (each goal at its best, then the sum of the others as low as it goes with that
+held) sets each goal's range; a grid of bounds on every goal but the first, about `steps + 1` cells, its loosest
+level leaving the goal free (the table's worst only estimates the front's, and a point past it would be missed);
+in each cell the best first goal, then the least sum of the others with it held -- an answer no other beats on
+every goal. A line of the grid stops at its first cell with no answer, since tighter ones have none either; any
+point another beats on every goal is dropped. A goal with a product goes to NSGA-II for any number of goals,
+thinned to `steps + 1` points spread over the front (max-min distance, each goal scaled to 0..1).
+
+Every goal's value is stored per point (`pareto_point.goal_values`, migration 0121) and returned as
+`pareto[].values`. The run page draws three goals or more as parallel axes, each point a line across them,
+with any two goals against each other below and every point listed with all its values; each opens its run.
+
 ## Solver options tuned per problem (`app/solve/tuning.py`)
 
 Each problem tunes its solver's whitelisted options (`app.solve.params`) over its own runs: the defaults for the

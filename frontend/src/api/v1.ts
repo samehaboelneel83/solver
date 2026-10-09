@@ -678,7 +678,7 @@ export type RunRequest = {
   time_limit_s?: number;
   seed?: number;
   solver?: string | null;
-  /** Ask for the trade-off front between the goal's two terms (migration 0045). */
+  /** Ask for the trade-off front between the goal's terms, two to six (migration 0045). */
   pareto_steps?: number;
   /** Solve the robust counterpart and report the price (app.solve.robust). */
   robust?: boolean;
@@ -707,6 +707,8 @@ export type ParetoPoint = {
   seq: number;
   first: number;
   second: number;
+  /** Every goal's value in the goal's order; absent on older runs. */
+  values?: number[] | null;
   epsilon: number | null;
   status: "optimal" | "feasible";
   run_id: number | null;

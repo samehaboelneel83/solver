@@ -102,8 +102,8 @@ def test_the_front_under_maximise_turns_the_other_way():
 
 
 @pytest.mark.parametrize("ir, reason", [
-    (_ir(terms=("cost",)), "has 1 terms"),
-    (_ir(terms=("cost", "time", "cost")), "has 3 terms"),
+    (_ir(terms=("cost",)), "has 1 term\\b"),
+    (_ir(terms=("cost", "time", "cost", "time", "cost", "time", "cost")), "has 7 terms"),
     (_ir(soft=True), "preferred rule"),
 ])
 def test_a_front_is_refused_for_what_it_cannot_show(ir, reason):
@@ -249,3 +249,79 @@ def test_the_front_draws_a_less_is_better_goal_as_less():
     # Profit and water rise together: the front runs from (0, 0) to (10, 10), never "most water".
     values = sorted((round(p.first), round(p.second)) for p in points)
     assert values[0] == (0, 0) and values[-1] == (10, 10)
+
+
+# -- three goals or more (augmented epsilon-constraint; NSGA-II for products) --------------------------------
+
+THREE = {"a": (1, 9, 5), "b": (6, 6, 1), "c": (9, 1, 5), "d": (5, 5, 9), "e": (7, 7, 2)}
+
+
+def _data3(values=THREE) -> dict:
+    data = _data({k: v[:2] for k, v in values.items()})
+    data["parameters"]["risk"] = [{"option": k, "value": v[2]} for k, v in values.items()]
+    return data
+
+
+def _ir3(sense: str = "minimize") -> dict:
+    ir = _ir(sense, ("cost", "time", "risk"))
+    ir["parameters"]["risk"] = {"index": ["option"]}
+    return ir
+
+
+@pytest.mark.parametrize("backend", ["cp-sat", "highs"])
+def test_three_goals_every_point_none_beats_on_all_three(backend):
+    """E (7, 7, 2) is beaten by B (6, 6, 1) on every goal; D (5, 5, 9) is past the payoff table's worst risk
+    (5) and is found all the same, the loosest level leaving risk free."""
+    points = _front(_ir3(), _data3(), backend, steps=10)
+    assert sorted(p.values for p in points) == [(1, 9, 5), (5, 5, 9), (6, 6, 1), (9, 1, 5)]
+    assert all(p.status == "optimal" for p in points)
+    assert all((p.first, p.second) == p.values[:2] for p in points)
+
+
+def test_three_goals_under_maximise():
+    mirrored = {k: tuple(10 - x for x in v) for k, v in THREE.items()}
+    points = _front(_ir3("maximize"), _data3(mirrored), steps=10)
+    assert sorted(p.values for p in points) == sorted(tuple(10 - x for x in v) for k, v in THREE.items() if k != "e")
+
+
+def test_three_goals_that_multiply_decisions_are_searched():
+    """A goal with a product goes to NSGA-II for any number of goals; each point keeps every rule."""
+    from app.solve.pareto import searched_front
+
+    ir = _ir3()
+    ir["variables"]["level"] = {"index": [], "domain": "integer", "lower": 0, "upper": 4}
+    ir["objective"]["terms"][2]["expression"] = {"add": [ir["objective"]["terms"][2]["expression"],
+                                                        {"mul": [{"var": "level", "index": []}, {"var": "level", "index": []}]}]}
+    compiled = compile_model(ir, _data3())
+    points = searched_front(compiled, steps=6, time_limit=3)
+    assert points and all(len(p.values) == 3 for p in points) and len(points) <= 7
+    for p in points:
+        assert sum(v for (name, _), v in p.solution.assignments.items() if name == "pick") == 1
+
+
+def test_a_run_records_every_goal_of_a_three_goal_front(db, empty_queue):
+    domain = make_domain(db, "pareto3")
+    option = make_entity_type(db, domain, "option", "resource")
+    ids = {key: make_entity(db, option, key) for key in THREE}
+    for i, name in enumerate(("cost", "time", "risk")):
+        par = make_parameter_def(db, domain, name, [option])
+        for key, values in THREE.items():
+            make_parameter_value(db, par, [ids[key]], values[i])
+    version = make_model_version(db, make_problem(db, domain), _ir3())
+    problem = db.execute(text("SELECT problem_id FROM model_version WHERE id = :v"), {"v": version}).scalar_one()
+    scenario = db.execute(
+        text("INSERT INTO scenario (problem_id, model_version_id, name) VALUES (:p, :v, 's') RETURNING id"),
+        {"p": problem, "v": version},
+    ).scalar_one()
+    db.commit()
+    try:
+        run_id = enqueue_run(db, scenario, time_limit=30.0, pareto_steps=10)
+        assert claim_next(db) == run_id
+        assert execute_run(db, run_id).status == "optimal"
+        read = _read(db, run_id)
+        assert read.pareto_terms == ["o_cost", "o_time", "o_risk"]
+        assert sorted(tuple(p.values) for p in read.pareto) == [(1, 9, 5), (5, 5, 9), (6, 6, 1), (9, 1, 5)]
+    finally:
+        db.execute(text("DELETE FROM run"))
+        db.execute(text("DELETE FROM domain WHERE id = :d"), {"d": domain})
+        db.commit()

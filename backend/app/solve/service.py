@@ -1341,7 +1341,7 @@ def _execute(
                                  "trial": chosen_options.trial, "why": chosen_options.evidence}
 
         if params.get("pareto_steps"):
-            # A trade-off front between the goal's two terms (app.solve.pareto):
+            # A trade-off front between the goal's terms, two to six (app.solve.pareto):
             # each point solved in full, the first end standing as this run's
             # own answer. A model with no answer at all falls through to the
             # ordinary solve, so its verdict and explanation are the usual ones.
@@ -3100,10 +3100,11 @@ def _record_front(db: Session, run_id: int, compiled: Compiled, backend, points)
         )
         db.execute(
             text(
-                "INSERT INTO pareto_point (run_id, seq, first_value, second_value, epsilon, status, point_run_id)"
-                " VALUES (:r, :seq, :a, :b, :e, :st, :child)"
+                "INSERT INTO pareto_point (run_id, seq, first_value, second_value, goal_values, epsilon, status,"
+                " point_run_id) VALUES (:r, :seq, :a, :b, CAST(:all AS jsonb), :e, :st, :child)"
             ),
-            {"r": run_id, "seq": seq, "a": point.first, "b": point.second, "e": point.epsilon,
+            {"r": run_id, "seq": seq, "a": point.first, "b": point.second,
+             "all": _json(list(point.values or (point.first, point.second))), "e": point.epsilon,
              "st": point.status, "child": child},
         )
 

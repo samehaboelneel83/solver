@@ -557,12 +557,12 @@ def result(run_id: int, db: Session = Depends(get_db), user: UserAccount = Depen
             (p or {}).get("kind") == "local" and (p or {}).get("anchor") is not None
             for (p,) in db.execute(text("SELECT placement FROM gis_dataset WHERE domain_id = :d"),
                                    {"d": rec["domain_id"]}).all())
-    points = db.execute(text("SELECT seq, first_value, second_value, status, point_run_id FROM pareto_point"
-                             " WHERE run_id = :r ORDER BY seq"), {"r": run_id}).all()
+    points = db.execute(text("SELECT seq, first_value, second_value, status, point_run_id, goal_values"
+                             " FROM pareto_point WHERE run_id = :r ORDER BY seq"), {"r": run_id}).all()
     if points:
         # A trade-off front: each point's two goal values and what it chooses, from its own run.
         rec["front"] = []
-        for seq, first, second, status, point_run in points:
+        for seq, first, second, status, point_run, goal_values in points:
             chosen: dict[str, list[str]] = {}
             if point_run is not None:
                 point = db.execute(text("SELECT assignments FROM solution WHERE run_id = :r"),
@@ -573,6 +573,7 @@ def result(run_id: int, db: Session = Depends(get_db), user: UserAccount = Depen
                     if keys:
                         chosen[var] = keys
             rec["front"].append({"seq": seq, "first": first, "second": second, "status": status,
+                                 "values": goal_values if isinstance(goal_values, list) else [first, second],
                                  "run_id": point_run, "chosen": chosen})
     return {"text": agent_result.summary(rec), "facts": agent_result.facts(rec)}
 
