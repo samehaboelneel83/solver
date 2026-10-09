@@ -187,3 +187,18 @@ def test_a_run_races_the_model_as_written_against_the_strengthened_one(db, empty
     assert {r["solver"] for r in forms["raced"]} == {"as written", "with implied rows"}
     best = float(_solve(compile_model(_multi_item(1), {})).objective)
     assert float(row["objective"]) == pytest.approx(best)
+
+
+def test_which_form_wins_is_remembered_and_rechecked():
+    from app.solve.memory import FORM_RECHECK, recall_form
+
+    race = lambda won, status="optimal": {"won": won, "raced": [  # noqa: E731
+        {"solver": "as written", "status": status if won == "as written" else "feasible", "seconds": 1.0},
+        {"solver": "with implied rows", "status": status if won != "as written" else "feasible", "seconds": 2.0}]}
+    assert recall_form([race("as written")] * 2) is None  # not enough races
+    assert recall_form([race("as written")] * 3).form == "as written"
+    assert recall_form([race("as written"), race("with implied rows"), race("as written")]) is None
+    assert recall_form([race("as written", "feasible")] * 3) is None  # no proof: nothing learnt
+    used = {"won": "as written", "remembered": True}
+    assert recall_form([used] * (FORM_RECHECK - 1) + [race("as written")] * 3).form == "as written"
+    assert recall_form([used] * FORM_RECHECK + [race("as written")] * 3) is None  # time to race again

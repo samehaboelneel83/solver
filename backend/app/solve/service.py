@@ -1200,7 +1200,16 @@ def _execute(
             time_limit = max(1.0, time_limit - float(start_record.get("seconds", 0)))
 
         unstrengthened = solving_model
-        if (params.get("strengthen", True) and backend.name in ("highs", "scip") and not params.get("pareto_steps")
+        remembered_form = None
+        if (params.get("strengthen", True) and params.get("hedge_forms", True) and backend.name in ("highs", "scip")
+                and not params.get("pareto_steps")):
+            # Which form this problem's recent races proved first (app.solve.memory.recall_form).
+            remembered_form = _recall_form(db, run_id)
+        if remembered_form is not None and remembered_form.form == "as written":
+            # The rows lost every recent race on this problem: not made at all this time.
+            strengthen_record = {"skipped": remembered_form.evidence,
+                                 "forms": {"won": "as written", "remembered": True}}
+        elif (params.get("strengthen", True) and backend.name in ("highs", "scip") and not params.get("pareto_steps")
                 and strengthen_rows.applies(solving_model) is None):
             # Rows any model with on/off limits implies (app.solve.strengthen): each quantity within its own
             # limit, and covers -- added where the relaxation breaks them. The optimum stays; the bound rises.
@@ -1496,7 +1505,10 @@ def _execute(
                     began_solve = time.monotonic()
                     try:
                         forms = {"with implied rows": solving_model}
-                        if (strengthen_record or {}).get("added") and params.get("hedge_forms", True) and workers >= 2:
+                        if remembered_form is not None and (strengthen_record or {}).get("added"):
+                            strengthen_record["forms"] = {"won": "with implied rows", "remembered": True,
+                                                          "evidence": remembered_form.evidence}
+                        elif (strengthen_record or {}).get("added") and params.get("hedge_forms", True) and workers >= 2:
                             # Rows a model implies help one solver and slow another (HiGHS on lot sizing finds
                             # them itself): both forms run at once on half the threads each, the first proof
                             # ends both, else the better answer stands (app.solve.race).
@@ -2723,6 +2735,21 @@ def _admissible(found, params: dict | None = None) -> set[str]:
 
 def _rank_of(name: str) -> tuple[int, str]:
     return (by_name(name).rank, name)
+
+
+def _recall_form(db: Session, run_id: int):
+    from app.solve.memory import recall_form
+
+    rows = db.execute(
+        text(
+            "SELECT r.params->'strengthen_run'->'forms' FROM run r JOIN scenario s ON s.id = r.scenario_id"
+            " WHERE s.problem_id = (SELECT s2.problem_id FROM run r2 JOIN scenario s2 ON s2.id = r2.scenario_id WHERE r2.id = :r)"
+            "   AND r.id <> :r AND r.params->'strengthen_run'->'forms' IS NOT NULL"
+            " ORDER BY r.id DESC LIMIT 30"
+        ),
+        {"r": run_id},
+    ).scalars().all()
+    return recall_form([row for row in rows if isinstance(row, dict)])
 
 
 def _recall(db: Session, run_id: int, found, params: dict | None = None):

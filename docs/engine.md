@@ -203,6 +203,11 @@ infeasible, unbounded) ends both, otherwise the better answer at the deadline st
 portfolio does with solvers). `strengthen_run.forms` records both and which won; setting `hedge_forms` turns it
 off. A run is then never slower than the faster form by more than what half the threads cost.
 
+**Remembered per problem** (`app.solve.memory.recall_form`). Most runs re-solve a problem already solved, so
+once the same form has proved the problem's last three races first (each by a proof), the next runs use that
+form alone on all the threads -- and when it is the model as written, the rows are not made at all. After ten
+runs on a remembered form the forms race again, since new data may change which is faster.
+
 All candidates are checked against the relaxation as one sparse product per round; up to 2,000 are added a
 round, in the HiGHS worker on one model. Uncapacitated facility location, 100 sites × 400 customers: the
 relaxation's bound goes from 17,876 to 35,695 -- the optimum -- in 3.9 s, and HiGHS then proves it in 1.5 s

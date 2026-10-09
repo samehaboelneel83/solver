@@ -53,3 +53,46 @@ def _seconds(value: float) -> str:
     """Three figures, in milliseconds under a second: "0 s" says nothing."""
     return f"{value * 1000:.3g} ms" if value < 1 else f"{value:.3g} s"
 
+
+
+#: Races a form must win in a row (each with a proof) before it is used alone.
+FORM_WINS = 3
+#: Runs on a remembered form before the forms race again (the data may have changed what is faster).
+FORM_RECHECK = 10
+
+
+@dataclass(frozen=True)
+class Form:
+    form: str
+    evidence: str
+
+
+def recall_form(history: list[dict]) -> Form | None:
+    """`history`: the problem's recent `strengthen_run.forms` records, newest first -- races (`raced`) and runs
+    that used a remembered form (`remembered`). The form that won the last `FORM_WINS` races, each by a proof,
+    unless `FORM_RECHECK` runs have used it since the last race (then race again); else None."""
+    since = 0
+    races: list[dict] = []
+    for entry in history:
+        if entry.get("remembered"):
+            if not races:
+                since += 1
+            continue
+        if entry.get("raced"):
+            races.append(entry)
+        if len(races) >= FORM_WINS:
+            break
+    if len(races) < FORM_WINS or since >= FORM_RECHECK:
+        return None
+    winners = {race.get("won") for race in races}
+    if len(winners) != 1:
+        return None
+    won = winners.pop()
+    proofs = [next((r for r in race.get("raced", []) if r.get("solver") == won), {}) for race in races]
+    if not all(p.get("status") == "optimal" for p in proofs):
+        return None
+    seconds = [p.get("seconds") for p in proofs if p.get("seconds") is not None]
+    evidence = (f"remembered: the model {won} proved the last {len(races)} races between the two forms on this "
+                f"problem first" + (f" (in {_seconds(median(seconds))} median)" if seconds else "")
+                + f"; races again after {FORM_RECHECK - since} more runs")
+    return Form(won, evidence)
