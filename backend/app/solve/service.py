@@ -1012,6 +1012,18 @@ def _execute(
         decomposition_record = None
         network_record = None
         cuts_record = None
+        # Choices learnt from this problem's own runs (app.solve.choices): made once, when first asked.
+        choices_record: dict[str, dict[str, Any]] = {}
+
+        def choose_on(name: str) -> bool:
+            if name not in choices_record:
+                from app.solve.choices import Decided
+
+                decided = (_decide_choice(db, run_id, name) if params.get("learn_choices", True)
+                           else Decided(True, f"{name}: on (learning is off)"))
+                choices_record[name] = {"on": decided.on, "why": decided.evidence}
+            return choices_record[name]["on"]
+
         fixed_charge_record = None
         strengthen_record = None
         start_record, start_key = None, "connected_start_run"
@@ -1182,6 +1194,8 @@ def _execute(
                 start_record = {"used": False, "why": why_not}
             elif hint:
                 start_record = {"used": False, "why": "an earlier answer is the start"}
+            elif not choose_on("start"):
+                start_record = {"used": False, "why": choices_record["start"]["why"]}
             else:
                 hint, start_record = starter.start(
                     ir, data, compiled, seconds=min(starter.CEILING, starter.SHARE * time_limit))
@@ -1220,7 +1234,7 @@ def _execute(
 
         if (params.get("fixed_charge_start", True) and backend.name in warm.HINTED
                 and not params.get("pareto_steps") and fixed_charge_rows.applies(solving_model) is None
-                and (start_key in ("join_start_run", "greedy_start_run") or not hint)):
+                and (start_key in ("join_start_run", "greedy_start_run") or not hint) and choose_on("start")):
             # Any model with fixed charges (app.solve.fixed_charge): slope scaling read off the compiled model,
             # kept when it is a better start than one already made.
             # From the model as written (the added rows would split each charge's cost), stopping once its
@@ -1238,7 +1252,7 @@ def _execute(
         from app.solve import join as join_cuts
 
         if (params.get("connected_start") and "join" in kinds and backend.name in warm.HINTED
-                and join_cuts.separate_applies(solving_model) is None):
+                and join_cuts.separate_applies(solving_model) is None and choose_on("cuts")):
             # Cuts the relaxation breaks, added before the solve (app.solve.join.separate): the bound rises,
             # the optimum stays.
             solving_model, cuts_record = join_cuts.separate(solving_model, seconds=min(20.0, 0.15 * time_limit))
@@ -1712,6 +1726,8 @@ def _execute(
         extra["network_run"] = network_record
     if cuts_record is not None:
         extra["join_cuts_run"] = cuts_record
+    if choices_record:
+        extra["choices"] = choices_record
     if fixed_charge_record is not None:
         extra["fixed_charge_start_run"] = fixed_charge_record
     if strengthen_record is not None:
@@ -2735,6 +2751,25 @@ def _admissible(found, params: dict | None = None) -> set[str]:
 
 def _rank_of(name: str) -> tuple[int, str]:
     return (by_name(name).rank, name)
+
+
+def _decide_choice(db: Session, run_id: int, name: str):
+    from app.solve.choices import RECENT, decide
+
+    rows = db.execute(
+        text(
+            "SELECT r.params->'choices'->:name, r.status, r.wall_time_s, r.gap, r.params->>'time_limit_s'"
+            " FROM run r JOIN scenario s ON s.id = r.scenario_id"
+            " WHERE s.problem_id = (SELECT s2.problem_id FROM run r2 JOIN scenario s2 ON s2.id = r2.scenario_id WHERE r2.id = :r)"
+            "   AND r.id <> :r AND r.params->'choices'->:name IS NOT NULL AND r.reused_from IS NULL"
+            "   AND r.status NOT IN ('queued', 'running', 'cancelled', 'error')"
+            " ORDER BY r.id DESC LIMIT :n"
+        ),
+        {"r": run_id, "name": name, "n": RECENT},
+    ).all()
+    history = [{"on": bool((made or {}).get("on")), "status": status, "seconds": seconds, "gap": gap,
+                "limit": float(limit) if limit else None} for made, status, seconds, gap, limit in rows]
+    return decide(name, history)
 
 
 def _recall_form(db: Session, run_id: int):

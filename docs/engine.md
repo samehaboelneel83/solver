@@ -214,6 +214,17 @@ relaxation's bound goes from 17,876 to 35,695 -- the optimum -- in 3.9 s, and Hi
 (5.2 s without). The fixed-charge start runs after it, from the model as written, and stops once its answer is
 within 0.2% of that bound (`near_bound`): the solver needs no better start then.
 
+### Choices learnt from the problem's own runs (`app/solve/choices.py`)
+
+Whether to build a start before the solve (the rule's own start, or the fixed-charge one) and whether to add the
+cuts a relaxation breaks are each one on/off choice, learnt per problem the same way: on by default; tried off
+only once two runs with it on have *proved* their answers (so a problem that needs it to find any answer is never
+left without one), until two runs each way; then the way with the lower median time to a proof (an unproven run
+counts as the whole time allowed and more) is kept; every ten runs the other way is tried once again. A run that
+tried it off and did not prove, where every run with it did, turns it back on at once. Each run records its
+choices and why (`params.choices`, "Learnt from earlier runs" on the run page); setting `learn_choices` turns the
+learning off. The greedy start stays always on: it takes a moment and is what keeps a run from ending empty.
+
 ## NetworkX as a solver
 
 NetworkX (BSD licence, `networkx==3.6.1`) is in the image and used two ways.
