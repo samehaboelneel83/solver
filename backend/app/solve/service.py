@@ -65,6 +65,7 @@ from app.solve import warm
 from app.solve import locks as lock_rows
 from app.solve import adapters as adapters_rows
 from app.solve import fixed_charge as fixed_charge_rows
+from app.solve import strengthen as strengthen_rows
 from app.solve import greedy as greedy_rows
 from app.solve import verify as verify_rows
 from app.solve import answers as answer_rows
@@ -1012,6 +1013,7 @@ def _execute(
         network_record = None
         cuts_record = None
         fixed_charge_record = None
+        strengthen_record = None
         start_record, start_key = None, "connected_start_run"
         search_record = None
         exact_failed = None
@@ -1197,13 +1199,26 @@ def _execute(
             start_key = "greedy_start_run"
             time_limit = max(1.0, time_limit - float(start_record.get("seconds", 0)))
 
+        unstrengthened = solving_model
+        if (params.get("strengthen", True) and backend.name in ("highs", "scip") and not params.get("pareto_steps")
+                and strengthen_rows.applies(solving_model) is None):
+            # Rows any model with on/off limits implies (app.solve.strengthen): each quantity within its own
+            # limit, and covers -- added where the relaxation breaks them. The optimum stays; the bound rises.
+            unstrengthened = solving_model
+            solving_model, strengthen_record = strengthen_rows.strengthen(
+                solving_model, seconds=min(strengthen_rows.CEILING, strengthen_rows.SHARE * time_limit))
+            time_limit = max(1.0, time_limit - float(strengthen_record.get("seconds", 0)))
+
         if (params.get("fixed_charge_start", True) and backend.name in warm.HINTED
                 and not params.get("pareto_steps") and fixed_charge_rows.applies(solving_model) is None
                 and (start_key in ("join_start_run", "greedy_start_run") or not hint)):
             # Any model with fixed charges (app.solve.fixed_charge): slope scaling read off the compiled model,
             # kept when it is a better start than one already made.
+            # From the model as written (the added rows would split each charge's cost), stopping once its
+            # answer is within 0.2% of the strengthened relaxation's bound: the solver needs no better start.
             charged, charge_record = fixed_charge_rows.start(
-                solving_model, seconds=min(fixed_charge_rows.CEILING, fixed_charge_rows.SHARE * time_limit))
+                unstrengthened, seconds=min(fixed_charge_rows.CEILING, fixed_charge_rows.SHARE * time_limit),
+                bound=(strengthen_record or {}).get("bound_after"))
             time_limit = max(1.0, time_limit - float(charge_record.get("seconds", 0)))
             kept = fixed_charge_rows.better_of(solving_model, charged, hint)
             charge_record = {"used": kept, **charge_record}
@@ -1649,6 +1664,8 @@ def _execute(
         extra["join_cuts_run"] = cuts_record
     if fixed_charge_record is not None:
         extra["fixed_charge_start_run"] = fixed_charge_record
+    if strengthen_record is not None:
+        extra["strengthen_run"] = strengthen_record
     computed = _computed_sources(db, run_id, ir)
     if computed:
         extra["computed_inputs"] = computed

@@ -1208,6 +1208,7 @@ function RunDetail({
     routing_start_run?: RoutingStartRecord;
     join_start_run?: { used?: boolean; why?: string; how?: string; built?: number; used_places?: number; seconds?: number; overloaded?: number; dropped?: number; moves?: number; swaps?: number };
     join_cuts_run?: { rounds?: number; cuts?: number; bound_before?: number | null; bound_after?: number | null; seconds?: number };
+    strengthen_run?: { added?: number; limits?: number; covers?: number; rounds?: number; bound_before?: number | null; bound_after?: number | null; seconds?: number; why?: string };
     fixed_charge_start_run?: { used?: boolean; why?: string; charges?: number; open?: number; rounds?: number; dropped?: number; added?: number; swapped?: number; objective?: number; seconds?: number };
     computed_inputs?: (ComputedSource & { input: string; name: string })[];
     metaheuristic_run?: MetaheuristicRecord;
@@ -1453,6 +1454,11 @@ function RunDetail({
           )}
           {params.connected_start_run && <Fact label="Started from" value={connectedStartText(params.connected_start_run)} />}
           {params.routing_start_run && <Fact label="Started from" value={routingStartText(params.routing_start_run)} />}
+          {params.strengthen_run && <Fact label="Rows implied" value={params.strengthen_run.why
+            ? `none added (${params.strengthen_run.why})`
+            : `${params.strengthen_run.added ?? 0} added where the relaxation broke them (of ${(params.strengthen_run.limits ?? 0) + (params.strengthen_run.covers ?? 0)} the on/off limits imply)`
+              + (typeof params.strengthen_run.bound_before === "number" && typeof params.strengthen_run.bound_after === "number"
+                ? `; bound ${params.strengthen_run.bound_before.toLocaleString(undefined, { maximumFractionDigits: 2 })} → ${params.strengthen_run.bound_after.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : "")} />}
           {params.fixed_charge_start_run && <Fact label="Fixed charges" value={params.fixed_charge_start_run.why
             ? `no start (${params.fixed_charge_start_run.why})`
             : `slope scaling over ${params.fixed_charge_start_run.charges ?? "?"} on/off decisions with a cost: ${params.fixed_charge_start_run.open ?? "?"} on, goal ${params.fixed_charge_start_run.objective?.toLocaleString() ?? "?"}`

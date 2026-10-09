@@ -36,10 +36,18 @@ def main(argv: list[str] | None = None) -> int:
             pickle.dump(result, handle, protocol=pickle.HIGHEST_PROTOCOL)
         return 0
 
+    if payload.get("mode") == "strengthen":
+        from app.solve.strengthen import strengthen_in_process
+
+        result = strengthen_in_process(payload["compiled"], seconds=payload["seconds"])
+        with open(out_path, "wb") as handle:
+            pickle.dump(result, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        return 0
+
     if payload.get("mode") == "fixed_charge":
         from app.solve.fixed_charge import start_in_process as fixed_charge_in_process
 
-        result = fixed_charge_in_process(payload["compiled"], seconds=payload["seconds"])
+        result = fixed_charge_in_process(payload["compiled"], seconds=payload["seconds"], bound=payload.get("bound"))
         with open(out_path, "wb") as handle:
             pickle.dump(result, handle, protocol=pickle.HIGHEST_PROTOCOL)
         return 0

@@ -166,6 +166,24 @@ second; an 18×18 capacitated network design (612 links) 21,891 in 30 s where Hi
 (and the join rule's own start 22,648); a 60×300 facility model 1.5% above the optimum HiGHS proves in 18 s --
 there the start only costs time.
 
+### Rows the on/off limits imply (`app/solve/strengthen.py`)
+
+Before a HiGHS or SCIP solve of any model with on/off limits (`sum(a*x) <= M*on`, `on` yes or no, whatever it
+costs), two families of rows the model implies are added where the relaxation breaks them (`strengthen_run`, up
+to 15 s or 10% of the run; setting `strengthen`, on):
+
+- **each quantity within its own limit**: where another rule bounds a quantity below what its limit allows (a
+  shipment by its customer's demand), `a*x <= min(M, a*u) * on` -- the classic facility-location strengthening,
+  found in any model of that shape;
+- **covers**: a rule needing at least `d` of quantities each behind a limit needs enough of them on:
+  `sum(min(allowed, d) * on) >= d`.
+
+All candidates are checked against the relaxation as one sparse product per round; up to 2,000 are added a
+round, in the HiGHS worker on one model. Uncapacitated facility location, 100 sites × 400 customers: the
+relaxation's bound goes from 17,876 to 35,695 -- the optimum -- in 3.9 s, and HiGHS then proves it in 1.5 s
+(5.2 s without). The fixed-charge start runs after it, from the model as written, and stops once its answer is
+within 0.2% of that bound (`near_bound`): the solver needs no better start then.
+
 ## NetworkX as a solver
 
 NetworkX (BSD licence, `networkx==3.6.1`) is in the image and used two ways.

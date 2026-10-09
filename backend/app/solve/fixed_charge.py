@@ -93,7 +93,8 @@ def applies(compiled: Compiled) -> str | None:
     return None
 
 
-def start(compiled: Compiled, *, seconds: float = CEILING) -> tuple[dict[VarKey, Any], dict[str, Any]]:
+def start(compiled: Compiled, *, seconds: float = CEILING,
+          bound: float | None = None) -> tuple[dict[VarKey, Any], dict[str, Any]]:
     """The best design slope scaling finds, as a complete answer of the model, and what it did. Runs in the
     HiGHS worker process (`app.solve.highs_worker`), one HiGHS model changed in place between solves."""
     from app.solve import highs
@@ -102,7 +103,8 @@ def start(compiled: Compiled, *, seconds: float = CEILING) -> tuple[dict[VarKey,
     if not highs.available():
         return {}, {"why": "HiGHS is not in this build", "seconds": 0.0}
     try:
-        hint, record = highs._in_child({"mode": "fixed_charge", "compiled": compiled, "seconds": float(seconds)},
+        hint, record = highs._in_child({"mode": "fixed_charge", "compiled": compiled, "seconds": float(seconds),
+                                        "bound": bound},
                                        time_limit=float(seconds))
     except RuntimeError as failed:
         return {}, {"why": str(failed)[:300], "seconds": round(time.monotonic() - began, 3)}
@@ -110,7 +112,8 @@ def start(compiled: Compiled, *, seconds: float = CEILING) -> tuple[dict[VarKey,
     return hint, record
 
 
-def start_in_process(compiled: Compiled, *, seconds: float) -> tuple[dict[VarKey, Any], dict[str, Any]]:
+def start_in_process(compiled: Compiled, *, seconds: float,
+                     bound: float | None = None) -> tuple[dict[VarKey, Any], dict[str, Any]]:
     import highspy
     import numpy as np
 
@@ -280,7 +283,15 @@ def start_in_process(compiled: Compiled, *, seconds: float) -> tuple[dict[VarKey
                         return True
         return False
 
-    while left() > 0.3 and (drop_pass() or add_one() or swap_one()):
+    def near() -> bool:
+        """Within 0.2% of a known bound on the optimum: no start could be much better."""
+        if bound is None:
+            return False
+        close = best[0] - sense * float(bound) <= 0.002 * max(1.0, abs(best[0]))
+        record["near_bound"] = record.get("near_bound") or close
+        return close
+
+    while left() > 0.3 and not near() and (drop_pass() or add_one() or swap_one()):
         pass
     values = best[1]
     hint: dict[VarKey, Any] = {}
