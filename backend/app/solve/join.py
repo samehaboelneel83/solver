@@ -532,6 +532,147 @@ def solve(compiled: Compiled):
 # --- a start for every other model with one join rule --------------------------------------------------------
 
 
+def _choose(compiled: Compiled, meta: dict[str, Any], cost: dict[str, Decimal], f_in: set[str], f_out: set[str],
+            forced: set[VarKey], banned: set[VarKey], *, seconds: float, began: float):
+    """Which places to use, and the network that feeds them: the start for a join rule with `use` and sources.
+
+    From the places that must be used (joined to the sources by a Steiner tree), places are added while they pay:
+    each move adds the cheapest path of links from the network (or a source) to a place worth using, with every
+    place on the path, and keeps it when the design that carries every demand (`_design`, quickly) costs less
+    than the places bring in. Then places are taken out one at a time while that pays. The design of the places
+    kept is made in full last. It keeps every row of the join rule -- demands, capacities, supplies, carry --
+    as `_design` does; rules beyond it are left to the solver."""
+    import networkx as nx
+
+    sign = Decimal(1) if compiled.sense != "maximize" else Decimal(-1)
+    place_of = {k: p for p, k in meta["use"].items()}
+    must = {place_of[k] for k in forced if k in place_of}
+    barred = {place_of[k] for k in banned if k in place_of}
+    sources = {s_ for s_ in meta["sources"] if s_ not in barred}
+    gain = {p: -sign * compiled.objective.coeffs.get(k, Decimal(0)) for p, k in meta["use"].items()}
+    cap = meta["capacity"] or {}
+    total = sum((meta["need"] or {}).values(), Decimal(0)) or Decimal(1)
+    graph = nx.Graph()
+    for link, (a, b) in meta["ends"].items():
+        if link in f_out or a == b or a in barred or b in barred:
+            continue
+        weight = float(max(cost[link], Decimal(0)))
+        room = 1.0 + weight / float(max(cap.get(link, total), Decimal(1)))
+        if not graph.has_edge(a, b) or graph[a][b]["weight"] > weight:
+            graph.add_edge(a, b, weight=weight, room=room)
+    deadline = began + max(0.5, seconds) * 0.85
+
+    def value(among: set[str], full: bool = False):
+        made = _design(compiled, meta, cost, f_in, f_out, seconds=max(0.2, deadline - time.monotonic()),
+                       began=time.monotonic(), among=among, rounds_most=12 if full else 3, drop=full)
+        return None if made is None else (made[1]["value"], made)
+
+    used: set[str] = set()
+    if must:
+        terminals = sorted(must | {SUPER}, key=str)
+        big = graph.copy()
+        for s_ in sources:
+            big.add_edge(SUPER, s_, weight=0.0)
+        piece = nx.node_connected_component(big, SUPER) if SUPER in big else set()
+        if not set(terminals) <= piece:
+            return None
+        from networkx.algorithms.approximation import steiner_tree
+
+        used = {p for p in steiner_tree(big.subgraph(piece), terminals, weight="weight").nodes if p != SUPER} | must
+    def ways(network: set[str], p: str, most: int = 4):
+        """Paths of places from the network (or a source) to p: the cheapest few, then the few with the most room
+        (each link weighed by its cost over its capacity), then those taken together -- a demand one path cannot
+        carry may fit two side by side."""
+        g = graph.copy()
+        for q in (network | sources) & set(graph.nodes):
+            g.add_edge(SUPER, q, weight=0.0, room=0.0)
+        if SUPER not in g or p not in g or not nx.has_path(g, SUPER, p):
+            return []
+        out: list[set[str]] = []
+        for weight in ("weight", "room"):
+            for i, path in enumerate(nx.shortest_simple_paths(g, SUPER, p, weight=weight)):
+                if set(path[1:]) not in out:
+                    out.append(set(path[1:]))
+                if i + 1 >= most:
+                    break
+        together, unions = set(), []
+        for path in out:
+            together |= path
+            unions.append(set(together))
+        return out + unions[1:]
+
+    def routed(wanted: set[str]):
+        """Places that feed `wanted`, found by routing its demand at least cost through any place, adding the
+        places the flow passes (they must then be fed too), until no new place is passed: one try, or none."""
+        places_ = set(wanted)
+        for _ in range(8):
+            passed = _design(compiled, meta, cost, f_in, f_out, seconds=0.5, began=time.monotonic(),
+                             fed=places_ | sources)
+            if passed is None:
+                return []
+            passed = (passed - barred) | places_
+            if passed <= places_:
+                return [places_]
+            places_ = passed
+        return [places_]
+
+    best = value(used)
+    if best is None:
+        # The tree cannot carry the demand (a capacity on its way): the places that must be used are joined one
+        # at a time, each along the first of its cheapest paths whose design still carries everything.
+        used, best = set(), value(set())
+        for m in sorted(must, key=str):
+            if m in used:
+                continue
+            for path in [*ways(used, m), *routed(used | {m})]:
+                tried = value(used | path)
+                if tried is not None:
+                    used, best = used | path, tried
+                    break
+            else:
+                return None
+    moves = 0
+    improved = True
+    while improved and time.monotonic() < deadline:
+        improved = False
+        start_from = (used | sources) & set(graph.nodes)
+        if not start_from:
+            break
+        _, paths = nx.multi_source_dijkstra(graph, start_from, weight="weight")
+        for p in sorted((p for p in meta["places"] if p not in used and gain[p] > 0 and p in paths),
+                        key=lambda p: (-gain[p], p)):
+            if time.monotonic() > deadline:
+                break
+            for path in [set(paths[p]), lambda: routed(used | {p})]:
+                if callable(path):  # the shortest path cannot carry it: route it through any places instead
+                    found = path()
+                    if not found:
+                        break
+                    path = found[0]
+                tried = value(used | path)
+                if tried is not None and tried[0] < best[0]:
+                    used, best, moves, improved = used | path, tried, moves + 1, True
+                    break
+                if tried is not None:
+                    break  # it carries, and does not pay: a dearer path would not either
+            if improved:
+                break  # the paths change with the network: find them again
+    taken_out = True
+    while taken_out and time.monotonic() < deadline:
+        taken_out = False
+        for p in sorted(used - must - sources, key=lambda p: (gain[p], p)):
+            if time.monotonic() > deadline:
+                break
+            tried = value(used - {p})
+            if tried is not None and tried[0] < best[0]:
+                used, best, moves, taken_out = used - {p}, tried, moves + 1, True
+    final = value(used, full=True) or best
+    hint, made = final[1]
+    made.update(how="places chosen by their worth, each fed by a capacity-aware design", used_places=len(used),
+                moves=moves)
+    return hint, made
+
+
 def _overloaded(meta: dict[str, Any], hint: dict[VarKey, Any]) -> int:
     """How many links the start sends more along than their capacity (the solver then mends it)."""
     carried: dict[str, float] = {}
@@ -541,7 +682,8 @@ def _overloaded(meta: dict[str, Any], hint: dict[VarKey, Any]) -> int:
 
 
 def _design(compiled: Compiled, meta: dict[str, Any], cost: dict[str, Decimal], f_in: set[str], f_out: set[str], *,
-            seconds: float, began: float):
+            seconds: float, began: float, among: set[str] | None = None, rounds_most: int = 12, drop: bool = True,
+            fed: set[str] | None = None):
     """A capacitated network that carries every demand: the hint for a capacitated design (9 October 2026).
 
     1. The demand is sent at least cost with every link open, each link priced per unit at what it costs to carry
@@ -557,8 +699,24 @@ def _design(compiled: Compiled, meta: dict[str, Any], cost: dict[str, Decimal], 
     from app.solve.network import _scale
 
     places, ends, sources = meta["places"], meta["ends"], meta["sources"]
-    need, cap, supply = meta["need"], meta["capacity"] or {}, meta["supply"] or {}
+    need, cap, supply = meta["need"] or {}, meta["capacity"] or {}, meta["supply"] or {}
+    if among is not None:
+        # Only these places are used (the rest are not): links between two of them, their demands, their sources.
+        places = [p for p in places if p in among]
+        sources = {s_ for s_ in sources if s_ in among}
+        need = {p: v for p, v in need.items() if p in among}
+        ends = {l: (a, b) for l, (a, b) in ends.items() if a in among and b in among}
+    if fed is not None:
+        # Routing only: the demand of `fed` alone, through any of the places; the places the flow passes.
+        need = {p: v for p, v in need.items() if p in fed}
     sign = Decimal(1) if compiled.sense != "maximize" else Decimal(-1)
+    use_worth = sum((sign * compiled.objective.coeffs.get(k, Decimal(0))
+                     for p, k in (meta["use"] or {}).items() if p in set(places)), Decimal(0))
+    if not places:
+        hint = {k: 0 for k in [*meta["build"].values(), *meta["flow"].values(), *meta["dflow"].values(),
+                               *(meta["use"] or {}).values(), *(meta["carry"] or {}).values()]}
+        return hint, {"how": "nothing used", "built": 0, "rounds": 0, "dropped": 0, "estimate": 0.0,
+                      "value": Decimal(0)}
     unit = {link: max(Decimal(0), sign * compiled.objective.coeffs.get(k, Decimal(0)))
             for link, k in (meta["carry"] or {}).items()}
     total = sum(need.values(), Decimal(0))
@@ -600,6 +758,12 @@ def _design(compiled: Compiled, meta: dict[str, Any], cost: dict[str, Decimal], 
             carried += unit.get(l, Decimal(0)) * (abs(net))
         return carried, out
 
+    if fed is not None:
+        routed = flow_on(allowed, slope={})
+        if routed is None:
+            return None
+        return {p for l, (ab, ba) in routed[1].items() if ab or ba for p in ends[l]} | set(fed)
+
     def joined(links: set[str]) -> bool:
         parent = {p: p for p in [*places, SUPER]}
 
@@ -628,7 +792,7 @@ def _design(compiled: Compiled, meta: dict[str, Any], cost: dict[str, Decimal], 
     # first), until the design repeats; the cheapest design seen is kept.
     slope: dict[str, Decimal] = {}
     built, best, seen, rounds = None, None, set(), 0
-    while rounds < 12 and time.monotonic() < deadline:
+    while rounds < rounds_most and time.monotonic() < deadline:
         rounds += 1
         sent = flow_on(allowed, slope=slope)
         if sent is None:
@@ -647,7 +811,7 @@ def _design(compiled: Compiled, meta: dict[str, Any], cost: dict[str, Decimal], 
         return None
     dropped = 0
     for l in sorted((l for l in built if cost[l] > 0 and l not in f_in), key=lambda l: (-cost[l], l)):
-        if time.monotonic() > deadline:
+        if not drop or time.monotonic() > deadline:
             break
         trial = built - {l}
         if not joined(trial):
@@ -673,18 +837,23 @@ def _design(compiled: Compiled, meta: dict[str, Any], cost: dict[str, Decimal], 
             parent[find(a)] = find(b)
             tree.add(l)
     hint: dict[VarKey, Any] = {k: (1 if l in built else 0) for l, k in meta["build"].items()}
-    hint.update(_flows(meta, tree))
+    hint.update({k: 0 for k in [*meta["flow"].values(), *meta["dflow"].values()]})
+    hint.update(_flows(dict(meta, places=places, sources=sources, ends=ends), tree))
+    if meta["use"] is not None:
+        kept = set(places)
+        hint.update({k: (1 if p in kept else 0) for p, k in meta["use"].items()})
 
     def number(v: Decimal):
         return int(v) if v == v.to_integral_value() else float(v)
     for (l, u, v), key in meta["dflow"].items():
         ab, ba = best[1].get(l, (Decimal(0), Decimal(0)))
-        hint[key] = number(ab if (u, v) == ends[l] else ba)
+        hint[key] = number(ab if (u, v) == meta["ends"][l] else ba)
     for l, key in (meta["carry"] or {}).items():
         ab, ba = best[1].get(l, (Decimal(0), Decimal(0)))
         hint[key] = number(ab + ba)
     return hint, {"how": "capacity-aware design (slope scaling, then links dropped)", "built": len(built),
-                  "rounds": rounds, "dropped": dropped, "estimate": float(best[0] * sign)}
+                  "rounds": rounds, "dropped": dropped, "estimate": float((best[0] + use_worth) * sign),
+                  "value": best[0] + use_worth}
 
 
 def start_applies(compiled: Compiled) -> str | None:
@@ -732,8 +901,15 @@ def start(compiled: Compiled, *, seconds: float = CEILING) -> tuple[dict[VarKey,
         designed = _design(compiled, meta, cost, f_in, f_out, seconds=seconds, began=began)
         if designed is not None:
             hint, made = designed
+            made.pop("value", None)
             return hint, {**record, **made, "seconds": round(time.monotonic() - began, 3)}
         record["design_why"] = "no flow can carry every demand even with every link built"
+    if meta["use"] is not None and meta["sources"] is not None:
+        chosen = _choose(compiled, meta, cost, f_in, f_out, forced, banned, seconds=seconds, began=began)
+        if chosen is not None:
+            hint, made = chosen
+            made.pop("value", None)
+            return hint, {**record, **made, "seconds": round(time.monotonic() - began, 3)}
     if meta["use"] is None:
         built, tree, pieces = _tree(meta["places"], meta["ends"], meta["sources"], cost, f_in, f_out)
         if pieces > 1:

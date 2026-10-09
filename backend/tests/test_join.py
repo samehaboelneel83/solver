@@ -275,7 +275,7 @@ def test_the_start_keeps_the_join_rule(seed):
     compiled = compile_model(ir, data)
     assert join.start_applies(compiled) is None
     hint, record = join.start(compiled)
-    assert record["how"].startswith("Steiner") and hint
+    assert record["how"].startswith("places chosen" if sources else "Steiner") and hint
     values = {k: hint.get(k, 0) for k in compiled.variables}
     assert _holds(compiled, values), record
     # Without use: the spanning tree, in a model with a budget row the exact lane does not take.
@@ -558,3 +558,42 @@ def test_demand_no_design_can_carry_is_refused_with_the_shortfall():
         compile_model(*_capacitated(places, links, {"s"}, {"a": 3, "b": 3}, {"sa": 2, "ab": 5, "sb": 3}))
     compiled = compile_model(*_capacitated(places, links, {"s"}, {"a": 3, "b": 2}, {"sa": 2, "ab": 5, "sb": 3}))
     assert _mip(compiled).status == "optimal"
+
+
+def _prize_capacitated(seed, n=7):
+    """Sources, places worth a prize when fed (and some that must be), demands, capacities, per-unit costs."""
+    rnd = random.Random(seed)
+    places, links = _graph(n, 600 + seed, extra=0.35)
+    links = [(l, a, b, abs(c) + 1) for l, a, b, c in links]
+    sources = {"p0"}
+    need = {p: rnd.randint(0, 4) for p in places if p not in sources}
+    cap = {l: rnd.randint(3, 10) for l, *_ in links}
+    unit = {l: rnd.randint(0, 2) for l, *_ in links}
+    prize = {p: rnd.choice([0, 0, 10, 25, 40]) for p in places}
+    required = {places[-1]} if seed % 2 else set()
+    ir, data = _capacitated(places, links, sources, need, cap, unit=unit)
+    use_ir, use_data = _model(places, links, sources=sources, use=True, prize=prize, required=required)
+    ir["variables"]["serve"] = use_ir["variables"]["serve"]
+    ir["constraints"][0]["join"]["use"] = {"var": "serve", "index": ["p"]}
+    for name in ("prize", "required"):
+        ir["parameters"][name] = use_ir["parameters"][name]
+        data["parameters"][name] = use_data["parameters"][name]
+    ir["objective"]["terms"].append(next(t for t in use_ir["objective"]["terms"] if t["id"] == "o_prize"))
+    ir["constraints"].append(next(c for c in use_ir["constraints"] if c["id"] == "c_required"))
+    return ir, data
+
+
+@pytest.mark.parametrize("seed", range(10))
+def test_with_use_the_start_chooses_places_that_pay_and_keeps_every_row(seed):
+    compiled = compile_model(*_prize_capacitated(seed))
+    hint, record = join.start(compiled)
+    result = _mip(compiled)
+    if result.status == "infeasible":
+        return
+    assert result.status == "optimal"
+    assert record["how"].startswith("places chosen"), record
+    values = {k: hint.get(k, 0) for k in compiled.variables}
+    assert _holds(compiled, values), (seed, record)
+    ours, best = float(compiled.objective.evaluated_at(values)), float(result.objective)
+    assert ours == pytest.approx(record["estimate"])
+    assert best - 1e-6 <= ours <= best + 0.25 * abs(best) + 10, (seed, ours, best)

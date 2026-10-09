@@ -208,7 +208,15 @@ design kept); places that take nothing are joined by Kruskal; then links are dro
 rest still joins and carries everything for less. Every flow is a NetworkX min-cost flow, so the start keeps
 every row of the rule. On an 18×18 grid (324 places, 612 links, capacities and per-unit costs) it gives 22,648 in
 2.4 s where HiGHS alone has 23,659 after 60 s; on small cases it is within a few per cent of the optimum. With
-`use`, the Steiner start is kept and `join_start_run.overloaded` counts the links it sends over capacity. Before
+`use` and sources, the start also chooses the places: from the places that must be used (joined to the sources
+by a Steiner tree; when that tree cannot carry their demand, by routing it at least cost through any places and
+adding the places the flow passes until none is new), places worth something in the goal are added along their
+cheapest path -- or routed, when that path cannot carry them -- while the design that feeds them costs less than
+they bring in; then places are taken out while that pays (`join_start_run.used_places`, `moves`). Each design is
+the capacity-aware one above, so the start keeps every row. A 14×14 grid with prizes, capacities and four places
+that must be served: HiGHS alone found no answer in 60 s; the start gives one in 14 s and HiGHS keeps it. On a
+9×9 grid HiGHS with the start ends at -1,190 against -1,177 without. Without sources, the Steiner start (with
+`overloaded`) is kept. Before
 any of this, a maximum flow with every link built checks that the demand can be carried at all: when it cannot,
 the run is refused with the shortfall ("at most 285 of the 303 ... can reach them").
 
