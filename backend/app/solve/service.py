@@ -236,6 +236,9 @@ def enqueue_run(
     connected_start = bool(settings["solve.connected_start"].value)
     routing_start = bool(settings["solve.routing_start"].value)
     from_settings["routing_start"] = settings["solve.routing_start"].source
+    # The solver alone first, briefly; the steps before a solve only when that settles nothing.
+    probe_first = bool(settings["solve.probe_first"].value) if "solve.probe_first" in settings else True
+    from_settings["probe_first"] = settings["solve.probe_first"].source if "solve.probe_first" in settings else "default"
     # Which solvers this problem's organization lets solve (queue R42).
     from app.solve.licences import solver_list
 
@@ -341,6 +344,7 @@ def enqueue_run(
         "network": network,
         "network_engine": network_engine,
         "routing_start": routing_start,
+        "probe_first": probe_first,
         **({"allowed_solvers": allowed_solvers} if allowed_solvers else {}),
         **({"denied_solvers": denied_solvers} if denied_solvers else {}),
         **({"solver_params_setting": tuned_params, "tuned_from": tuned_from} if tuned_params else {}),
@@ -1013,6 +1017,8 @@ def _execute(
         network_record = None
         cuts_record = None
         tuning_record = None
+        presolve_record = None
+        probe_record = None
         # Choices learnt from this problem's own runs (app.solve.choices): made once, when first asked.
         choices_record: dict[str, dict[str, Any]] = {}
 
@@ -1165,8 +1171,59 @@ def _execute(
                     {"w": _json({"warm_start_from": prior[0], "warm_start_hinted": len(hint or {})}), "r": run_id},
                 )
                 db.commit()  # not held through the solve: see `_record_fingerprint`
+        # One budget for every step before the solve (starts, implied rows, cuts): each takes its own share,
+        # but together they may not take more than PRESOLVE_SHARE of the run -- the solver keeps the rest.
+        presolve_from = time_limit
+        presolve_record: dict[str, Any] = {"budget_s": round(PRESOLVE_SHARE * time_limit, 3), "skipped": []}
+
+        def grant(own: float, step: str) -> float:
+            left = PRESOLVE_SHARE * presolve_from - (presolve_from - time_limit)
+            seconds = max(0.0, min(own, left))
+            if seconds < PRESOLVE_MIN_S:
+                presolve_record["skipped"].append(step)
+                return 0.0
+            return seconds
+
         kinds = {key for c in ir.get("constraints") or [] if isinstance(c, dict)
                  for key in ("connected", "route", "join") if key in c}
+
+        # Escalation (bench/results/2026-10-09-pipeline.md): the steps before a solve -- the join rule's start
+        # and cuts, the fixed-charge start, the implied rows -- cost time on every model a solver proves on
+        # its own in seconds, which is most. So the solver first tries the model as it is, briefly; only when
+        # that settles nothing do the steps run, handed what it found as their start.
+        probe_answer, probe_record, steps_wanted = None, None, True
+        # Only where the run would hand the model to its solver as it is: a lane of its own (a network, a
+        # pairing, a spanning tree, a horizon, a decomposition, sampled futures, a search) is left to run.
+        own_lane = (any(params.get(k) for k in ("rolling_horizon", "lagrangian", "lns", "robust", "alternatives"))
+                    or (bool(params.get("stochastic_samples")) and stochastic_rows.wanted(ir))
+                    or (bool(params.get("decompose")) and allocation_rows.applies(solving_model) is None)
+                    or (bool(params.get("network")) and _graph_lane(solving_model)))
+        if (params.get("probe_first", True) and backend.name in warm.HINTED and not params.get("pareto_steps")
+                and not race_candidates and not portfolio_candidates and not own_lane
+                and ("join" in kinds or fixed_charge_rows.applies(solving_model) is None
+                     or (backend.name in ("highs", "scip") and strengthen_rows.applies(solving_model) is None))):
+            probe_s = min(PROBE_FIRST_MAX_S, max(PROBE_FIRST_MIN_S, PROBE_FIRST_SHARE * time_limit))
+            try:
+                probed, probe_reason = sandbox.run(
+                    "app.solve.sandbox:solve_in_child",
+                    {"backend": backend.name, "compiled": solving_model, "time_limit": probe_s, "seed": seed,
+                     "workers": workers, "gap_rel": gap_rel, "hint": hint,
+                     "symmetry": bool(params.get("symmetry")), "solver_params": tuned.get(backend.name)},
+                    time_limit=probe_s, workers=workers, on_progress=events.progress, should_stop=stop.is_set,
+                )
+            except (Unsupported, sandbox.SandboxFailed) as exc:
+                probed, probe_reason = None, None
+                probe_record = {"seconds": probe_s, "failed": str(exc)[:300]}
+            if probed is not None:
+                probe_record = {"seconds": round(probed.wall_seconds, 3), "status": probed.status,
+                                "objective": probed.objective}
+                if probed.status in race_rows.DECISIVE:
+                    # Settled on its own: no step would have paid for itself.
+                    probe_answer, steps_wanted = (probed, probe_reason), False
+                else:
+                    time_limit = max(1.0, time_limit - float(probed.wall_seconds))
+                    if probed.assignments:
+                        hint = {**(hint or {}), **probed.assignments}
         starter = None
         if params.get("connected_start") and "connected" in kinds and reach_rows.rule_of(ir) is not None:
             # Rooted at its sources (app.solve.reach): the model solved without the reach, then repaired.
@@ -1177,7 +1234,7 @@ def _execute(
             # `solve.connected_start`, app.solve.partition, queue R13).
             starter, start_key = partition_rows, "connected_start_run"
             why_not = partition_rows.applies(ir)
-        elif params.get("connected_start") and "join" in kinds:
+        elif params.get("connected_start") and "join" in kinds and steps_wanted:
             # A spanning tree, or a Steiner tree joining the places that must be joined (app.solve.join).
             from app.solve import join as join_start
 
@@ -1197,9 +1254,11 @@ def _execute(
                 start_record = {"used": False, "why": "an earlier answer is the start"}
             elif not choose_on("start"):
                 start_record = {"used": False, "why": choices_record["start"]["why"]}
+            elif not grant(min(starter.CEILING, starter.SHARE * time_limit), "start"):
+                start_record = {"used": False, "why": "the time for steps before the solve was spent"}
             else:
                 hint, start_record = starter.start(
-                    ir, data, compiled, seconds=min(starter.CEILING, starter.SHARE * time_limit))
+                    ir, data, compiled, seconds=grant(min(starter.CEILING, starter.SHARE * time_limit), "start"))
                 start_record = {"used": True, **start_record}
                 hint = hint or None
                 # The start's time is the run's: the solver gets what is left, so the run keeps its limit.
@@ -1224,24 +1283,29 @@ def _execute(
             # The rows lost every recent race on this problem: not made at all this time.
             strengthen_record = {"skipped": remembered_form.evidence,
                                  "forms": {"won": "as written", "remembered": True}}
-        elif (params.get("strengthen", True) and backend.name in ("highs", "scip") and not params.get("pareto_steps")
-                and strengthen_rows.applies(solving_model) is None):
+        elif (steps_wanted and params.get("strengthen", True) and backend.name in ("highs", "scip")
+                and not params.get("pareto_steps")
+                and strengthen_rows.applies(solving_model) is None
+                and grant(min(strengthen_rows.CEILING, strengthen_rows.SHARE * time_limit), "strengthen")):
             # Rows any model with on/off limits implies (app.solve.strengthen): each quantity within its own
             # limit, and covers -- added where the relaxation breaks them. The optimum stays; the bound rises.
             unstrengthened = solving_model
             solving_model, strengthen_record = strengthen_rows.strengthen(
-                solving_model, seconds=min(strengthen_rows.CEILING, strengthen_rows.SHARE * time_limit))
+                solving_model, seconds=grant(min(strengthen_rows.CEILING, strengthen_rows.SHARE * time_limit),
+                                             "strengthen"))
             time_limit = max(1.0, time_limit - float(strengthen_record.get("seconds", 0)))
 
-        if (params.get("fixed_charge_start", True) and backend.name in warm.HINTED
+        if (steps_wanted and params.get("fixed_charge_start", True) and backend.name in warm.HINTED
                 and not params.get("pareto_steps") and fixed_charge_rows.applies(solving_model) is None
-                and (start_key in ("join_start_run", "greedy_start_run") or not hint) and choose_on("start")):
+                and (start_key in ("join_start_run", "greedy_start_run") or not hint) and choose_on("start")
+                and grant(min(fixed_charge_rows.CEILING, fixed_charge_rows.SHARE * time_limit), "fixed charges")):
             # Any model with fixed charges (app.solve.fixed_charge): slope scaling read off the compiled model,
             # kept when it is a better start than one already made.
             # From the model as written (the added rows would split each charge's cost), stopping once its
             # answer is within 0.2% of the strengthened relaxation's bound: the solver needs no better start.
             charged, charge_record = fixed_charge_rows.start(
-                unstrengthened, seconds=min(fixed_charge_rows.CEILING, fixed_charge_rows.SHARE * time_limit),
+                unstrengthened, seconds=grant(min(fixed_charge_rows.CEILING, fixed_charge_rows.SHARE * time_limit),
+                                              "fixed charges"),
                 bound=(strengthen_record or {}).get("bound_after"))
             time_limit = max(1.0, time_limit - float(charge_record.get("seconds", 0)))
             kept = fixed_charge_rows.better_of(solving_model, charged, hint)
@@ -1252,15 +1316,18 @@ def _execute(
 
         from app.solve import join as join_cuts
 
-        if (params.get("connected_start") and "join" in kinds and backend.name in warm.HINTED
-                and join_cuts.separate_applies(solving_model) is None and choose_on("cuts")):
+        if (steps_wanted and params.get("connected_start") and "join" in kinds and backend.name in warm.HINTED
+                and join_cuts.separate_applies(solving_model) is None and choose_on("cuts")
+                and grant(min(20.0, 0.15 * time_limit), "cuts")):
             # Cuts the relaxation breaks, added before the solve (app.solve.join.separate): the bound rises,
             # the optimum stays.
-            solving_model, cuts_record = join_cuts.separate(solving_model, seconds=min(20.0, 0.15 * time_limit))
+            solving_model, cuts_record = join_cuts.separate(solving_model,
+                                                            seconds=grant(min(20.0, 0.15 * time_limit), "cuts"))
             time_limit = max(1.0, time_limit - float(cuts_record.get("seconds", 0)))
 
         points: list = []
         parts, blocks_record = None, None
+        presolve_record["spent_s"] = round(presolve_from - time_limit, 3)
         tuning_record = None
         if params.get("auto_tune", True) and not tuned.get(backend.name) and not params.get("pareto_steps"):
             # The solver's own options, tuned for this problem by Bayesian optimisation over its runs
@@ -1312,6 +1379,9 @@ def _execute(
                 return _cancelled_outcome(db, run_id)
             if points:
                 result, reason = _point_solution(compiled, points[0]), None
+                raise _Answered
+            if probe_answer is not None:
+                result, reason = probe_answer
                 raise _Answered
             if portfolio_candidates:
 
@@ -1743,6 +1813,10 @@ def _execute(
         extra["choices"] = choices_record
     if tuning_record is not None:
         extra["tuning"] = tuning_record
+    if probe_record is not None:
+        extra["probe_first_run"] = probe_record
+    if presolve_record is not None and (presolve_record.get("skipped") or presolve_record.get("spent_s")):
+        extra["presolve"] = presolve_record
     if fixed_charge_record is not None:
         extra["fixed_charge_start_run"] = fixed_charge_record
     if strengthen_record is not None:
@@ -2315,6 +2389,11 @@ def _time_set(db: Session, run_id: int, compiled: Compiled) -> str | None:
     return next((name for name in sorted(names) if name in indexed), None)
 
 
+#: The most of a run's time all the steps before its solve may take together (starts, implied rows, cuts), and
+#: the least a step is worth starting with.
+PRESOLVE_SHARE, PRESOLVE_MIN_S = 0.3, 0.5
+#: The solver's first, plain try before any of those steps: a share of the run, within these bounds.
+PROBE_FIRST_SHARE, PROBE_FIRST_MIN_S, PROBE_FIRST_MAX_S = 0.2, 2.0, 30.0
 #: The share of the time given to IPOPT after SCIP ends without a proof (queue R6).
 LOCAL_SHARE = 0.25
 #: The metaheuristic's share of the run's time after an exact solver ended with nothing (queue R14).
@@ -2884,6 +2963,17 @@ def _price(nominal: Solution, robust: Solution, sense: str) -> dict[str, Any]:
         if nominal.objective:
             out["price_share"] = round(worse / abs(nominal.objective), 6)
     return out
+
+
+def _graph_lane(compiled) -> bool:
+    """Whether an exact graph lane (min-cost flow, a matching, a spanning tree) takes the model."""
+    from app.solve import join as join_rows, matching as matching_rows
+
+    try:
+        return (network_rows.applies(compiled) is None or matching_rows.applies(compiled) is None
+                or join_rows.applies(compiled) is None)
+    except Exception:  # noqa: BLE001 -- a check that fails leaves the model to the solver
+        return False
 
 
 class _Answered(Exception):

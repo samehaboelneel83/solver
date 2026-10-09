@@ -74,7 +74,7 @@ from tests.test_quadratic import empty_queue  # noqa: E402,F401
 from tests.test_v1_problem_run import db  # noqa: E402,F401
 
 
-def test_a_run_records_the_rows_it_added(db, empty_queue):  # noqa: F811
+def test_a_run_records_the_rows_it_added(db, empty_queue, steps_first):  # noqa: F811
     from sqlalchemy import text
 
     from tests.test_run_events import _run
@@ -174,7 +174,7 @@ def test_a_network_design_written_by_the_join_rule_gets_its_cut_sets_without_it(
     assert float(_solve(stronger).objective) == pytest.approx(float(_solve(compiled).objective))
 
 
-def test_a_run_races_the_model_as_written_against_the_strengthened_one(db, empty_queue):  # noqa: F811
+def test_a_run_races_the_model_as_written_against_the_strengthened_one(db, empty_queue, steps_first):  # noqa: F811
     from sqlalchemy import text
 
     from tests.test_run_events import _run
@@ -202,3 +202,58 @@ def test_which_form_wins_is_remembered_and_rechecked():
     used = {"won": "as written", "remembered": True}
     assert recall_form([used] * (FORM_RECHECK - 1) + [race("as written")] * 3).form == "as written"
     assert recall_form([used] * FORM_RECHECK + [race("as written")] * 3) is None  # time to race again
+
+
+def test_the_steps_before_a_solve_share_one_budget(db, empty_queue, steps_first):  # noqa: F811
+    """Starts, implied rows and cuts each take their share, but together at most PRESOLVE_SHARE of the run."""
+    from sqlalchemy import text
+
+    from app.solve.service import PRESOLVE_SHARE, enqueue_run
+    from app.worker import work_once
+    from tests.test_v1_problem_run import make_domain, make_model_version, make_problem
+
+    version = make_model_version(db, make_problem(db, make_domain(db, "budget")), _uncapacitated(4, 30, 120))
+    problem = db.execute(text("SELECT problem_id FROM model_version WHERE id = :v"), {"v": version}).scalar_one()
+    scenario = db.execute(text("INSERT INTO scenario (problem_id, model_version_id, name) VALUES (:p, :v, 'base') "
+                               "RETURNING id"), {"p": problem, "v": version}).scalar_one()
+    db.commit()
+    run_id = enqueue_run(db, scenario, time_limit=3.0, reuse=False)
+    for _ in range(5):
+        if db.execute(text("SELECT status FROM run WHERE id = :r"), {"r": run_id}).scalar_one() != "queued":
+            break
+        work_once(db)
+    params = db.execute(text("SELECT params FROM run WHERE id = :r"), {"r": run_id}).scalar_one()
+    budget = params["presolve"]
+    assert budget["budget_s"] == pytest.approx(PRESOLVE_SHARE * 3.0)
+    # A 3 s run: the implied rows' own share (0.3 s) is too little to be worth starting, so it is skipped and said.
+    assert "strengthen" in budget["skipped"], budget
+    assert budget["spent_s"] <= budget["budget_s"] + 1.0, budget
+
+
+def test_the_solver_alone_first_settles_an_easy_model_and_skips_the_steps(db, empty_queue):  # noqa: F811
+    """`solve.probe_first` (on by default): a model the solver proves in a moment never pays for the steps."""
+    from sqlalchemy import text
+
+    from tests.test_run_events import _run
+
+    run_id = _run(db, _uncapacitated(2), "probe first easy")
+    row = db.execute(text("SELECT status, params FROM run WHERE id = :r"), {"r": run_id}).mappings().one()
+    assert row["status"] == "optimal"
+    probe = row["params"]["probe_first_run"]
+    assert probe["status"] == "optimal", probe
+    assert "strengthen_run" not in row["params"] and "fixed_charge_start_run" not in row["params"]
+
+
+def test_the_solver_alone_first_escalates_when_it_settles_nothing(db, empty_queue):  # noqa: F811
+    """Not settled in its share (2 s of 10): the steps run, after it, with the time left."""
+    from sqlalchemy import text
+
+    from tests.test_run_events import _run
+
+    run_id = _run(db, _uncapacitated(1, 100, 400), "probe first hard")
+    params = db.execute(text("SELECT params FROM run WHERE id = :r"), {"r": run_id}).scalar_one()
+    probe = params["probe_first_run"]
+    if probe.get("status") == "optimal":
+        pytest.skip("this machine proved the large model inside the probe")
+    assert probe["seconds"] <= 4.0, probe
+    assert "fixed_charge_start_run" in params or "strengthen_run" in params or "presolve" in params, params

@@ -37,7 +37,9 @@ def test_the_template_solves_with_every_zone_and_sub_zone_connected(tenants, db,
     assert again.status_code == 201, again.text
     assert _cells(db, applied["domain_id"]) == 90
 
-    run = client.post(f"/api/v1/scenarios/{applied['scenario_id']}/runs", json={"time_limit_s": 60}, headers=tenants["a"])
+    # 120 s, not 60: alone it answers in about 50 s, and under a full test run's load it ran out of time
+    # (a failure that said nothing about the template).
+    run = client.post(f"/api/v1/scenarios/{applied['scenario_id']}/runs", json={"time_limit_s": 120}, headers=tenants["a"])
     assert run.status_code in (200, 201, 202), run.text
     run_id = run.json()["id"]
     for _ in range(5):

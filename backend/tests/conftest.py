@@ -193,3 +193,23 @@ try:
     seed_admin(_session)
 finally:
     _session.close()
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture
+def steps_first():
+    """`solve.probe_first` off by default for the test: a test that checks what a step before the solve did
+    needs the step to run, not a quick solve that settles the model first."""
+    from sqlalchemy import text
+
+    session = SessionLocal()
+    try:
+        session.execute(text("UPDATE setting_key SET default_value = CAST('false' AS jsonb) WHERE key = 'solve.probe_first'"))
+        session.commit()
+        yield
+    finally:
+        session.execute(text("UPDATE setting_key SET default_value = CAST('true' AS jsonb) WHERE key = 'solve.probe_first'"))
+        session.commit()
+        session.close()

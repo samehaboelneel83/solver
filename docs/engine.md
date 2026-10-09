@@ -225,6 +225,23 @@ tried it off and did not prove, where every run with it did, turns it back on at
 choices and why (`params.choices`, "Learnt from earlier runs" on the run page); setting `learn_choices` turns the
 learning off. The greedy start stays always on: it takes a moment and is what keeps a run from ending empty.
 
+### The solver alone first, then the steps (`solve.probe_first`)
+
+Measured end to end (`bench/pipeline.py`, `bench/results/2026-10-09-pipeline.md`), every step always on made
+runs 5x slower on geometric mean, because most models are proved by the solver alone in seconds; the steps paid
+only on the hard ones. So a run now escalates: the chosen solver tries the model as it is for a fifth of the time
+allowed (2 to 30 s). A proof there is the answer (`probe_first_run`, "Solver alone first" on the run page);
+otherwise the steps that apply run -- the rule's start, the fixed-charge start, the implied rows and their race,
+the join cuts -- with what the probe found as their start and the time left (1.05x on the same bench, the hard
+instances' gains kept). It is skipped where a lane of the run's own takes the model (min-cost flow, a matching,
+a spanning tree, a horizon, a decomposition, sampled futures, a search, alternatives), with a solver race or
+portfolio, for fronts, and for solvers that take no start. Setting `solve.probe_first` off restores the steps
+first.
+
+**One budget for the steps.** Starts, implied rows and cuts each take their own share of the time, but together
+at most 30% of the run (`PRESOLVE_SHARE`); a step whose share left is under half a second is skipped and said
+(`presolve`, "Before the solve" on the run page).
+
 ## More searches, raced; NSGA-II fronts (9 October 2026)
 
 The metaheuristic lane (`app/solve/evolve.py`) adds simulated annealing (`sa`), tabu search (`tabu`), differential

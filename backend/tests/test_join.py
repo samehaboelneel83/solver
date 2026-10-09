@@ -370,7 +370,7 @@ def test_a_run_of_a_spanning_network_is_solved_by_kruskal_and_proven(db, empty_q
     assert round(float(row["objective"])) == _nx_mst(places, links)
 
 
-def test_a_run_choosing_its_places_starts_from_a_steiner_tree(db, empty_queue):  # noqa: F811
+def test_a_run_choosing_its_places_starts_from_a_steiner_tree(db, empty_queue, steps_first):  # noqa: F811
     places, links = _graph(10, 43)
     row = _domain_run(db, places, links, use=True, required=("p2", "p5", "p9"))
     assert row["status"] == "optimal", row["error"]

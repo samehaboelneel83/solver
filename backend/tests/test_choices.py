@@ -35,7 +35,7 @@ from tests.test_quadratic import empty_queue  # noqa: E402,F401
 from tests.test_v1_problem_run import db  # noqa: E402,F401
 
 
-def test_a_problem_learns_whether_its_start_is_worth_building(db, empty_queue):  # noqa: F811
+def test_a_problem_learns_whether_its_start_is_worth_building(db, empty_queue, steps_first):  # noqa: F811
     from sqlalchemy import text
 
     from app.solve.service import enqueue_run

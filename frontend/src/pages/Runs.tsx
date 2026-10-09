@@ -1218,6 +1218,8 @@ function RunDetail({
     join_cuts_run?: { rounds?: number; cuts?: number; bound_before?: number | null; bound_after?: number | null; seconds?: number };
     choices?: Record<string, { on?: boolean; why?: string }>;
     tuning?: { backend?: string; trial?: boolean; why?: string };
+    presolve?: { budget_s?: number; spent_s?: number; skipped?: string[] };
+    probe_first_run?: { seconds?: number; status?: string; objective?: number | null; failed?: string };
     strengthen_run?: { added?: number; limits?: number; covers?: number; flow_nodes?: number; flow_cuts?: number; forms?: { won?: string; remembered?: boolean }; skipped?: string; rounds?: number; bound_before?: number | null; bound_after?: number | null; seconds?: number; why?: string };
     fixed_charge_start_run?: { used?: boolean; why?: string; charges?: number; open?: number; rounds?: number; dropped?: number; added?: number; swapped?: number; objective?: number; seconds?: number };
     computed_inputs?: (ComputedSource & { input: string; name: string })[];
@@ -1465,6 +1467,13 @@ function RunDetail({
           {params.connected_start_run && <Fact label="Started from" value={connectedStartText(params.connected_start_run)} />}
           {params.routing_start_run && <Fact label="Started from" value={routingStartText(params.routing_start_run)} />}
           {params.tuning?.why && <Fact label="Solver options" value={params.tuning.why} />}
+          {params.probe_first_run && <Fact label="Solver alone first" value={params.probe_first_run.failed
+            ? `tried for ${params.probe_first_run.seconds} s and failed (${params.probe_first_run.failed}); the steps ran`
+            : ["optimal", "infeasible", "unbounded"].includes(params.probe_first_run.status ?? "")
+              ? `settled the model in ${params.probe_first_run.seconds} s (${params.probe_first_run.status}), so no start or added rows were needed`
+              : `${params.probe_first_run.seconds} s without a proof (${params.probe_first_run.status}); the steps ran, starting from what it found`} />}
+          {params.presolve && <Fact label="Before the solve" value={`${params.presolve.spent_s ?? 0} s of the ${params.presolve.budget_s ?? 0} s allowed for starts, implied rows and cuts`
+            + (params.presolve.skipped?.length ? `; skipped for want of time: ${params.presolve.skipped.join(", ")}` : "")} />}
           {params.choices && Object.keys(params.choices).length > 0 && <Fact label="Learnt from earlier runs"
             value={Object.values(params.choices).map((c) => c.why ?? "").filter(Boolean).join("; ")} />}
           {params.strengthen_run && <Fact label="Rows implied" value={params.strengthen_run.skipped

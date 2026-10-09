@@ -89,6 +89,7 @@ Rules are held by Deb's feasibility order; every answer is checked on every comp
 | Per-problem memory of the fastest solver | `memory.py` | setting `solve.memory` |
 | Learned solver selector (nearest neighbours on model fingerprints) | `selector.py` | shadow, or acting with `solve.selector_acts` |
 | On/off choices learnt per problem (starts, cuts) | `choices.py` | every run with history |
+| Escalation: the solver alone first, the steps before a solve only when it settles nothing | `service.py` | setting `solve.probe_first` (on) |
 | Bayesian optimisation of each solver's options per problem (Gaussian process, expected improvement) | `tuning.py` | every run with history; `solve.solver_params` overrides |
 | Infeasibility explanation (IIS, QuickXplain) | `diagnose.py` | infeasible runs |
 

@@ -42,7 +42,7 @@ LISTED_CELLS = 50
 #: The request keys a probe keeps from the plan's run: how it was solved, not what it found.
 _KEPT = ("time_limit_s", "workers", "gap_rel", "cpsat_scaling", "symmetry", "separable", "pdlp", "memory",
          "probe", "portfolio", "lns", "lagrangian", "local_fallback", "rolling_horizon", "decompose",
-         "connected_start", "metaheuristic", "network", "routing_start", "solver_params_setting", "tuned_from",
+         "connected_start", "metaheuristic", "network", "routing_start", "probe_first", "solver_params_setting", "tuned_from",
          "requested_solver", "robust", "classified_as", "why", "needs", "from_settings")
 
 

@@ -92,7 +92,7 @@ from tests.test_quadratic import empty_queue  # noqa: E402,F401
 from tests.test_v1_problem_run import db  # noqa: E402,F401
 
 
-def test_a_run_of_a_fixed_charge_model_starts_from_slope_scaling(db, empty_queue):  # noqa: F811
+def test_a_run_of_a_fixed_charge_model_starts_from_slope_scaling(db, empty_queue, steps_first):  # noqa: F811
     from sqlalchemy import text
 
     from tests.test_run_events import _run
