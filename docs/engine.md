@@ -220,7 +220,17 @@ the capacity-aware one above, so the start keeps every row. A 14×14 grid with p
 that must be served: HiGHS alone finds no answer in 60 s and CP-SAT -707; the start gives -1,033 in 19 s, and
 CP-SAT from it reaches -1,148. On a
 9×9 grid HiGHS with the start ends at -1,190 against -1,177 without. Without sources, the Steiner start (with
-`overloaded`) is kept. Before
+`overloaded`) is kept.
+
+**Cuts the rule adds itself.** The flow rows are exact but their relaxation is loose, so the rule also writes
+rows every answer keeps (the optimum is unchanged): each joined place but a source (or the root) has a built link
+at it; joining k such places takes at least k links; with capacities, the links at a place cover its need
+(`sum(min(capacity, need) * build) >= need`, a link counting no more than the need it could carry in), and the
+links leaving the sources and their first, second and third rings of neighbours cover the demand beyond (the same
+strengthening when every place is fed; the plain capacity sum against the used places' demand with `use`). The
+compiled rule records how many (`cuts`). With HiGHS for 60 s: a 10×10 capacitated grid closes from a 28.5% gap to
+3.2%, an 18×18 one from 34% to 11% (and finds 23,175 instead of 23,659), and the 14×14 grid with prizes has its
+bound raised from -2,609 to -1,814. `app.solve.join.CUTS` turns them off only to measure this. Before
 any of this, a maximum flow with every link built checks that the demand can be carried at all: when it cannot,
 the run is refused with the shortfall ("at most 285 of the 303 ... can reach them").
 

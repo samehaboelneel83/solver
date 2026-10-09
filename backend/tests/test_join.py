@@ -597,3 +597,33 @@ def test_with_use_the_start_chooses_places_that_pay_and_keeps_every_row(seed):
     ours, best = float(compiled.objective.evaluated_at(values)), float(result.objective)
     assert ours == pytest.approx(record["estimate"])
     assert best - 1e-6 <= ours <= best + 0.25 * abs(best) + 10, (seed, ours, best)
+
+
+def _relaxed_bound(compiled):
+    from dataclasses import replace
+
+    from app.solve.compile import Variable
+
+    loose = {k: Variable(k, "continuous", v.lower, v.upper) for k, v in compiled.variables.items()}
+    result = _mip(replace(compiled, variables=loose))
+    assert result.status == "optimal"
+    return float(result.objective)
+
+
+@pytest.mark.parametrize("shape", ["capacitated", "chosen places"])
+def test_the_cuts_raise_the_relaxations_bound_and_leave_the_optimum(shape, monkeypatch):
+    if shape == "capacitated":
+        rnd = random.Random(2)
+        places, links = _graph(9, 77, extra=0.4)
+        links = [(l, a, b, abs(c) + 5) for l, a, b, c in links]
+        need = {p: rnd.randint(1, 5) for p in places if p != "p0"}
+        cap = {l: rnd.choice([6, 12]) for l, *_ in links}
+        made = lambda: compile_model(*_capacitated(places, links, {"p0"}, need, cap))  # noqa: E731
+    else:
+        made = lambda: compile_model(*_prize_capacitated(3, n=8))  # noqa: E731
+    with_cuts = made()
+    monkeypatch.setattr(join, "CUTS", False)
+    without = made()
+    assert with_cuts.joins[0]["cuts"] > len(with_cuts.joins[0]["places"]) // 2 and without.joins[0]["cuts"] == 0
+    assert _relaxed_bound(with_cuts) > _relaxed_bound(without) + 1e-6
+    assert round(float(_mip(with_cuts).objective)) == round(float(_mip(without).objective))

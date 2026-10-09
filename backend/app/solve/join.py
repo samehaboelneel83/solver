@@ -40,6 +40,8 @@ from app.solve.compile import Compiled, VarKey
 FLOW, ROOT, DEMAND = "__join_flow", "__join_root", "__join_demand"
 #: The share of the run's time the start may take, and its ceiling in seconds.
 SHARE, CEILING = 0.2, 30.0
+#: Whether the rule adds its cuts (degree, link count, cut-sets). Always on; off only to measure what they bring.
+CUTS = True
 #: The node standing for "any source": joined to every source at no cost, so a forest is one spanning tree.
 SUPER = "\x00sources"
 
@@ -249,11 +251,36 @@ def expand(compiler: Any, spec: dict[str, Any]) -> None:
         if root is not None:
             balance.add(Linear(coeffs={root[p]: n + one}))
         row({place_index: p}, balance, ">=")
+    # Cuts the flow implies but its relaxation does not see (each holds at every answer, so the optimum is
+    # unchanged): every joined place but a source (or the root) has a built link at it, and joining k such places
+    # takes at least k links.
+    at: dict[str, list[VarKey]] = {p: [] for p in places}
+    for link, (a, b) in ends.items():
+        if a != b:
+            at[a].append(build[link])
+            at[b].append(build[link])
+    cuts = 0
+    every = Linear(coeffs={k: one for k in build.values()})
+    for p in (places if CUTS else []):
+        if sources is not None and p in sources:
+            continue
+        degree = Linear(coeffs={k: one for k in at[p]}).add(x(p), factor=-1)
+        if root is not None:
+            degree.add(Linear(coeffs={root[p]: one}))
+        row({place_index: p}, degree, ">=")
+        cuts += 1
+        every.add(x(p), factor=-1)
+        if root is not None:
+            every.add(Linear(coeffs={root[p]: one}))
+    if CUTS:
+        row({}, every, ">=")
+        cuts += 1
     demand = _demand(compiler, spec, places, links, ends, build, sources, x, row) if body.get("demand") else None
+    cuts += (demand or {}).get("cuts", 0)
     compiler.connectivity.append(rule)
     compiler.joins.append({
         "rule": rule, "build": build, "use": use, "ends": ends, "places": places, "sources": sources,
-        "flow": flow, "root": root, "unusable": len(unusable), "unreachable": len(unreachable),
+        "flow": flow, "root": root, "unusable": len(unusable), "unreachable": len(unreachable), "cuts": cuts,
         **(demand or {"need": None, "dflow": {}, "capacity": {}, "supply": {}, "carry": None}),
     })
 
@@ -328,7 +355,64 @@ def _demand(compiler: Any, spec: dict[str, Any], places, links, ends, build, sou
             row({place_index: p}, into[p].copy().add(x(p), factor=-need[p]), ">=")
         else:
             row({place_index: p}, into[p].copy(), ">=")
-    return {"need": need, "dflow": dflow, "capacity": cap, "supply": supply, "carry": carry}
+    cuts = _capacity_cuts(rule, link_index, place_index, places, ends, build, sources, need, cap, x, row,
+                          fixed=body.get("use") is None) if cap and CUTS else 0
+    return {"need": need, "dflow": dflow, "capacity": cap, "supply": supply, "carry": carry, "cuts": cuts}
+
+
+def _capacity_cuts(rule, link_index, place_index, places, ends, build, sources, need, cap, x, row, *, fixed: bool,
+                   rings: int = 3) -> int:
+    """Cut-set rows of a capacitated design: the built links leaving a set of places that holds every source
+    carry at most their capacities, so together they must cover the demand outside it. For the place itself
+    (the set: every place but p) each link counts at most p's need -- a link carries no more into p than it
+    needs, so sum(min(cap, need) * build) >= need -- and for the sets grown from the sources ring by ring (one,
+    two, three links out) the same when every place must be fed (the demand outside is then a number). Valid at
+    every answer, so the optimum is unchanged; the relaxation's bound rises."""
+    from app.solve.compile import Linear
+
+    one = Decimal(1)
+    total_cap = sum(cap.values(), Decimal(0))
+    cuts = 0
+    at: dict[str, list[str]] = {p: [] for p in places}
+    for link, (a, b) in ends.items():
+        if a != b:
+            at[a].append(link)
+            at[b].append(link)
+    for p, d in need.items():
+        if not d:
+            continue
+        cover = Linear(coeffs={})
+        for link in at[p]:
+            cover.add(Linear(coeffs={build[link]: min(cap.get(link, d), d)}))
+        if cover.coeffs:
+            row({place_index: p}, cover.add(x(p), factor=-d), ">=")
+            cuts += 1
+    # Rings out from the sources.
+    inside = set(sources)
+    for _ in range(rings):
+        border = [l for l, (a, b) in ends.items() if (a in inside) != (b in inside)]
+        outside = [p for p in places if p not in inside]
+        if not border or not outside:
+            break
+        if fixed:
+            d = sum((need.get(p, Decimal(0)) for p in outside), Decimal(0))
+            if d <= 0:
+                break
+            left = Linear(coeffs={})
+            for l in border:
+                left.add(Linear(coeffs={build[l]: min(cap.get(l, d), d)}))
+            row({}, left, ">=", Linear(const=d))
+        else:
+            left = Linear(coeffs={})
+            for l in border:
+                left.add(Linear(coeffs={build[l]: cap.get(l, total_cap)}))
+            for p in outside:
+                if need.get(p):
+                    left.add(x(p), factor=-need[p])
+            row({}, left, ">=")
+        cuts += 1
+        inside |= {q for l in border for q in ends[l]}
+    return cuts
 
 
 # --- the exact graph lane: a minimum spanning tree or forest -------------------------------------------------

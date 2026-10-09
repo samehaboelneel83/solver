@@ -777,7 +777,10 @@ holds what each link carries, so the goal can price it per unit and other rules 
 takes (or limits) nothing; a negative or non-numeric value is refused. Whole numbers keep the flow whole. A demand
 without a capacity, supply or carry is still a spanning forest; with any of them it is solved as a MIP, starting
 from a capacity-aware design (min-cost flows with slope scaling, then links dropped). When every place must be
-fed and even every link built cannot carry the demand, the run is refused with the shortfall.
+fed and even every link built cannot carry the demand, the run is refused with the shortfall. The compiled rule also
+carries cuts every answer keeps (a built link at each joined place, at least as many links as places joined, and
+with capacities the links at each place and around the sources covering the demand): they change no answer and
+tighten the solver's bound.
 
 Refusals, all `shape` but the last three:
 
