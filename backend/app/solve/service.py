@@ -2301,36 +2301,49 @@ def _time_set(db: Session, run_id: int, compiled: Compiled) -> str | None:
 LOCAL_SHARE = 0.25
 #: The metaheuristic's share of the run's time after an exact solver ended with nothing (queue R14).
 SEARCH_SHARE = 0.25
-#: Which search, by what the model decides: set by bench/results/2026-09-25-metaheuristics.md.
-SEARCH_CONTINUOUS, SEARCH_WHOLE = "ga", "ga"
+#: The searches tried after an exact solver ended with nothing, in order of preference (the first `workers` of
+#: those that take the model run at once, one thread each): whole-number models, and continuous ones.
+SEARCH_WHOLE = ("tabu", "sa", "ga", "de", "aco")
+SEARCH_CONTINUOUS = ("cma-es", "de", "pso", "sa", "ga", "aco", "tabu")
 
 
 def _metaheuristic_fallback(compiled, found, backend, result, *, hint, time_limit: float, seed, workers: int,
                             should_stop):
-    """After an exact solver ended with no answer: a metaheuristic's, which keeps every rule and claims
-    nothing -- `feasible`, no bound. Nothing found, or a model it cannot search, leaves the run as it was."""
+    """After an exact solver ended with no answer: the searches race at once (one thread each), and the best
+    answer that keeps every rule is the run's -- `feasible`, no bound, claiming nothing. Nothing found, or no
+    search that takes the model, leaves the run as it was."""
     from app.solve.backends import by_name
 
     whole = any(v.is_integral for v in compiled.variables.values())
-    method = SEARCH_WHOLE if whole else SEARCH_CONTINUOUS
-    searcher = by_name(method)
-    if found.model_class not in searcher.classes or (found.needs - searcher.provides):
-        return result, backend, {"used": False, "why": f"{method} cannot take a {found.model_class} model like this"}
+    order = SEARCH_WHOLE if whole else SEARCH_CONTINUOUS
+    takes = [m for m in order if found.model_class in by_name(m).classes and not (found.needs - by_name(m).provides)]
+    if not takes:
+        return result, backend, {"used": False, "why": f"no search takes a {found.model_class} model like this"}
+    methods = takes[:max(1, workers)]
     seconds = max(1.0, SEARCH_SHARE * time_limit)
-    try:
-        searched, _ = sandbox.run(
-            "app.solve.sandbox:solve_in_child",
-            {"backend": method, "compiled": compiled, "time_limit": seconds, "seed": seed, "workers": workers,
-             "gap_rel": 0.0, "hint": hint},
-            time_limit=seconds, workers=workers, should_stop=should_stop,
-        )
-    except (Unsupported, NotContinuous, sandbox.SandboxFailed) as exc:
-        return result, backend, {"used": False, "why": str(exc)}
-    record = {"used": True, "method": method, "after": backend.name, "seconds": seconds, "status": searched.status,
-              "objective": searched.objective}
-    if not searched.assignments:
-        return result, backend, {**record, "kept": False}
-    return searched, searcher, {**record, "kept": True}
+
+    def one(method: str, limit: float, share: int, _stop_others):
+        try:
+            return sandbox.run(
+                "app.solve.sandbox:solve_in_child",
+                {"backend": method, "compiled": compiled, "time_limit": limit, "seed": seed, "workers": share,
+                 "gap_rel": 0.0, "hint": hint},
+                time_limit=limit, workers=share, should_stop=should_stop,
+            )[0]
+        except (Unsupported, NotContinuous, sandbox.SandboxFailed):
+            return Solution("unknown", False, None, {}, 0.0, method)
+
+    outcomes, raced = race_rows._all_at_once(methods, one, seconds, max(workers, len(methods)), frozenset())
+    answered = [m for m in methods if outcomes[m].assignments and outcomes[m].objective is not None]
+    record = {"used": True, "methods": methods, "after": backend.name, "seconds": seconds, "raced": raced}
+    if not answered:
+        return result, backend, {**record, "method": methods[0], "status": "unknown", "objective": None,
+                                 "kept": False}
+    sign = 1.0 if compiled.sense == "minimize" else -1.0
+    won = min(answered, key=lambda m: sign * float(outcomes[m].objective))
+    searched = outcomes[won]
+    record.update(method=won, status=searched.status, objective=searched.objective, kept=True)
+    return searched, by_name(won), record
 
 
 def _local_fallback(compiled, found, backend, result, *, time_limit: float, seed, workers: int, should_stop):

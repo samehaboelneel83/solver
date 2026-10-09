@@ -277,6 +277,11 @@ def _why_it_died(exitcode: int | None, limits: dict) -> str:
         # A native allocation failing under RLIMIT_AS aborts rather than
         # raising MemoryError.
         return f"the solver crashed ({name}); the memory limit is {limits['memory_mb']} MB"
+    if exitcode:
+        # Ended with an error it could not report: under a memory ceiling, most often sending the error itself
+        # needed memory the ceiling refused (seen under load, October 2026).
+        return (f"the solver process ended without an answer (exit code {exitcode}); the memory limit is "
+                f"{limits['memory_mb']} MB")
     return f"the solver process ended without an answer (exit code {exitcode})"
 
 

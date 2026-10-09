@@ -52,13 +52,15 @@ class Point:
     solution: Solution
 
 
-def admissible(compiled: Compiled) -> None:
+def admissible(compiled: Compiled, *, searched: bool = True) -> None:
+    """Whether a front can be drawn. With `searched`, a goal that multiplies decisions is drawn by NSGA-II
+    (`app.solve.evolve.nsga2`) rather than refused."""
     if len(compiled.objective_terms) != 2:
         raise NotTwoGoals(
             f"a trade-off front is between two goals, and this model's goal has "
             f"{len(compiled.objective_terms)} terms"
         )
-    if compiled.objective_quadratic:
+    if compiled.objective_quadratic and not searched:
         raise NotTwoGoals("a trade-off front is drawn for linear goals; this one multiplies decisions")
     if compiled.violations:
         raise NotTwoGoals(
@@ -72,6 +74,8 @@ def front(backend, compiled: Compiled, *, steps: int, time_limit: float, solve) 
     ordered by the first term. `solve(compiled, time_limit)` is one solve
     (`solve_compiled`, bound to the backend and its knobs by the caller)."""
     admissible(compiled)
+    if compiled.objective_quadratic:
+        return searched_front(compiled, steps=steps, time_limit=time_limit)
     sign = Decimal(1) if compiled.sense == "minimize" else Decimal(-1)
     # Each goal its own way, then both minimised (benchmark round 5: "less water" was drawn as "more").
     from app.solve.compile import directed_terms
@@ -133,3 +137,28 @@ def front(backend, compiled: Compiled, *, steps: int, time_limit: float, solve) 
     for point in points:
         unique.setdefault((round(point.first, 6), round(point.second, 6)), point)
     return sorted(unique.values(), key=lambda p: (p.first * float(sign), p.second * float(sign)))
+
+
+def searched_front(compiled: Compiled, *, steps: int, time_limit: float, seed: int | None = 1) -> list[Point]:
+    """The front of a goal no exact solve takes as two linear terms (one multiplies decisions): NSGA-II's final
+    front, thinned to at most `steps + 1` points spread along the first term. Each point keeps every rule and
+    is `feasible` -- found, not proven on the front."""
+    from app.solve.evolve import nsga2
+    from app.solve.result import Solution
+
+    found = nsga2(compiled, time_limit=time_limit, seed=seed)
+    if not found:
+        return []
+    sign = 1.0 if compiled.sense == "minimize" else -1.0
+    found.sort(key=lambda item: (sign * item[1][0], sign * item[1][1]))
+    if len(found) > steps + 1:
+        picks = sorted({round(k * (len(found) - 1) / steps) for k in range(steps + 1)})
+        found = [found[k] for k in picks]
+    points = []
+    for values, (a, b) in found:
+        objective = float(compiled.objective.evaluated_at(values)) + sum(
+            float(c) * float(values.get(x, 0)) * float(values.get(y, 0))
+            for (x, y), c in compiled.objective_quadratic.items())
+        solution = Solution("feasible", False, objective, values, 0.0, "nsga2")
+        points.append(Point(a, b, None, "feasible", solution))
+    return points

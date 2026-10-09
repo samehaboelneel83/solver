@@ -119,7 +119,7 @@ def test_a_newer_published_version_is_named_with_the_way_to_move(scenario, db, a
 def test_the_solver_list_says_which_the_rules_really_choose(auth_headers):  # noqa: F811
     items = {s["name"]: s for s in TestClient(app).get("/api/v1/solvers", headers=auth_headers).json()["items"]}
     assert items["cp-sat"]["chosen_unasked"] is True
-    for local in ("ipopt", "cma-es", "pso", "ga"):
+    for local in ("ipopt", "cma-es", "pso", "ga", "sa", "tabu", "de", "aco"):
         assert items[local]["chosen_unasked"] is False, local
     assert items["benders"]["chosen_unasked"] is False
 

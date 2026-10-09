@@ -629,6 +629,50 @@ GA = Backend(
     planner_choice="A search over whole answers will take this; its answer keeps every rule but is not proven the best.",
 )
 
+SA = Backend(
+    name="sa",
+    classes=_CONTINUOUS_CLASSES | {"IP", "MILP", "MIQP", "MIQCQP", "MINLP"},
+    provides=_SEARCHED | {"integral", "connected", "bilinear-binary"},
+    rank=8,
+    solve=_evolve("sa"),
+    proves="local",
+    note="simulated annealing; one answer and its neighbours, cooling with reheats -- an answer, never proven best",
+    planner_choice="A search over whole answers will take this; its answer keeps every rule but is not proven the best.",
+)
+
+TABU = Backend(
+    name="tabu",
+    classes=_CONTINUOUS_CLASSES | {"IP", "MILP", "MIQP", "MIQCQP", "MINLP"},
+    provides=_SEARCHED | {"integral", "connected", "bilinear-binary"},
+    rank=9,
+    solve=_evolve("tabu"),
+    proves="local",
+    note="tabu search; the best move not recently made, with aspiration -- an answer, never proven best",
+    planner_choice="A search over whole answers will take this; its answer keeps every rule but is not proven the best.",
+)
+
+DE = Backend(
+    name="de",
+    classes=_CONTINUOUS_CLASSES | {"IP", "MILP", "MIQP", "MIQCQP", "MINLP"},
+    provides=_SEARCHED | {"integral", "connected", "bilinear-binary"},
+    rank=10,
+    solve=_evolve("de"),
+    proves="local",
+    note="differential evolution (JADE); vectors bred by difference -- an answer, never proven best",
+    planner_choice="A search over whole answers will take this; its answer keeps every rule but is not proven the best.",
+)
+
+ACO = Backend(
+    name="aco",
+    classes=_CONTINUOUS_CLASSES | {"IP", "MILP", "MIQP", "MIQCQP", "MINLP"},
+    provides=_SEARCHED | {"integral", "connected", "bilinear-binary"},
+    rank=11,
+    solve=_evolve("aco"),
+    proves="local",
+    note="ant colony optimisation (ACO_R); an archive of the best answers as pheromone -- an answer, never proven best",
+    planner_choice="A search over whole answers will take this; its answer keeps every rule but is not proven the best.",
+)
+
 def _networkx_solve(
     compiled: Compiled,
     *,
@@ -717,7 +761,7 @@ LAYOUT = Backend(
     planner_choice="The placement solver will lay the items out on the drawing's grid, without listing positions.",
 )
 
-BUILT_IN: tuple[Backend, ...] = (CP_SAT, GLOP, HIGHS, MILP, SCIP, PDLP, IPOPT, CMA_ES, PSO, GA, BENDERS, COLGEN,
+BUILT_IN: tuple[Backend, ...] = (CP_SAT, GLOP, HIGHS, MILP, SCIP, PDLP, IPOPT, CMA_ES, PSO, GA, SA, TABU, DE, ACO, BENDERS, COLGEN,
                                  NETWORKX, LAYOUT)
 
 
@@ -731,7 +775,7 @@ def _with_adapters() -> tuple[Backend, ...]:
 
 REGISTRY: tuple[Backend, ...] = _with_adapters()
 #: The searches: they never say `optimal`, `infeasible` or `unbounded` -- an answer, or none.
-SEARCHES = frozenset({CMA_ES.name, PSO.name, GA.name})
+SEARCHES = frozenset({CMA_ES.name, PSO.name, GA.name, SA.name, TABU.name, DE.name, ACO.name})
 
 
 class NoBackend(Exception):

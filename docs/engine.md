@@ -225,6 +225,18 @@ tried it off and did not prove, where every run with it did, turns it back on at
 choices and why (`params.choices`, "Learnt from earlier runs" on the run page); setting `learn_choices` turns the
 learning off. The greedy start stays always on: it takes a moment and is what keeps a run from ending empty.
 
+## More searches, raced; NSGA-II fronts (9 October 2026)
+
+The metaheuristic lane (`app/solve/evolve.py`) adds simulated annealing (`sa`), tabu search (`tabu`), differential
+evolution (`de`, JADE) and ant colony optimisation (`aco`, ACO_R / ACO_MV) to the genetic algorithm, particle swarm
+and CMA-ES. All take mixed decisions except PSO and CMA-ES (continuous), share Deb's feasibility order and the
+compiled model's own evaluation, and never claim an optimum. After an exact solver ends with nothing
+(`solve.metaheuristic`), the searches that take the model race at once, one thread each (tabu, sa, ga, de, aco for
+whole-number models; cma-es, de, pso, sa, ga, aco, tabu for continuous ones, the first `workers` of them), and the
+best answer keeping every rule is the run's (`metaheuristic_run.raced`). A two-goal front whose goal multiplies
+decisions, which no exact epsilon-constraint solve takes, is drawn by NSGA-II (`evolve.nsga2`), each point
+`feasible`. The full map of techniques is `docs/techniques.md`.
+
 ## NetworkX as a solver
 
 NetworkX (BSD licence, `networkx==3.6.1`) is in the image and used two ways.

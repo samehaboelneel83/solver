@@ -161,19 +161,27 @@ const SEARCH_NAMES: Record<string, string> = {
   ga: "a genetic algorithm",
   "cma-es": "an evolution strategy (CMA-ES)",
   pso: "a particle swarm",
+  sa: "simulated annealing",
+  tabu: "a tabu search",
+  de: "differential evolution",
+  aco: "an ant colony",
 };
 
 /** What `solve.metaheuristic` (queue R14) did after the exact solver ended with nothing. */
 export type MetaheuristicRecord =
-  | { used: true; method: string; after: string; seconds: number; status: string; objective: number | null; kept: boolean; exact_failed?: string }
+  | { used: true; method: string; after: string; seconds: number; status: string; objective: number | null; kept: boolean; exact_failed?: string;
+      methods?: string[]; raced?: { solver: string; status: string; objective: number | null }[] }
   | { used: false; why: string };
 
 export function metaheuristicText(record: MetaheuristicRecord): string {
   if (!record.used) return `not searched: ${record.why}`;
   const method = SEARCH_NAMES[record.method] ?? record.method;
+  const others = (record.raced ?? []).filter((r) => r.solver !== record.method)
+    .map((r) => `${SEARCH_NAMES[r.solver] ?? r.solver} ${r.objective === null ? "found nothing" : r.objective.toLocaleString()}`);
+  const raced = (record.methods?.length ?? 0) > 1 ? ` (best of ${record.methods!.length} searches at once${others.length ? `; ${others.join(", ")}` : ""})` : "";
   return record.kept
-    ? `${method} for ${record.seconds}s after ${record.after} ended with no answer`
-    : `${method} for ${record.seconds}s after ${record.after}: nothing that keeps every rule`;
+    ? `${method} for ${record.seconds}s after ${record.after} ended with no answer${raced}`
+    : `${record.methods && record.methods.length > 1 ? `${record.methods.length} searches` : method} for ${record.seconds}s after ${record.after}: nothing that keeps every rule`;
 }
 
 /** What the platform computed from the map for this run (queue R16a), in a line per input. */
