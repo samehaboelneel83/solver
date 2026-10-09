@@ -46,10 +46,39 @@ def manifest(path: Path) -> dict:
         return json.load(handle)
 
 
-def head(path: Path, limit: int) -> list[dict]:
+def tables(manifest: dict) -> list[dict]:
+    """The tables an extraction holds, the first first: each {file, source_object, columns, rows, sha256, ...}. A
+    one-table extraction is its manifest's own fields in `rows.jsonl`."""
+    listed = manifest.get("tables")
+    if listed:
+        return list(listed)
+    return [{"file": "rows.jsonl", **{k: manifest.get(k) for k in ("source_object", "columns", "rows", "sha256",
+                                                                     "changed_column", "high_water", "since")
+                                      if manifest.get(k) is not None}}]
+
+
+def table(manifest: dict, name: str | None) -> dict:
+    """One table of an extraction by its name; the first when no name is given."""
+    found = tables(manifest)
+    if not name:
+        return found[0]
+    for entry in found:
+        if entry.get("source_object") == name:
+            return entry
+    raise ArtifactUnavailable(f"this extraction has no table {name!r}")
+
+
+def _file(path: Path, name: str) -> Path:
+    target = (path / name).resolve()
+    if target.parent != path or not target.name.startswith("rows") or not target.is_file():
+        raise ArtifactUnavailable("the extracted files are no longer in storage; run the extraction again")
+    return target
+
+
+def head(path: Path, limit: int, file: str = "rows.jsonl") -> list[dict]:
     """The first `limit` rows, for a preview."""
     rows: list[dict] = []
-    with (path / "rows.jsonl").open("rb") as handle:
+    with _file(path, file).open("rb") as handle:
         for line in handle:
             if len(rows) >= limit:
                 break
@@ -57,11 +86,11 @@ def head(path: Path, limit: int) -> list[dict]:
     return rows
 
 
-def verified_rows(path: Path, expected_sha256: str, max_rows: int) -> list[dict]:
+def verified_rows(path: Path, expected_sha256: str, max_rows: int, file: str = "rows.jsonl") -> list[dict]:
     """Every row, checked against the manifest's hash. Raises `ArtifactChanged` if they differ."""
     digest = hashlib.sha256()
     rows: list[dict] = []
-    with (path / "rows.jsonl").open("rb") as handle:
+    with _file(path, file).open("rb") as handle:
         for line in handle:
             digest.update(line)
             if len(rows) >= max_rows:

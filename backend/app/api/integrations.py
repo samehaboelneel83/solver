@@ -15,6 +15,20 @@ from app.integrations.policy import source_for
 router = APIRouter(prefix="/api/v1", tags=["integrations"])
 
 
+class TableBody(BaseModel):
+    """A further table of the same database, read with the source's first (a sheet of its own)."""
+    model_config = ConfigDict(extra="forbid")
+    table: str = Field(min_length=1, max_length=128)
+    columns: list[str] = Field(min_length=1, max_length=200)
+    changed_column: str = Field(default="", max_length=128)
+
+    @model_validator(mode="after")
+    def _changed_is_read(self):
+        if self.changed_column and self.changed_column not in self.columns:
+            raise ValueError(f"changed_column must be one of {self.table}'s columns")
+        return self
+
+
 class SourceBody(BaseModel):
     """A table or view in a database (app/integrations/postgres.py, databases.py). For Oracle, `database` is the
     service name and `schema` the owner; for MySQL / MariaDB, `schema` is the database the table is in."""
@@ -29,11 +43,16 @@ class SourceBody(BaseModel):
     columns: list[str] = Field(min_length=1, max_length=200)
     changed_column: str = Field(default="", max_length=128, description="a column that grows when a row changes "
                                 "(an update time or a version), one of `columns`: lets a read take only what changed")
+    more_tables: list[TableBody] = Field(default_factory=list, max_length=20, description="further tables of the same "
+                                         "database and schema, read with this one: one extraction, a sheet per table")
 
     @model_validator(mode="after")
     def _changed_is_read(self):
         if self.changed_column and self.changed_column not in self.columns:
             raise ValueError("changed_column must be one of the columns read")
+        names = [self.table, *(t.table for t in self.more_tables)]
+        if len(set(names)) != len(names):
+            raise ValueError("a table is named twice")
         return self
 
 
@@ -44,8 +63,13 @@ class HttpSourceBody(BaseModel):
     url: str = Field(min_length=9, max_length=2000, pattern=r"^https://")
     format: Literal["json", "csv", "xlsx"]
     columns: list[str] = Field(min_length=1, max_length=200)
-    auth: Literal["none", "bearer", "basic"] = "none"
+    auth: Literal["none", "bearer", "basic", "oauth_client"] = "none"
     username: str = Field(default="", max_length=128)
+    token_url: str = Field(default="", max_length=2000, description="oauth_client: the https:// token address")
+    client_id: str = Field(default="", max_length=256, description="oauth_client: the client id; the secret is the credential")
+    scope: str = Field(default="", max_length=1000)
+    audience: str = Field(default="", max_length=1000, description="oauth_client: the API's name, for providers that ask for it")
+    client_auth: Literal["basic", "post"] = Field(default="basic", description="oauth_client: the secret as HTTP Basic, or in the form")
     sheet: str = Field(default="", max_length=128)
     records_at: str = Field(default="", max_length=200, description='dotted path to the list in a JSON answer, e.g. "data.items"')
     paging: Literal["none", "next_link", "link_header", "page_number"] = "none"
@@ -55,6 +79,11 @@ class HttpSourceBody(BaseModel):
 
     @model_validator(mode="after")
     def _paging_is_whole(self):
+        if self.auth == "oauth_client":
+            if not self.token_url.startswith("https://") or not self.client_id.strip():
+                raise ValueError("client-credential sign-in needs token_url (https://) and client_id")
+        elif self.token_url or self.client_id:
+            raise ValueError("token_url and client_id are for client-credential sign-in (auth: oauth_client)")
         if self.paging != "none" and self.format != "json":
             raise ValueError("pages are read for a JSON answer only")
         if self.paging == "next_link" and not self.next_at.strip():
@@ -173,7 +202,9 @@ def submit(identity: int, body: JobBody | None = None, db: Session = Depends(get
     if not row["enabled"]:
         raise HTTPException(409, "Connection is disabled")
     incremental = bool(body and body.incremental)
-    if incremental and not (row["config"] or {}).get("changed_column"):
+    config = row["config"] or {}
+    if incremental and not (config.get("changed_column") or any(
+            (t or {}).get("changed_column") for t in config.get("more_tables") or [])):
         raise HTTPException(422, "This source names no changed column (an update time or a version), so it can only be "
                                  "read whole")
     try:

@@ -157,7 +157,9 @@ class _Lp:
     def run(self, left: float) -> str:
         from app.solve.highs import _has_solution, _status
 
-        self.h.setOptionValue("time_limit", max(0.01, float(left)))
+        # HiGHS counts its time limit against all the run time of one solver, not each solve's: a limit of what is
+        # left overall stopped later rounds early once the rounds before had used it.
+        self.h.setOptionValue("time_limit", self.h.getRunTime() + max(0.01, float(left)))
         self.h.solve()
         status = _status(self.h.getModelStatus())
         if status == "feasible" and not _has_solution(self.h):

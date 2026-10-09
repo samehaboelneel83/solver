@@ -511,7 +511,7 @@ def test_a_layout_step_the_model_chose_that_is_too_fine_points_to_the_one_that_f
             raise layout.LayoutRefused("this layout needs 383,808 occupies links")
         return {"grid_step_m": 1.0, "candidates": 12008, "upper_bound": {"items": 828}, "files": [], "spec": {}}
 
-    monkeypatch.setattr(layout, "make", fake)
+    monkeypatch.setattr(layout, "generated", fake)
     agent = core.Agent(core.Settings(), agent_api._index, lambda *a, **k: {"ok": True}, core.Context("x", mode="model"))
     said = agent._make_layout({"area_layers": ["BOUNDARY"], "items": [{"name": "bed", "length": 2, "width": 1}],
                                "aisle": 1, "step": 0.5, "form": "candidates"})

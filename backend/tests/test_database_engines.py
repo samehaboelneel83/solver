@@ -183,3 +183,43 @@ def test_a_snapshot_keeps_the_highest_changed_value_and_the_mark_it_read_from(tm
     assert manifest["high_water"] == "2026-10-08T11:30:00" and manifest["since"] == "2026-10-08T09:00:00"
     with pytest.raises(ValueError):
         ExtractionRequest(org, 9, "staff", ("id",), ExtractionLimits(), since_column="updated_at")
+
+
+def test_one_source_reads_several_tables_each_into_its_own_file(tmp_path, monkeypatch):
+    """Several tables of one database as one source: one extraction, a rows file and a manifest entry per table;
+    the first stays where a one-table extraction keeps it."""
+    import json
+
+    from app.integrations import artifacts
+    from app.integrations.contracts import ConnectorCapabilities
+    from app.integrations.snapshots import stage_snapshot
+
+    monkeypatch.setenv("OAAS_INTEGRATION_NETWORKS", "10.0.0.0/8")
+    monkeypatch.setenv("OAAS_INTEGRATION_CA", "/ca.pem")
+    source = _source("postgres", more_tables=[{"table": "shifts", "columns": ["id", "hours"]},
+                                              {"table": "sites", "columns": ["site"], "changed_column": "site"}])
+    assert [t for t, _, _ in source.tables()] == ["products", "shifts", "sites"]
+    assert source.columns_of("shifts") == ("id", "hours") and source.columns_of("other") is None
+    with pytest.raises(ValueError):
+        _source("postgres", more_tables=[{"table": "products", "columns": ["id"]}])  # named twice
+
+    class Rows:
+        capabilities = ConnectorCapabilities("fake", "1")
+        source_schema: list = []
+
+        def extract(self, request, cancelled):
+            yield from ({c: f"{request.source_object}-{c}-{n}" for c in request.columns} for n in range(2))
+
+    org = uuid4()
+    first = ExtractionRequest(org, 9, "staff", ("id",), ExtractionLimits())
+    more = (ExtractionRequest(org, 9, "shifts", ("id", "hours"), ExtractionLimits()),)
+    folder = stage_snapshot(tmp_path, Rows(), first, Event(), more)
+    manifest = json.loads((folder / "manifest.json").read_text())
+    assert manifest["source_object"] == "staff" and manifest["rows"] == 2
+    tables = artifacts.tables(manifest)
+    assert [(t["source_object"], t["file"]) for t in tables] == [("staff", "rows.jsonl"), ("shifts", "rows-2.jsonl")]
+    shifts = artifacts.table(manifest, "shifts")
+    rows = artifacts.verified_rows(folder, shifts["sha256"], 10, shifts["file"])
+    assert rows[0] == {"id": "shifts-id-0", "hours": "shifts-hours-0"}
+    with pytest.raises(artifacts.ArtifactUnavailable):
+        artifacts.table(manifest, "nowhere")

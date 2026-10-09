@@ -242,3 +242,31 @@ def test_a_refresh_from_an_incremental_read_adds_and_updates_but_takes_nothing_a
     active = db.execute(text("SELECT count(*) FROM entity e JOIN entity_type t ON t.id = e.entity_type_id"
                              " WHERE t.name = :k AND e.active"), {"k": kind}).scalar_one()
     assert active == 3  # n2 and n3 kept
+
+
+def test_a_source_of_two_tables_is_two_sheets_and_each_can_be_previewed(extracted, db):  # noqa: F811
+    """One source, several tables: the refresh reads a sheet per table, and the preview and import name one."""
+    import hashlib
+
+    client, tenants, connection, _, job, root = extracted
+    staff = job(FIRST)
+    artifact, org = db.execute(text("SELECT artifact_id, organization_id FROM ingestion_job WHERE id = :j"),
+                               {"j": staff}).one()
+    folder = root / str(org) / str(connection) / str(artifact)
+    rows = [{"site": "S1", "beds": 4}, {"site": "S2", "beds": 6}]
+    lines = b"".join((json.dumps(r, sort_keys=True, separators=(",", ":")) + "\n").encode() for r in rows)
+    (folder / "rows-2.jsonl").write_bytes(lines)
+    manifest = json.loads((folder / "manifest.json").read_text())
+    manifest["tables"] = [{"file": "rows.jsonl", "source_object": "staff", "columns": manifest["columns"],
+                           "rows": manifest["rows"], "sha256": manifest["sha256"]},
+                          {"file": "rows-2.jsonl", "source_object": "sites", "columns": ["site", "beds"], "rows": 2,
+                           "sha256": hashlib.sha256(lines).hexdigest()}]
+    (folder / "manifest.json").write_text(json.dumps(manifest))
+    sheet = client.get(f"/api/v1/agent/sources/{staff}/file", headers=tenants["a"]).json()
+    assert [s["name"] for s in sheet["sheets"]] == ["staff", "sites"] and sheet["sheets"][1]["rows"][1][1] in (6, "6")
+    second = client.get(f"/api/v1/ingestion-jobs/{staff}/preview?table=sites", headers=tenants["a"]).json()
+    assert second["columns"] == ["site", "beds"] and second["rows"][0]["site"] == "S1"
+    assert second["tables"] == ["staff", "sites"]
+    first = client.get(f"/api/v1/ingestion-jobs/{staff}/preview", headers=tenants["a"]).json()
+    assert first["source_object"] == "staff"
+    assert client.get(f"/api/v1/ingestion-jobs/{staff}/preview?table=nowhere", headers=tenants["a"]).status_code == 409

@@ -405,7 +405,10 @@ def _map_of(db: Session, run_id: int) -> dict[str, Any]:
     results = [dict(r) for r in db.execute(
         text("SELECT constraint_id, satisfied, violations FROM constraint_result WHERE run_id = :r"), {"r": run_id}
     ).mappings()]
-    ir, data = solved_with(row["ir"], row["data"] or {}, row["params"] or {}, row["patch"] or {})
+    from app.solve.generate import for_run
+
+    ir, data = solved_with(row["ir"], for_run(run_id, row["ir"] or {}, row["data"] or {}), row["params"] or {},
+                           row["patch"] or {})
     data = with_metre_shapes(db, row["domain_id"], data)
     return answer_map(ir, data, row["assignments"], row["amounts"], results)
 

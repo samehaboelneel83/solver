@@ -52,6 +52,21 @@ def main(argv: list[str] | None = None) -> int:
             pickle.dump(result, handle, protocol=pickle.HIGHEST_PROTOCOL)
         return 0
 
+    if payload.get("mode") == "colgen":
+        from app.solve.colgen import solve_in_process as colgen_in_process
+
+        result = colgen_in_process(
+            payload["compiled"],
+            time_limit=payload["time_limit"],
+            workers=payload["workers"],
+            seed=payload.get("seed"),
+            gap_rel=payload.get("gap_rel", 0.0),
+            progress=payload.get("progress", False),
+        )
+        with open(out_path, "wb") as handle:
+            pickle.dump(result, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        return 0
+
     result = solve_in_process(
         payload["compiled"],
         time_limit=payload["time_limit"],

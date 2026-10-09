@@ -70,6 +70,9 @@ def run_features(db: Session, run_id: int) -> list[dict[str, Any]]:
     if row is None:
         raise HTTPException(404, "run not found")
     ir, data, assignments = row
+    from app.solve.generate import for_run
+
+    data = for_run(run_id, ir or {}, data or {})
     rules = [c["connected"] for c in ir.get("constraints", []) if isinstance(c, dict) and "connected" in c]
     if not rules:
         raise HTTPException(404, NOT_SPATIAL)
@@ -166,10 +169,18 @@ def run_places(
     dataset. Sets with no shape are left out; an empty object means nothing to map."""
     if db.get(Run, run_id) is None:
         raise HTTPException(404, "run not found")
-    data = db.execute(
-        text("SELECT d.data -> 'sets' FROM run r JOIN dataset d ON d.id = r.dataset_id WHERE r.id = :r"),
+    found_run = db.execute(
+        text("SELECT mv.ir, d.data -> 'sets' FROM run r JOIN dataset d ON d.id = r.dataset_id"
+             " JOIN model_version mv ON mv.id = r.model_version_id WHERE r.id = :r"),
         {"r": run_id},
-    ).scalar() or {}
+    ).one()
+    data = found_run[1] or {}
+    if (found_run[0] or {}).get("generate"):
+        from app.solve.generate import for_run
+
+        full = db.execute(text("SELECT d.data FROM run r JOIN dataset d ON d.id = r.dataset_id WHERE r.id = :r"),
+                          {"r": run_id}).scalar() or {}
+        data = for_run(run_id, found_run[0], full).get("sets") or {}
     places: dict[str, dict[str, list[float]]] = {}
     for set_name, rows in data.items():
         found: dict[str, list[float]] = {}

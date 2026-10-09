@@ -9,6 +9,7 @@
 import { IR_VERSION } from "../ir/contract";
 import { cleanVariable, type ParameterSpec, type VariableSpec } from "./declarations";
 import { cleanBinding, cleanTerm, declaredRelationships, type Constraint, type ObjectiveTerm } from "./terms";
+import { relationshipsToDeclare } from "../ir/generate";
 
 export type FormDraft = {
   sets: string[];
@@ -54,7 +55,8 @@ export function publishable(ir: Record<string, unknown>): Record<string, unknown
   // otherwise be two spellings of "optimise nothing". A model with only
   // rules is legitimate: it asks for any answer that satisfies them.
   const { objective: _previous, relationships: _edges, ...withoutObjective } = ir;
-  const walked = declaredRelationships(draft.constraints, draft.objective.terms);
+  // Less what the model's recipes make, plus what they read (`generate`, plan 1B).
+  const walked = relationshipsToDeclare(ir, declaredRelationships(draft.constraints, draft.objective.terms));
   return {
     ...withoutObjective,
     // The editor always writes the current version: version 2 is version 1

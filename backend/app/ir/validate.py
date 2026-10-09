@@ -77,6 +77,8 @@ from app.models.v1_domain import (
 )
 
 Loc = list[str | int]
+#: The most recipes one model's `generate` holds.
+MAX_RECIPES = 20
 
 #: The keys each term kind may carry, beside the kind's own key.
 _TERM_KEYS: dict[str, frozenset[str]] = {
@@ -263,6 +265,31 @@ class _ShapeChecker:
                     f"the relationship {name!r} is named twice",
                 )
             self.relationships.add(name)
+        return None
+
+    def check_generate(self):
+        """`generate` (version 2, plan phase 1B): sets the worker builds from a recipe instead of stored records
+        (app/solve/generate.py). Each recipe reads sets and relationships the model lists (or an earlier recipe
+        made) and makes new ones, known from the recipe alone; they are then sets and relationships like any."""
+        from app.solve import generate
+
+        recipes = self.ir.get("generate")
+        if recipes is None:
+            return None
+        if self.ir.get("version") == 1:
+            return Refusal("generate_needs_version_2", ["generate"],
+                           "generated sets are a version 2 construct; publish the model as version 2")
+        if not isinstance(recipes, list) or not 1 <= len(recipes) <= MAX_RECIPES:
+            return Refusal("generate_malformed", ["generate"],
+                           f"generate is a list of 1 to {MAX_RECIPES} recipes")
+        for i, recipe in enumerate(recipes):
+            fault = generate.check(recipe, self.sets, self.relationships)
+            if fault:
+                code, loc, message = fault
+                return Refusal(code, ["generate", i, *loc], message)
+            made_sets, made_rels = generate.outputs(recipe)
+            self.sets.update(made_sets)
+            self.relationships.update(made_rels)
         return None
 
     def check_parameters(self):
@@ -2173,6 +2200,7 @@ def check_shape(ir: Any) -> Refusal | None:
     for step in (
         checker.check_sets,
         checker.check_relationships,
+        checker.check_generate,
         checker.check_parameters,
         checker.check_predictors,
         checker.check_variables,
@@ -2689,7 +2717,27 @@ class _DomainChecker:
 def check_against_domain(db: Session, domain_id: int, ir: dict[str, Any]) -> Refusal | None:
     """The rules only the domain's own rows can decide. `ir` must already
     have passed :func:`check_shape`; this walks it assuming that."""
-    return _DomainChecker(ir, _DomainWorld(db, domain_id)).check()
+    world = _DomainWorld(db, domain_id)
+    with_generated(world, ir)
+    return _DomainChecker(ir, world).check()
+
+
+def with_generated(world: Any, ir: dict[str, Any]) -> None:
+    """The sets and relationships a model's recipes make, added to what its domain declares: no rows of them are
+    stored, but rules walk and read them like any (app/solve/generate.py)."""
+    if not ir.get("generate"):
+        return
+    from app.solve import generate
+
+    made_sets, made_rels = generate.declared(ir)
+    for name, attributes in made_sets.items():
+        world.entity_type_ids.setdefault(name, -1)
+        world.ancestors.setdefault(name, [])
+        for attribute, data_type in attributes.items():
+            world.attributes[(name, attribute)] = {"data_type": data_type, "required": True, "enum_values": [],
+                                                   "references_id": None, "links_to": None}
+    for name, ends in made_rels.items():
+        world.relationship_ends[name] = ends
 
 
 def validate_ir(db: Session, domain_id: int, ir: Any) -> Refusal | None:

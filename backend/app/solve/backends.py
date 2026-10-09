@@ -538,6 +538,45 @@ BENDERS = Backend(
 )
 
 
+def _colgen_solve(
+    compiled: Compiled,
+    *,
+    time_limit: float,
+    workers: int,
+    should_stop: ShouldStop | None = None,
+    seed: int | None = None,
+    gap_rel: float = 0.0,
+    on_progress=None,
+    hint: dict | None = None,
+    solver_params: dict | None = None,
+) -> Solution:
+    from app.solve import colgen
+
+    return colgen.solve(compiled, time_limit=time_limit, workers=workers, should_stop=should_stop, seed=seed,
+                        gap_rel=gap_rel, on_progress=on_progress)
+
+
+COLGEN = Backend(
+    name="colgen",
+    # A linear model with many more decisions than rules (a candidate list, every pairing, every pattern): a
+    # small master over the columns that matter, the rest priced from the rule matrix (`app.solve.colgen`).
+    classes=frozenset({"LP", "MILP"}),
+    provides=frozenset(
+        {"linear", "integral", "continuous", "fractional-data", "scaled-fractional-data", "soft-constraints"}
+    ),
+    rank=9,
+    solve=_colgen_solve,
+    # The bound is the Lagrangian of every column at the master's prices; an answer meeting it is proven best.
+    proves="global",
+    is_available=_highs_available,
+    note="column generation over HiGHS; for a linear model with many more decisions than rules -- the answer is "
+         "proven best only when it meets the bound over every column",
+    planner_choice="A column generation solver will take this; asked for by name.",
+    # By name only: it pays on models with far more decisions than rules.
+    automatic=False,
+)
+
+
 def _evolve(method: str):
     def run(compiled: Compiled, *, time_limit: float, workers: int, should_stop: ShouldStop | None = None,
             seed: int | None = None, gap_rel: float = 0.0, on_progress=None, hint: dict | None = None,
@@ -667,7 +706,7 @@ LAYOUT = Backend(
     planner_choice="The placement solver will lay the items out on the drawing's grid, without listing positions.",
 )
 
-BUILT_IN: tuple[Backend, ...] = (CP_SAT, GLOP, HIGHS, MILP, SCIP, PDLP, IPOPT, CMA_ES, PSO, GA, BENDERS,
+BUILT_IN: tuple[Backend, ...] = (CP_SAT, GLOP, HIGHS, MILP, SCIP, PDLP, IPOPT, CMA_ES, PSO, GA, BENDERS, COLGEN,
                                  NETWORKX, LAYOUT)
 
 

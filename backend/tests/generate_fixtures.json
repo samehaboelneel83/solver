@@ -1,0 +1,1216 @@
+{
+ "//": [
+  "Generated sets (plan 1B): the recipe checks, read by backend/tests/test_generate.py and",
+  "frontend/src/ir/generate.test.ts. Each case merges `change` into `base` at the top level; both",
+  "validators must refuse it with `code` at `loc` (inside the ir). `base` itself is valid."
+ ],
+ "base": {
+  "version": 2,
+  "sets": [
+   "area",
+   "item_kind",
+   "nurse",
+   "shift"
+  ],
+  "relationships": [
+   "can_work"
+  ],
+  "parameters": {},
+  "variables": {
+   "place": {
+    "index": [
+     "item"
+    ],
+    "domain": "binary"
+   },
+   "on": {
+    "index": [
+     "assign"
+    ],
+    "domain": "binary"
+   }
+  },
+  "constraints": [
+   {
+    "id": "c_one_per_cell",
+    "forall": [
+     {
+      "index": "k",
+      "set": "cell"
+     }
+    ],
+    "left": {
+     "sum": {
+      "var": "place",
+      "index": [
+       "j"
+      ]
+     },
+     "over": [
+      {
+       "index": "j",
+       "set": "item",
+       "via": {
+        "rel": "occupies",
+        "to": "k"
+       }
+      }
+     ]
+    },
+    "relation": "<=",
+    "right": {
+     "const": 1
+    },
+    "severity": "hard"
+   }
+  ],
+  "objective": {
+   "sense": "maximize",
+   "terms": [
+    {
+     "id": "o_items",
+     "weight": 1,
+     "expression": {
+      "sum": {
+       "var": "place",
+       "index": [
+        "i"
+       ]
+      },
+      "over": [
+       {
+        "index": "i",
+        "set": "item"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  "generate": [
+   {
+    "kind": "positions",
+    "areas": "area",
+    "shape": "shape",
+    "kinds": "item_kind",
+    "length": "length_cells",
+    "width": "width_cells",
+    "can_turn": "can_turn",
+    "value": "value",
+    "step": 0.5,
+    "origin": [
+     0,
+     0
+    ],
+    "items": "item",
+    "cells": "cell",
+    "occupies": "occupies",
+    "aisle": 1,
+    "aisle_sides": "long",
+    "keeps_free": "keeps_free"
+   },
+   {
+    "kind": "product",
+    "set": "assign",
+    "of": [
+     "nurse",
+     "shift"
+    ],
+    "linked": "can_work",
+    "same": [
+     [
+      "ward",
+      "ward"
+     ]
+    ]
+   },
+   {
+    "kind": "range",
+    "set": "hour",
+    "from": 0,
+    "to": 23
+   }
+  ]
+ },
+ "invalid": [
+  {
+   "why": "a version 1 model has no recipes",
+   "change": {
+    "version": 1
+   },
+   "code": "generate_needs_version_2",
+   "loc": [
+    "generate"
+   ]
+  },
+  {
+   "why": "an empty list of recipes",
+   "change": {
+    "generate": []
+   },
+   "code": "generate_malformed",
+   "loc": [
+    "generate"
+   ]
+  },
+  {
+   "why": "an unknown kind",
+   "change": {
+    "generate": [
+     {
+      "kind": "grid"
+     }
+    ]
+   },
+   "code": "generate_malformed",
+   "loc": [
+    "generate",
+    0,
+    "kind"
+   ]
+  },
+  {
+   "why": "a key a positions recipe does not read",
+   "change": {
+    "generate": [
+     {
+      "kind": "positions",
+      "areas": "area",
+      "shape": "shape",
+      "kinds": "item_kind",
+      "length": "length_cells",
+      "width": "width_cells",
+      "can_turn": "can_turn",
+      "value": "value",
+      "step": 0.5,
+      "origin": [
+       0,
+       0
+      ],
+      "items": "item",
+      "cells": "cell",
+      "occupies": "occupies",
+      "aisle": 1,
+      "aisle_sides": "long",
+      "keeps_free": "keeps_free",
+      "colour": "red"
+     },
+     {
+      "kind": "product",
+      "set": "assign",
+      "of": [
+       "nurse",
+       "shift"
+      ],
+      "linked": "can_work",
+      "same": [
+       [
+        "ward",
+        "ward"
+       ]
+      ]
+     },
+     {
+      "kind": "range",
+      "set": "hour",
+      "from": 0,
+      "to": 23
+     }
+    ]
+   },
+   "code": "generate_malformed",
+   "loc": [
+    "generate",
+    0,
+    "colour"
+   ]
+  },
+  {
+   "why": "a positions recipe without its occupies",
+   "change": {
+    "generate": [
+     {
+      "kind": "positions",
+      "areas": "area",
+      "shape": "shape",
+      "kinds": "item_kind",
+      "length": "length_cells",
+      "width": "width_cells",
+      "can_turn": "can_turn",
+      "value": "value",
+      "step": 0.5,
+      "origin": [
+       0,
+       0
+      ],
+      "items": "item",
+      "cells": "cell",
+      "aisle": 1,
+      "aisle_sides": "long",
+      "keeps_free": "keeps_free"
+     },
+     {
+      "kind": "product",
+      "set": "assign",
+      "of": [
+       "nurse",
+       "shift"
+      ],
+      "linked": "can_work",
+      "same": [
+       [
+        "ward",
+        "ward"
+       ]
+      ]
+     },
+     {
+      "kind": "range",
+      "set": "hour",
+      "from": 0,
+      "to": 23
+     }
+    ]
+   },
+   "code": "generate_malformed",
+   "loc": [
+    "generate",
+    0,
+    "occupies"
+   ]
+  },
+  {
+   "why": "areas from a set the model does not list",
+   "change": {
+    "generate": [
+     {
+      "kind": "positions",
+      "areas": "room",
+      "shape": "shape",
+      "kinds": "item_kind",
+      "length": "length_cells",
+      "width": "width_cells",
+      "can_turn": "can_turn",
+      "value": "value",
+      "step": 0.5,
+      "origin": [
+       0,
+       0
+      ],
+      "items": "item",
+      "cells": "cell",
+      "occupies": "occupies",
+      "aisle": 1,
+      "aisle_sides": "long",
+      "keeps_free": "keeps_free"
+     },
+     {
+      "kind": "product",
+      "set": "assign",
+      "of": [
+       "nurse",
+       "shift"
+      ],
+      "linked": "can_work",
+      "same": [
+       [
+        "ward",
+        "ward"
+       ]
+      ]
+     },
+     {
+      "kind": "range",
+      "set": "hour",
+      "from": 0,
+      "to": 23
+     }
+    ]
+   },
+   "code": "generate_unknown_set",
+   "loc": [
+    "generate",
+    0,
+    "areas"
+   ]
+  },
+  {
+   "why": "a non-positive step",
+   "change": {
+    "generate": [
+     {
+      "kind": "positions",
+      "areas": "area",
+      "shape": "shape",
+      "kinds": "item_kind",
+      "length": "length_cells",
+      "width": "width_cells",
+      "can_turn": "can_turn",
+      "value": "value",
+      "step": 0,
+      "origin": [
+       0,
+       0
+      ],
+      "items": "item",
+      "cells": "cell",
+      "occupies": "occupies",
+      "aisle": 1,
+      "aisle_sides": "long",
+      "keeps_free": "keeps_free"
+     },
+     {
+      "kind": "product",
+      "set": "assign",
+      "of": [
+       "nurse",
+       "shift"
+      ],
+      "linked": "can_work",
+      "same": [
+       [
+        "ward",
+        "ward"
+       ]
+      ]
+     },
+     {
+      "kind": "range",
+      "set": "hour",
+      "from": 0,
+      "to": 23
+     }
+    ]
+   },
+   "code": "generate_malformed",
+   "loc": [
+    "generate",
+    0,
+    "step"
+   ]
+  },
+  {
+   "why": "an origin that is not [x, y]",
+   "change": {
+    "generate": [
+     {
+      "kind": "positions",
+      "areas": "area",
+      "shape": "shape",
+      "kinds": "item_kind",
+      "length": "length_cells",
+      "width": "width_cells",
+      "can_turn": "can_turn",
+      "value": "value",
+      "step": 0.5,
+      "origin": [
+       0
+      ],
+      "items": "item",
+      "cells": "cell",
+      "occupies": "occupies",
+      "aisle": 1,
+      "aisle_sides": "long",
+      "keeps_free": "keeps_free"
+     },
+     {
+      "kind": "product",
+      "set": "assign",
+      "of": [
+       "nurse",
+       "shift"
+      ],
+      "linked": "can_work",
+      "same": [
+       [
+        "ward",
+        "ward"
+       ]
+      ]
+     },
+     {
+      "kind": "range",
+      "set": "hour",
+      "from": 0,
+      "to": 23
+     }
+    ]
+   },
+   "code": "generate_malformed",
+   "loc": [
+    "generate",
+    0,
+    "origin"
+   ]
+  },
+  {
+   "why": "an aisle side that is not one",
+   "change": {
+    "generate": [
+     {
+      "kind": "positions",
+      "areas": "area",
+      "shape": "shape",
+      "kinds": "item_kind",
+      "length": "length_cells",
+      "width": "width_cells",
+      "can_turn": "can_turn",
+      "value": "value",
+      "step": 0.5,
+      "origin": [
+       0,
+       0
+      ],
+      "items": "item",
+      "cells": "cell",
+      "occupies": "occupies",
+      "aisle": 1,
+      "aisle_sides": "up",
+      "keeps_free": "keeps_free"
+     },
+     {
+      "kind": "product",
+      "set": "assign",
+      "of": [
+       "nurse",
+       "shift"
+      ],
+      "linked": "can_work",
+      "same": [
+       [
+        "ward",
+        "ward"
+       ]
+      ]
+     },
+     {
+      "kind": "range",
+      "set": "hour",
+      "from": 0,
+      "to": 23
+     }
+    ]
+   },
+   "code": "generate_malformed",
+   "loc": [
+    "generate",
+    0,
+    "aisle_sides"
+   ]
+  },
+  {
+   "why": "an aisle with no name for its links",
+   "change": {
+    "generate": [
+     {
+      "kind": "positions",
+      "areas": "area",
+      "shape": "shape",
+      "kinds": "item_kind",
+      "length": "length_cells",
+      "width": "width_cells",
+      "can_turn": "can_turn",
+      "value": "value",
+      "step": 0.5,
+      "origin": [
+       0,
+       0
+      ],
+      "items": "item",
+      "cells": "cell",
+      "occupies": "occupies",
+      "aisle": 1,
+      "aisle_sides": "long"
+     },
+     {
+      "kind": "product",
+      "set": "assign",
+      "of": [
+       "nurse",
+       "shift"
+      ],
+      "linked": "can_work",
+      "same": [
+       [
+        "ward",
+        "ward"
+       ]
+      ]
+     },
+     {
+      "kind": "range",
+      "set": "hour",
+      "from": 0,
+      "to": 23
+     }
+    ]
+   },
+   "code": "generate_malformed",
+   "loc": [
+    "generate",
+    0,
+    "keeps_free"
+   ]
+  },
+  {
+   "why": "access without the features' shape",
+   "change": {
+    "generate": [
+     {
+      "kind": "positions",
+      "areas": "area",
+      "shape": "shape",
+      "kinds": "item_kind",
+      "length": "length_cells",
+      "width": "width_cells",
+      "can_turn": "can_turn",
+      "value": "value",
+      "step": 0.5,
+      "origin": [
+       0,
+       0
+      ],
+      "items": "item",
+      "cells": "cell",
+      "occupies": "occupies",
+      "aisle": 1,
+      "aisle_sides": "long",
+      "keeps_free": "keeps_free",
+      "access": "area",
+      "next_to": "next_to"
+     },
+     {
+      "kind": "product",
+      "set": "assign",
+      "of": [
+       "nurse",
+       "shift"
+      ],
+      "linked": "can_work",
+      "same": [
+       [
+        "ward",
+        "ward"
+       ]
+      ]
+     },
+     {
+      "kind": "range",
+      "set": "hour",
+      "from": 0,
+      "to": 23
+     }
+    ]
+   },
+   "code": "generate_malformed",
+   "loc": [
+    "generate",
+    0,
+    "access_shape"
+   ]
+  },
+  {
+   "why": "items named as a set the model lists",
+   "change": {
+    "generate": [
+     {
+      "kind": "positions",
+      "areas": "area",
+      "shape": "shape",
+      "kinds": "item_kind",
+      "length": "length_cells",
+      "width": "width_cells",
+      "can_turn": "can_turn",
+      "value": "value",
+      "step": 0.5,
+      "origin": [
+       0,
+       0
+      ],
+      "items": "area",
+      "cells": "cell",
+      "occupies": "occupies",
+      "aisle": 1,
+      "aisle_sides": "long",
+      "keeps_free": "keeps_free"
+     },
+     {
+      "kind": "product",
+      "set": "assign",
+      "of": [
+       "nurse",
+       "shift"
+      ],
+      "linked": "can_work",
+      "same": [
+       [
+        "ward",
+        "ward"
+       ]
+      ]
+     },
+     {
+      "kind": "range",
+      "set": "hour",
+      "from": 0,
+      "to": 23
+     }
+    ]
+   },
+   "code": "generate_name_taken",
+   "loc": [
+    "generate",
+    0,
+    "items"
+   ]
+  },
+  {
+   "why": "links named as a listed relationship",
+   "change": {
+    "generate": [
+     {
+      "kind": "positions",
+      "areas": "area",
+      "shape": "shape",
+      "kinds": "item_kind",
+      "length": "length_cells",
+      "width": "width_cells",
+      "can_turn": "can_turn",
+      "value": "value",
+      "step": 0.5,
+      "origin": [
+       0,
+       0
+      ],
+      "items": "item",
+      "cells": "cell",
+      "occupies": "can_work",
+      "aisle": 1,
+      "aisle_sides": "long",
+      "keeps_free": "keeps_free"
+     },
+     {
+      "kind": "product",
+      "set": "assign",
+      "of": [
+       "nurse",
+       "shift"
+      ],
+      "linked": "can_work",
+      "same": [
+       [
+        "ward",
+        "ward"
+       ]
+      ]
+     },
+     {
+      "kind": "range",
+      "set": "hour",
+      "from": 0,
+      "to": 23
+     }
+    ]
+   },
+   "code": "generate_name_taken",
+   "loc": [
+    "generate",
+    0
+   ]
+  },
+  {
+   "why": "items and cells one set",
+   "change": {
+    "generate": [
+     {
+      "kind": "positions",
+      "areas": "area",
+      "shape": "shape",
+      "kinds": "item_kind",
+      "length": "length_cells",
+      "width": "width_cells",
+      "can_turn": "can_turn",
+      "value": "value",
+      "step": 0.5,
+      "origin": [
+       0,
+       0
+      ],
+      "items": "item",
+      "cells": "item",
+      "occupies": "occupies",
+      "aisle": 1,
+      "aisle_sides": "long",
+      "keeps_free": "keeps_free"
+     },
+     {
+      "kind": "product",
+      "set": "assign",
+      "of": [
+       "nurse",
+       "shift"
+      ],
+      "linked": "can_work",
+      "same": [
+       [
+        "ward",
+        "ward"
+       ]
+      ]
+     },
+     {
+      "kind": "range",
+      "set": "hour",
+      "from": 0,
+      "to": 23
+     }
+    ]
+   },
+   "code": "generate_malformed",
+   "loc": [
+    "generate",
+    0,
+    "cells"
+   ]
+  },
+  {
+   "why": "a product of one set",
+   "change": {
+    "generate": [
+     {
+      "kind": "positions",
+      "areas": "area",
+      "shape": "shape",
+      "kinds": "item_kind",
+      "length": "length_cells",
+      "width": "width_cells",
+      "can_turn": "can_turn",
+      "value": "value",
+      "step": 0.5,
+      "origin": [
+       0,
+       0
+      ],
+      "items": "item",
+      "cells": "cell",
+      "occupies": "occupies",
+      "aisle": 1,
+      "aisle_sides": "long",
+      "keeps_free": "keeps_free"
+     },
+     {
+      "kind": "product",
+      "set": "assign",
+      "of": [
+       "nurse"
+      ],
+      "linked": "can_work",
+      "same": [
+       [
+        "ward",
+        "ward"
+       ]
+      ]
+     },
+     {
+      "kind": "range",
+      "set": "hour",
+      "from": 0,
+      "to": 23
+     }
+    ]
+   },
+   "code": "generate_malformed",
+   "loc": [
+    "generate",
+    1,
+    "of"
+   ]
+  },
+  {
+   "why": "a product of an unknown set",
+   "change": {
+    "generate": [
+     {
+      "kind": "positions",
+      "areas": "area",
+      "shape": "shape",
+      "kinds": "item_kind",
+      "length": "length_cells",
+      "width": "width_cells",
+      "can_turn": "can_turn",
+      "value": "value",
+      "step": 0.5,
+      "origin": [
+       0,
+       0
+      ],
+      "items": "item",
+      "cells": "cell",
+      "occupies": "occupies",
+      "aisle": 1,
+      "aisle_sides": "long",
+      "keeps_free": "keeps_free"
+     },
+     {
+      "kind": "product",
+      "set": "assign",
+      "of": [
+       "nurse",
+       "ward"
+      ],
+      "linked": "can_work",
+      "same": [
+       [
+        "ward",
+        "ward"
+       ]
+      ]
+     },
+     {
+      "kind": "range",
+      "set": "hour",
+      "from": 0,
+      "to": 23
+     }
+    ]
+   },
+   "code": "generate_unknown_set",
+   "loc": [
+    "generate",
+    1,
+    "of",
+    1
+   ]
+  },
+  {
+   "why": "linked by a relationship the model does not list",
+   "change": {
+    "generate": [
+     {
+      "kind": "positions",
+      "areas": "area",
+      "shape": "shape",
+      "kinds": "item_kind",
+      "length": "length_cells",
+      "width": "width_cells",
+      "can_turn": "can_turn",
+      "value": "value",
+      "step": 0.5,
+      "origin": [
+       0,
+       0
+      ],
+      "items": "item",
+      "cells": "cell",
+      "occupies": "occupies",
+      "aisle": 1,
+      "aisle_sides": "long",
+      "keeps_free": "keeps_free"
+     },
+     {
+      "kind": "product",
+      "set": "assign",
+      "of": [
+       "nurse",
+       "shift"
+      ],
+      "linked": "near",
+      "same": [
+       [
+        "ward",
+        "ward"
+       ]
+      ]
+     },
+     {
+      "kind": "range",
+      "set": "hour",
+      "from": 0,
+      "to": 23
+     }
+    ]
+   },
+   "code": "generate_unknown_relationship",
+   "loc": [
+    "generate",
+    1,
+    "linked"
+   ]
+  },
+  {
+   "why": "same that is not pairs",
+   "change": {
+    "generate": [
+     {
+      "kind": "positions",
+      "areas": "area",
+      "shape": "shape",
+      "kinds": "item_kind",
+      "length": "length_cells",
+      "width": "width_cells",
+      "can_turn": "can_turn",
+      "value": "value",
+      "step": 0.5,
+      "origin": [
+       0,
+       0
+      ],
+      "items": "item",
+      "cells": "cell",
+      "occupies": "occupies",
+      "aisle": 1,
+      "aisle_sides": "long",
+      "keeps_free": "keeps_free"
+     },
+     {
+      "kind": "product",
+      "set": "assign",
+      "of": [
+       "nurse",
+       "shift"
+      ],
+      "linked": "can_work",
+      "same": [
+       "ward"
+      ]
+     },
+     {
+      "kind": "range",
+      "set": "hour",
+      "from": 0,
+      "to": 23
+     }
+    ]
+   },
+   "code": "generate_malformed",
+   "loc": [
+    "generate",
+    1,
+    "same"
+   ]
+  },
+  {
+   "why": "distinct that is not true or false",
+   "change": {
+    "generate": [
+     {
+      "kind": "positions",
+      "areas": "area",
+      "shape": "shape",
+      "kinds": "item_kind",
+      "length": "length_cells",
+      "width": "width_cells",
+      "can_turn": "can_turn",
+      "value": "value",
+      "step": 0.5,
+      "origin": [
+       0,
+       0
+      ],
+      "items": "item",
+      "cells": "cell",
+      "occupies": "occupies",
+      "aisle": 1,
+      "aisle_sides": "long",
+      "keeps_free": "keeps_free"
+     },
+     {
+      "kind": "product",
+      "set": "assign",
+      "of": [
+       "nurse",
+       "shift"
+      ],
+      "linked": "can_work",
+      "same": [
+       [
+        "ward",
+        "ward"
+       ]
+      ],
+      "distinct": "yes"
+     },
+     {
+      "kind": "range",
+      "set": "hour",
+      "from": 0,
+      "to": 23
+     }
+    ]
+   },
+   "code": "generate_malformed",
+   "loc": [
+    "generate",
+    1,
+    "distinct"
+   ]
+  },
+  {
+   "why": "a range that ends before it starts",
+   "change": {
+    "generate": [
+     {
+      "kind": "positions",
+      "areas": "area",
+      "shape": "shape",
+      "kinds": "item_kind",
+      "length": "length_cells",
+      "width": "width_cells",
+      "can_turn": "can_turn",
+      "value": "value",
+      "step": 0.5,
+      "origin": [
+       0,
+       0
+      ],
+      "items": "item",
+      "cells": "cell",
+      "occupies": "occupies",
+      "aisle": 1,
+      "aisle_sides": "long",
+      "keeps_free": "keeps_free"
+     },
+     {
+      "kind": "product",
+      "set": "assign",
+      "of": [
+       "nurse",
+       "shift"
+      ],
+      "linked": "can_work",
+      "same": [
+       [
+        "ward",
+        "ward"
+       ]
+      ]
+     },
+     {
+      "kind": "range",
+      "set": "hour",
+      "from": 0,
+      "to": -1
+     }
+    ]
+   },
+   "code": "generate_malformed",
+   "loc": [
+    "generate",
+    2,
+    "to"
+   ]
+  },
+  {
+   "why": "a range with a step of 0",
+   "change": {
+    "generate": [
+     {
+      "kind": "positions",
+      "areas": "area",
+      "shape": "shape",
+      "kinds": "item_kind",
+      "length": "length_cells",
+      "width": "width_cells",
+      "can_turn": "can_turn",
+      "value": "value",
+      "step": 0.5,
+      "origin": [
+       0,
+       0
+      ],
+      "items": "item",
+      "cells": "cell",
+      "occupies": "occupies",
+      "aisle": 1,
+      "aisle_sides": "long",
+      "keeps_free": "keeps_free"
+     },
+     {
+      "kind": "product",
+      "set": "assign",
+      "of": [
+       "nurse",
+       "shift"
+      ],
+      "linked": "can_work",
+      "same": [
+       [
+        "ward",
+        "ward"
+       ]
+      ]
+     },
+     {
+      "kind": "range",
+      "set": "hour",
+      "from": 0,
+      "to": 23,
+      "step": 0
+     }
+    ]
+   },
+   "code": "generate_malformed",
+   "loc": [
+    "generate",
+    2,
+    "step"
+   ]
+  },
+  {
+   "why": "a range named as a set made before",
+   "change": {
+    "generate": [
+     {
+      "kind": "positions",
+      "areas": "area",
+      "shape": "shape",
+      "kinds": "item_kind",
+      "length": "length_cells",
+      "width": "width_cells",
+      "can_turn": "can_turn",
+      "value": "value",
+      "step": 0.5,
+      "origin": [
+       0,
+       0
+      ],
+      "items": "item",
+      "cells": "cell",
+      "occupies": "occupies",
+      "aisle": 1,
+      "aisle_sides": "long",
+      "keeps_free": "keeps_free"
+     },
+     {
+      "kind": "product",
+      "set": "assign",
+      "of": [
+       "nurse",
+       "shift"
+      ],
+      "linked": "can_work",
+      "same": [
+       [
+        "ward",
+        "ward"
+       ]
+      ]
+     },
+     {
+      "kind": "range",
+      "set": "assign",
+      "from": 0,
+      "to": 23
+     }
+    ]
+   },
+   "code": "generate_name_taken",
+   "loc": [
+    "generate",
+    2,
+    "set"
+   ]
+  }
+ ]
+}

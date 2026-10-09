@@ -426,9 +426,19 @@ export function irToBlocks(
       SENSE: String(objective.sense ?? "minimize"),
       MODE: String(objective.mode ?? "weighted"),
     },
-    extraState: { version: ir.version ?? 2, ...(ir.predictors ? { predictors: ir.predictors } : {}) },
+    // Every top-level key no block draws (`generate`, and any a later version adds) rides on the model block, so
+    // an edit in Blocks never drops it.
+    extraState: { version: ir.version ?? 2, ...(ir.predictors ? { predictors: ir.predictors } : {}),
+      ...(Object.keys(carried(ir)).length ? { carried: carried(ir) } : {}) },
     inputs: inputs({ DECLARE: stack(declarations), RULES: stack(rules), GOAL: stack(goal) }),
   });
   root.id = "model-root";
   return { blocks: { languageVersion: 0, blocks: [root] } };
+}
+
+/** The top-level keys Blocks has no block for, carried through it untouched. */
+const DRAWN = new Set(["version", "sets", "parameters", "variables", "constraints", "objective", "relationships",
+  "predictors"]);
+function carried(ir: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(ir).filter(([key]) => !DRAWN.has(key)));
 }

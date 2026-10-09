@@ -133,7 +133,7 @@ A failed job records one safe class in `error_code`, never driver text: `authent
 ## Web sources (HTTPS)
 
 `source` may instead be `{"kind": "http", "url": "https://…", "format": "json" | "csv" | "xlsx", "columns": [...],
-"auth": "none" | "bearer" | "basic", "username"?, "sheet"?, "records_at"?}`: a REST endpoint's JSON list (at the
+"auth": "none" | "bearer" | "basic" | "oauth_client", "username"?, "sheet"?, "records_at"?}`: a REST endpoint's JSON list (at the
 dotted path `records_at`, e.g. `data.items`), or a CSV or Excel file served over HTTPS. The same policy applies as
 for a database: the host must resolve inside `OAAS_INTEGRATION_NETWORKS`, TLS is verified (against
 `OAAS_INTEGRATION_CA` when set), redirects are not followed, the answer is capped at 20 MB. A token or password is
@@ -158,6 +158,22 @@ source whole now and then to find what was deleted. With no earlier mark, an inc
 Notices (migration 0119): a scheduled refresh that found changes to review, applied changes (and queued runs), or
 could not finish leaves a notice for the person who set it, shown under the bell in the app's header
 (`GET /api/v1/notices`, `POST /api/v1/notices/{id}/read`, `POST /api/v1/notices/read-all`).
+
+Sign-in by OAuth 2 client credentials (9 October 2026): `"auth": "oauth_client"` with `token_url` (https), `client_id`,
+optional `scope` and `audience`, and `client_auth` (`"basic"`, the default, or `"post"`: the secret in the form); the
+client secret is the source's credential (`password`), encrypted like any. Each extraction exchanges it at the token
+address for an access token (grant `client_credentials`) and reads with it as a bearer token. The token address is
+read under the same policy as the data -- https, inside `OAAS_INTEGRATION_NETWORKS` (it may be another host there),
+verified TLS, no redirects, an answer of 64 KB at most. A token refused mid-read (401) is renewed once, then the
+refusal stands (`authentication_failed`); a token address that refuses the client, gives no bearer token or cannot be
+reached fails with the usual classes. The token is never stored.
+
+Several tables as one source (9 October 2026): a database source may name `more_tables` (up to 20), each
+`{"table", "columns", "changed_column"?}` in the same database and schema. One extraction reads them all into one
+artifact, a sheet per table (`rows.jsonl`, then `rows-2.jsonl`, ...; the manifest's `tables` lists them, each with its
+own rows, digest and `high_water`). The import preview takes `?table=` and names `tables`; a mapping names its `table`
+(the first when left out), so each table is imported, bound and refreshed on its own, and an incremental read takes
+each table from its own mark.
 
 ## Database engines (plan of 8 October 2026, phase 4A)
 

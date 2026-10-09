@@ -19,6 +19,9 @@ def source_for(row):
     from .databases import DEFAULT_PORTS
 
     config["engine"] = config.get("engine") or "postgres"
+    # Further tables read with the first, as one source: (table, columns, changed column) each.
+    config["more_tables"] = tuple((str(t.get("table")), tuple(t.get("columns") or ()), str(t.get("changed_column") or ""))
+                                  for t in config.get("more_tables") or [] if isinstance(t, dict))
     if config.get("port") is None:
         config["port"] = DEFAULT_PORTS.get(config["engine"], 5432)
     return PostgresSource(

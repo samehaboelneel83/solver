@@ -32,3 +32,7 @@ CANDIDATE_LINKS = _limit("SOLVER_MAX_CANDIDATE_LINKS", 2_000_000)
 #: needs a form without a list (plan phase 1C).
 LAYOUT_CANDIDATES = _limit("SOLVER_MAX_LAYOUT_CANDIDATES", 150_000)
 LAYOUT_LINKS = _limit("SOLVER_MAX_LAYOUT_LINKS", 4_000_000)
+#: Members and links one generated set may have (app/solve/generate.py): built in the run's own process, never
+#: stored, so bounded by the worker's memory and the compile rather than by the database.
+GENERATED_MEMBERS = _limit("SOLVER_MAX_GENERATED_MEMBERS", 2_000_000)
+GENERATED_LINKS = _limit("SOLVER_MAX_GENERATED_LINKS", 8_000_000)

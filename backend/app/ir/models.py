@@ -459,6 +459,8 @@ class ProblemIR(_Model):
     objective: Optional[Objective] = None
     relationships: Optional[list[Name]] = None
     predictors: Optional[dict[Name, PredictorDeclaration]] = None
+    #: Sets the worker builds from a recipe (app/solve/generate.py); checked in full by validate.py.
+    generate: Optional[list[dict[str, Any]]] = None
 
 
 for _model in (Sum, Add, Mul, Fn, Predict, NoOverlap, Cumulative, ConnectedBody, Constraint, ObjectiveTerm):

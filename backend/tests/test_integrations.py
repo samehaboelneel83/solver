@@ -250,9 +250,23 @@ def test_an_incremental_job_needs_a_changed_column_and_starts_from_the_last_mark
         artifact = str(uuid4())
         folder = tmp_path / str(org) / str(connection) / artifact
         folder.mkdir(parents=True)
-        (folder / "manifest.json").write_text(json.dumps({"high_water": "2026-10-08T11:30:00"}))
+        (folder / "manifest.json").write_text(json.dumps({"source_object": "staff", "high_water": "2026-10-08T11:30:00"}))
         s.execute(text("INSERT INTO ingestion_job (connection_id, organization_id, requested_by, state, artifact_id,"
                        " finished_at) VALUES (:c, :o, :u, 'extracted', CAST(:a AS uuid), now())"),
                   {"c": connection, "o": org, "u": user, "a": artifact})
         s.commit()
-        assert last_high_water(s, org, connection, str(tmp_path)) == "2026-10-08T11:30:00"
+        assert last_high_water(s, org, connection, str(tmp_path)) == {"staff": "2026-10-08T11:30:00"}
+
+
+def test_a_source_names_further_tables_once_each(setup):  # noqa: F811
+    client, body, tenants = setup
+    two = {**body, "name": "two tables", "source": {**body["source"], "more_tables": [
+        {"table": "shifts", "columns": ["id", "hours"], "changed_column": "hours"}]}}
+    made = client.post("/api/v1/connections", json=two, headers=tenants["a"])
+    assert made.status_code in (200, 201), made.text
+    twice = {**body, "name": "twice", "source": {**body["source"], "more_tables": [
+        {"table": body["source"]["table"], "columns": ["id"]}]}}
+    assert client.post("/api/v1/connections", json=twice, headers=tenants["a"]).status_code == 422
+    # A further table's changed column lets the source be read incrementally.
+    job = client.post(f"/api/v1/connections/{made.json()['id']}/jobs", json={"incremental": True}, headers=tenants["a"])
+    assert job.status_code == 202 and job.json()["incremental"] is True

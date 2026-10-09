@@ -9,7 +9,7 @@ vi.mock("../api/client", async () => ({
 const access = vi.hoisted(() => ({ capabilities: ["integration.run", "integration.manage"] }));
 vi.mock("../hooks/useCapability", () => ({ useCapabilities: () => ({ known: true, can: (c: string) => access.capabilities.includes(c) }) }));
 import { apiFetch } from "../api/client";
-import { ImportWizard, SourcesPage, changeLines, everyOptions, guessMapping } from "./Sources";
+import { ImportWizard, SourcesPage, changeLines, everyOptions, guessMapping, moreTables } from "./Sources";
 
 function mount(path: string) {
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
@@ -65,6 +65,21 @@ describe("sources and extractions (Epic UX, U-4)", () => {
     expect(body.source).toEqual({ engine: "postgres", host: "10.0.0.5", port: 5432, database: "rota", username: "reader", schema: "public", table: "shifts", columns: ["id", "day", "hours"] });
   });
 
+  it("reads further tables of the same database with the source", async () => {
+    mount("/domains/7/data/sources");
+    fireEvent.click(await screen.findByRole("button", { name: "Add a source" }));
+    const form = screen.getByRole("form", { name: "Add a source" });
+    for (const [label, value] of [["Name", "Rota"], ["Host", "10.0.0.5"], ["Database", "rota"], ["User name", "reader"],
+      ["Password", "s3cret"], ["Table or view", "shifts"], ["Columns to extract, separated by commas", "id, hours"]]) {
+      fireEvent.change(within(form).getByLabelText(label), { target: { value } });
+    }
+    fireEvent.change(within(form).getByLabelText(/Further tables of the same schema/), { target: { value: "sites: id, beds\n\nwards: id" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Save source" }));
+    await waitFor(() => expect(calls()).toContain("POST /api/v1/connections"));
+    const body = JSON.parse(String((vi.mocked(apiFetch).mock.calls.find(([p]) => p === "/api/v1/connections")![1] as RequestInit).body));
+    expect(body.source.more_tables).toEqual([{ table: "sites", columns: ["id", "beds"] }, { table: "wards", columns: ["id"] }]);
+  });
+
   it("adds a MySQL source with its usual port, the table's database as its schema", async () => {
     mount("/domains/7/data/sources");
     fireEvent.click(await screen.findByRole("button", { name: "Add a source" }));
@@ -117,6 +132,31 @@ describe("sources and extractions (Epic UX, U-4)", () => {
     const body = JSON.parse(String((vi.mocked(apiFetch).mock.calls.find(([p]) => p === "/api/v1/connections")![1] as RequestInit).body));
     expect(body.source).toEqual({ kind: "http", url: "https://data.internal/api/projects", format: "json", auth: "none",
       columns: ["project", "cost"], records_at: "items", paging: "next_link", next_at: "links.next" });
+  });
+
+  it("adds a REST source signed in by client id and secret, the secret sent as the credential", async () => {
+    mount("/domains/7/data/sources");
+    fireEvent.click(await screen.findByRole("button", { name: "Add a source" }));
+    const form = screen.getByRole("form", { name: "Add a source" });
+    fireEvent.click(within(form).getByLabelText(/Web address/));
+    fireEvent.change(within(form).getByLabelText("Login"), { target: { value: "oauth_client" } });
+    const save = within(form).getByRole("button", { name: "Save source" });
+    for (const [label, value] of [["Name", "Projects"], ["Address (https://…)", "https://data.internal/api/projects"],
+      ["Columns to extract, separated by commas", "project, cost"], ["Client secret", "s3cret"]]) {
+      fireEvent.change(within(form).getByLabelText(label), { target: { value } });
+    }
+    expect(save).toBeDisabled();
+    for (const [label, value] of [["Token address (https://…)", "https://login.internal/oauth/token"], ["Client id", "planner"],
+      ["Scope (optional)", "read:projects"]]) {
+      fireEvent.change(within(form).getByLabelText(label), { target: { value } });
+    }
+    fireEvent.change(within(form).getByLabelText("Secret sent"), { target: { value: "post" } });
+    fireEvent.click(save);
+    await waitFor(() => expect(calls()).toContain("POST /api/v1/connections"));
+    const body = JSON.parse(String((vi.mocked(apiFetch).mock.calls.find(([p]) => p === "/api/v1/connections")![1] as RequestInit).body));
+    expect(body.password).toBe("s3cret");
+    expect(body.source).toEqual({ kind: "http", url: "https://data.internal/api/projects", format: "json", auth: "oauth_client",
+      columns: ["project", "cost"], token_url: "https://login.internal/oauth/token", client_id: "planner", client_auth: "post", scope: "read:projects" });
   });
 
   it("offers no source form to an account that may only run extractions", async () => {
@@ -183,6 +223,29 @@ describe("the import wizard", () => {
     expect(body).toEqual({ relationship_type_id: 21, columns: { id: "from", full_name: "to", hours: "hours" } });
   });
 
+  it("imports each table of a several-table source on its own, naming the table it maps", async () => {
+    const base = vi.mocked(apiFetch).getMockImplementation()!;
+    vi.mocked(apiFetch).mockImplementation(async (path, init) => {
+      const p = String(path);
+      if (p.startsWith("/api/v1/ingestion-jobs/12/preview")) {
+        const sites = p.includes("table=sites");
+        return { columns: sites ? ["id", "hours"] : ["id", "full_name", "hours"], rows_total: sites ? 1 : 3, source_object: sites ? "sites" : "staff",
+          sha256: "ab".repeat(32), tables: ["staff", "sites"], rows: [sites ? { id: "s1", hours: "8" } : { id: "n1", full_name: "Ada", hours: "37.5" }] };
+      }
+      return base(path, init);
+    });
+    mount("/domains/7/data/sources/4/jobs/12/import");
+    expect(await screen.findByRole("table", { name: "Extracted rows" })).toHaveTextContent("Ada");
+    fireEvent.change(screen.getByLabelText("Table"), { target: { value: "sites" } });
+    await waitFor(() => expect(calls()).toContain("GET /api/v1/ingestion-jobs/12/preview?limit=20&table=sites"));
+    expect(await screen.findByText(/1 rows from sites/)).toBeInTheDocument();
+    fireEvent.change(await screen.findByLabelText("The rows become records of"), { target: { value: "9" } });
+    fireEvent.click(screen.getByRole("button", { name: "Check the rows" }));
+    await screen.findByRole("table", { name: "Problems found" });
+    const body = JSON.parse(String((vi.mocked(apiFetch).mock.calls.find(([p]) => String(p).endsWith("/validate"))![1] as RequestInit).body));
+    expect(body).toEqual({ entity_type_id: 9, columns: { id: "key", hours: "hours" }, table: "sites" });
+  });
+
   it("names a parameter's index columns as its template does", async () => {
     mount("/domains/7/data/sources/4/jobs/12/import");
     await screen.findByRole("table", { name: "Extracted rows" });
@@ -190,6 +253,12 @@ describe("the import wizard", () => {
     fireEvent.change(await screen.findByLabelText("The rows become values of"), { target: { value: "31" } });
     const options = Array.from((screen.getByLabelText("id becomes") as HTMLSelectElement).options).map((o) => o.value);
     expect(options).toEqual(["", "ward_1", "ward_2", "value"]);
+  });
+});
+
+describe("further tables", () => {
+  it("reads one table per line, dropping lines without a name or columns", () => {
+    expect(moreTables(" sites : id , beds \nnocolumns:\n: id\nwards:id")).toEqual([{ table: "sites", columns: ["id", "beds"] }, { table: "wards", columns: ["id"] }]);
   });
 });
 

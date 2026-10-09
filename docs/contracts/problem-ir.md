@@ -407,6 +407,43 @@ Refusals: `predict_needs_version_2` (a version 1 document), `predictors_malforme
 
 *Invented*, all of it.
 
+### 3.7 `generate` (version 2, plan phase 1B)
+
+```json
+"generate": [
+  { "kind": "positions", "areas": "area", "shape": "shape", "kinds": "item_kind",
+    "length": "length_cells", "width": "width_cells", "can_turn": "can_turn", "value": "value",
+    "step": 0.5, "origin": [0, 0], "aisle": 1, "aisle_sides": "long",
+    "items": "item", "cells": "cell", "occupies": "occupies", "keeps_free": "keeps_free" },
+  { "kind": "product", "set": "assign", "of": ["nurse", "shift"], "linked": "can_work" },
+  { "kind": "range", "set": "hour", "from": 0, "to": 23 }
+]
+```
+
+Optional, and absent means none. Each recipe makes sets (and the links between their members) that
+are **not stored**: the run's frozen dataset holds only what the recipe reads, and the worker builds
+the members just before compiling (`backend/app/solve/generate.py`). The sets and relationships a
+recipe makes are not listed in `sets` or `relationships` (nothing of them is frozen), but every
+rule, variable and objective uses them like any: they are known from the recipe alone, so the
+document is checked before it runs. A recipe reads sets and relationships the document lists, or
+that an earlier recipe made.
+
+| kind | reads | makes |
+|---|---|---|
+| `range` | `from`, `to`, `step` (whole numbers) | the set `set`: members "0", "1", ... with the attribute `value` |
+| `product` | the sets `of` (two to four); optional `linked` (a relationship from the first to the second), `same` (pairs of attributes that must be equal), `distinct`, `unordered` | the set `set`: members "a\|b" with one attribute per part (a set named again: `<set>_2`), and the links `<set>_<part>` from each member to its parts |
+| `positions` | polygon areas (`areas`, WKT in `shape`) on a grid of `step` metres from `origin`; item kinds (`kinds`) with their cells (`length`, `width`), `can_turn`, `value`; optional `aisle` cells on `aisle_sides`; optional access features (`access`, `access_shape`) | the sets `items` (`kind`, `rot`, `aisle_side`, `x_m`, `y_m`, `min_x_m`, `min_y_m`, `width_m`, `height_m`, `zone`, `value`) and `cells` (`x_m`, `y_m`, `zone`, and `entrance` with access); the links `occupies`, `keeps_free` (with an aisle), `next_to` (with access) |
+
+A recipe that would make more members or links than the operator's limits
+(`SOLVER_MAX_GENERATED_MEMBERS`, `SOLVER_MAX_GENERATED_LINKS`) fails the run with a message; it
+is not truncated. At most 20 recipes.
+
+Refusals (shape): `generate_needs_version_2`, `generate_malformed`, `generate_unknown_set`,
+`generate_unknown_relationship`, `generate_name_taken`. The shared cases are
+`backend/tests/generate_fixtures.json`, read by both validators.
+
+*Invented*, all of it.
+
 ## 4. Terms — the arithmetic
 
 A **term** is an object naming exactly one kind. Seven kinds here, and three

@@ -29,10 +29,13 @@ def _extract(row, output, cancelled, result):
                 raise ExtractionError("The stored credential cannot be read with this server's keys",
                                       "credential_unreadable") from None
         adapter = connector_for(source, lambda _: password)
-        changed = getattr(source, "changed_column", "")
-        request = ExtractionRequest(row["organization_id"], row["id"], source.table, tuple(source.columns), ExtractionLimits(),
-                                    since_column=changed, since=row.get("since") if changed else None)
-        artifact = stage_snapshot(Path(output), adapter, request, cancelled)
+        marks = row.get("since") or {}
+        tables = source.tables() if hasattr(source, "tables") else [(source.table, tuple(source.columns), "")]
+        requests = [ExtractionRequest(row["organization_id"], row["id"], table, tuple(columns), ExtractionLimits(),
+                                      since_column=changed, since=marks.get(table) if changed else None)
+                    for table, columns, changed in tables]
+        request, more = requests[0], tuple(requests[1:])
+        artifact = stage_snapshot(Path(output), adapter, request, cancelled, more)
         result.send(("extracted", artifact.name))
     except ExtractionError as error:
         result.send(("failed", error.code))  # A failure class only: never driver details or credentials.
@@ -42,22 +45,27 @@ def _extract(row, output, cancelled, result):
         result.close()
 
 
-def last_high_water(db, organization_id, connection_id, output: str):
-    """The highest value of the changed column the connection's latest extracted read recorded; None when no read
-    has one (the first incremental read is then a full one)."""
+def last_high_water(db, organization_id, connection_id, output: str) -> dict:
+    """Per table, the highest value of its changed column the connection's latest extracted read recorded. A table
+    with none (the first incremental read of it) is read whole."""
     import json
 
+    marks: dict = {}
     for (artifact,) in db.execute(text(
             "SELECT artifact_id FROM ingestion_job WHERE connection_id = :c AND state = 'extracted'"
             " AND artifact_id IS NOT NULL ORDER BY finished_at DESC, id DESC LIMIT 5"), {"c": connection_id}).all():
         manifest = Path(output).resolve() / str(organization_id) / str(connection_id) / str(artifact) / "manifest.json"
         try:
-            mark = json.loads(manifest.read_text(encoding="utf-8")).get("high_water")
+            got = json.loads(manifest.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        if mark is not None:
-            return mark
-    return None
+        for entry in got.get("tables") or [got]:
+            table, mark = entry.get("source_object"), entry.get("high_water")
+            if table and mark is not None and table not in marks:
+                marks[table] = mark
+        if marks:
+            return marks
+    return marks
 
 
 def process_one(session_factory, output: str) -> bool:

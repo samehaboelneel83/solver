@@ -14,8 +14,38 @@ from uuid import uuid4
 from .contracts import ExtractionCancelled, ExtractionRequest, SnapshotConnector, extract_batches, later
 
 
+def _write_table(pending: Path, name: str, connector: SnapshotConnector, request: ExtractionRequest,
+                 cancelled: Event) -> dict:
+    """One table's rows into `name` in the pending folder; what the manifest says of it."""
+    count = size = 0
+    digest = hashlib.sha256()
+    high = None  # the highest value of the changed column read (migration 0118)
+    watched = request.since_column
+    stream = extract_batches(connector, request, cancelled)
+    try:
+        with (pending / name).open("xb") as output:
+            for batch in stream:
+                for row in batch:
+                    output.write(row)
+                    digest.update(row)
+                    if watched:
+                        high = later(high, json.loads(row).get(watched))
+                    count += 1
+                    size += len(row)
+            output.flush()
+            os.fsync(output.fileno())
+    finally:
+        stream.close()
+    return {"file": name, "source_object": request.source_object, "columns": list(request.columns),
+            "source_schema": list(getattr(connector, "source_schema", []) or []),
+            "rows": count, "bytes": size, "sha256": digest.hexdigest(),
+            **({"changed_column": watched, "high_water": high} if watched else {}),
+            **({"since": request.since} if watched and request.since is not None else {})}
+
+
 def stage_snapshot(
     root: Path, connector: SnapshotConnector, request: ExtractionRequest, cancelled: Event,
+    more: tuple[ExtractionRequest, ...] = (),
 ) -> Path:
     """Write rows and a manifest, then rename the complete directory into view.
 
@@ -23,6 +53,10 @@ def stage_snapshot(
     is no mutable 'latest' pointer. Failed extraction never changes prior imports.
     Readers must ignore .pending-* directories. Only authorized worker code may
     call this function; it does not substitute for application grants or RLS.
+
+    `more`: further tables of the same source, each into its own rows file (`rows-2.jsonl`, ...) and listed under
+    the manifest's `tables` with the first; the first stays in `rows.jsonl` and the manifest's own fields, as
+    a one-table extraction is read.
     """
     folder = root.resolve() / str(request.organization_id) / str(request.connection_id)
     folder.mkdir(parents=True, exist_ok=True)
@@ -30,26 +64,14 @@ def stage_snapshot(
     identity = str(uuid4())
     target = folder / identity
     started = datetime.now(timezone.utc).isoformat()
-    count = size = 0
-    digest = hashlib.sha256()
-    high = None  # the highest value of the changed column read (migration 0118)
-    watched = request.since_column
     try:
-        stream = extract_batches(connector, request, cancelled)
-        try:
-            with (pending / "rows.jsonl").open("xb") as output:
-                for batch in stream:
-                    for row in batch:
-                        output.write(row)
-                        digest.update(row)
-                        if watched:
-                            high = later(high, json.loads(row).get(watched))
-                        count += 1
-                        size += len(row)
-                output.flush()
-                os.fsync(output.fileno())
-        finally:
-            stream.close()
+        tables = [_write_table(pending, "rows.jsonl", connector, request, cancelled)]
+        for n, extra in enumerate(more, start=2):
+            if cancelled.is_set():
+                raise ExtractionCancelled("Extraction cancelled")
+            tables.append(_write_table(pending, f"rows-{n}.jsonl", connector, extra, cancelled))
+        first = tables[0]
+        count, size, watched, high = first["rows"], first["bytes"], request.since_column, first.get("high_water")
         if cancelled.is_set():
             raise ExtractionCancelled("Extraction cancelled")
         manifest = {
@@ -57,16 +79,17 @@ def stage_snapshot(
             "organization_id": str(request.organization_id), "connection_id": request.connection_id,
             "source_object": request.source_object, "columns": list(request.columns),
             "connector": connector.capabilities.connector_id, "connector_version": connector.capabilities.version,
-            "source_schema": getattr(connector, "source_schema", []),
+            "source_schema": first.pop("source_schema", []),
             "encoding": "canonical-json-lines-v1",
             "conversion": "Decimals and unsafe integers are strings; temporal values are ISO 8601; UUIDs are strings. Mapping must declare target types.",
             "started_at": started, "completed_at": datetime.now(timezone.utc).isoformat(),
-            "rows": count, "bytes": size, "sha256": digest.hexdigest(),
+            "rows": count, "bytes": size, "sha256": first["sha256"],
             "status": "extracted_requires_mapping_validation",
             # An incremental read says so, and every read of a source with a changed column keeps its highest
             # value: where the next incremental read starts.
             **({"changed_column": watched, "high_water": high} if watched else {}),
             **({"since": request.since} if watched and request.since is not None else {}),
+            **({"tables": tables} if more else {}),
         }
         with (pending / "manifest.json").open("x", encoding="utf-8") as output:
             json.dump(manifest, output, ensure_ascii=False, indent=2)

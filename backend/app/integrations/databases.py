@@ -78,9 +78,9 @@ class _DatabaseConnector:
     #: How the engine's driver marks a parameter in a statement.
     placeholder = "%s"
 
-    def select(self, columns: tuple[str, ...], since_column: str = "") -> str:
+    def select(self, columns: tuple[str, ...], since_column: str = "", table: str = "") -> str:
         return (f"SELECT {', '.join(self.quote(c) for c in columns)} FROM "
-                f"{self.quote(self.source.schema)}.{self.quote(self.source.table)}"
+                f"{self.quote(self.source.schema)}.{self.quote(table or self.source.table)}"
                 + (f" WHERE {self.quote(since_column)} >= {self.placeholder}" if since_column else ""))
 
     def since_value(self, since: object) -> object:
@@ -108,7 +108,8 @@ class _DatabaseConnector:
         self.source_schema = []
         if (request.organization_id, request.connection_id) != (source.organization_id, source.connection_id):
             raise ExtractionError("Connection scope mismatch")
-        if request.source_object != source.table or not set(request.columns).issubset(source.columns):
+        allowed = source.columns_of(request.source_object)
+        if allowed is None or not set(request.columns).issubset(allowed):
             raise ExtractionError("Source object or columns are not permitted")
         if cancelled.is_set():
             raise ExtractionCancelled("Extraction cancelled")
@@ -140,10 +141,10 @@ class _DatabaseConnector:
             try:
                 if request.since_column and request.since is not None:
                     # Only what changed since the last read; >= so rows stamped in the same instant are not lost.
-                    cursor.execute(self.select(request.columns, request.since_column),
+                    cursor.execute(self.select(request.columns, request.since_column, request.source_object),
                                    self.params(self.since_value(request.since)))
                 else:
-                    cursor.execute(self.select(request.columns))
+                    cursor.execute(self.select(request.columns, table=request.source_object))
                 while True:
                     if cancelled.is_set():
                         raise ExtractionCancelled("Extraction cancelled")

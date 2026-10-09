@@ -38,6 +38,8 @@ type B = Blockly.Block & {
   version?: number;
   /** The model's `predictors` declaration, carried as it is (Epic ML). */
   predictors?: Record<string, { inputs: number }>;
+  /** The model's top-level keys no block draws (`generate`, ...), carried as they are. */
+  carried?: Record<string, unknown>;
   isGiven?: boolean;
   emptyGiven?: boolean;
   labelPresent?: boolean;
@@ -335,11 +337,14 @@ export function defineIrBlocks(): void {
       this.version = 2;
     },
     saveExtraState(this: B) {
-      return { version: this.version, ...(this.predictors ? { predictors: this.predictors } : {}) };
+      return { version: this.version, ...(this.predictors ? { predictors: this.predictors } : {}),
+        ...(this.carried ? { carried: this.carried } : {}) };
     },
-    loadExtraState(this: B, state: { version: number; predictors?: Record<string, { inputs: number }> }) {
+    loadExtraState(this: B, state: { version: number; predictors?: Record<string, { inputs: number }>;
+      carried?: Record<string, unknown> }) {
       this.version = state.version;
       if (state.predictors) this.predictors = state.predictors;
+      if (state.carried) this.carried = state.carried;
     },
   };
 

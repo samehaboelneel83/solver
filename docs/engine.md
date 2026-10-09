@@ -8,6 +8,7 @@ IPOPT, CP-SAT, SCIP) — no commercial solver is needed for any of them.
 | Several good plans to pick from, not one | `"alternatives": 5` on a run | The next-best distinct plans within a gap of the best, each a run of its own |
 | A better answer to a nonlinear model | setting `solve.solver_params` = `ipopt.starts=8` | IPOPT from several starting points; the best answer is kept |
 | A large mixed model with an easy continuous part | `"solver": "benders"` on a run | Benders decomposition over HiGHS; a proven optimum |
+| A linear model with many more decisions than rules | `"solver": "colgen"` on a run | Column generation over HiGHS; a bound over every column |
 | The learned selector to choose the solver | setting `solve.selector_acts` = `true` | A confident pick solves the run; the reason is recorded |
 | A faster “why is this infeasible?” on large models | nothing — always on | QuickXplain in the conflict search above 12 candidate rules |
 | A network model solved as a network, by NetworkX | `"solver": "networkx"` on a run (or nothing: the network lane uses it) | Network simplex (min-cost flow); a proven optimum |
@@ -74,6 +75,40 @@ faster.
   feasibility cuts`.
 
 Code: `backend/app/solve/benders.py` (runs in HiGHS's child process, `highs_worker`).
+
+HiGHS counts a time limit against all the run time of one solver, not each solve's (`getRunTime`), so
+each round's limit is that run time plus what is left (9 October 2026; before, later rounds stopped early
+once the rounds before had used the time left).
+
+## 3a. Column generation (plan of 8 October 2026, 1D)
+
+For a linear model with far more decisions than rules -- every pairing of crews and duties, every
+cutting pattern, a large candidate list -- most of whose decisions are zero in any good answer. Asked for
+by name: `"solver": "colgen"`.
+
+- A **restricted master** holds the rules over a few columns: every decision that cannot be left at zero,
+  and the cheapest of the rest. Each round, the master's row prices give every column its reduced cost at
+  once, from the rule matrix (no problem-specific pricing), and the most improving columns join the
+  master, until none improves.
+- **Bound**: at each round's prices, the Lagrangian of the rules over *every* column -- a proven bound on
+  the whole model even if the loop is stopped early. **Answer**: the master once more with whole-number
+  decisions whole, over the columns found (price and branch); proven best only when it meets the bound,
+  otherwise `feasible` with the gap.
+- Rows the starting point does not meet get two slack columns at a large price, so the first masters
+  have an answer; a slack still used when no column improves, and no whole answer, is `infeasible`.
+- Refused with the reason: a goal or rule that is not linear, curves, functions, schedules or
+  placements.
+- A model with fewer than twice as many decisions as rules gains nothing from a small master (the camp's
+  candidate list at 0.5 m has 54,468 positions and 116,686 rules, and each master solve was slower than
+  the last): the master is then the whole model from the start, solved as HiGHS would, its whole-number
+  optimum proven, and the solver string says so.
+- Measured (9 October 2026): a set cover of 300 items by 60,000 sets, as a linear program -- 2.4 s and
+  3,143 columns, against 10.8 s for HiGHS on the whole model, the same optimum; whole-numbered, both
+  are still searching at 60 s, with the same bound.
+- The solver string records the work, e.g. `colgen (highs 1.15.1): 6 rounds, 1,243 of 40,000 columns`.
+
+Code: `backend/app/solve/colgen.py` (runs in HiGHS's child process, `highs_worker`); tests
+`backend/tests/test_colgen.py`.
 
 ## 4. The learned selector acting (E-4)
 

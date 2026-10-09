@@ -44,6 +44,9 @@ class PostgresSource:
     #: A column that grows when a row changes (an update time, a version): lets a read take only what changed
     #: (migration 0118). One of `columns`; empty when the source is always read whole.
     changed_column: str = ""
+    #: Further tables of the same database read with it, as one source (each `(table, columns, changed_column)`):
+    #: one extraction, a sheet per table (handover of 8 October 2026).
+    more_tables: tuple = ()
 
     def __post_init__(self):
         if self.engine not in ("postgres", "mysql", "sqlserver", "oracle"):
@@ -65,6 +68,25 @@ class PostgresSource:
             ipaddress.ip_network(network)
         if self.changed_column and self.changed_column not in self.columns:
             raise ValueError("The changed column must be one of the columns read")
+        names = [self.table]
+        for entry in self.more_tables:
+            table, columns, changed = (tuple(entry) + ("",))[:3]
+            if not table or "\x00" in table or not columns or len(set(columns)) != len(columns) \
+                    or any(not c or "\x00" in c for c in columns):
+                raise ValueError("Invalid source identifiers")
+            if changed and changed not in columns:
+                raise ValueError("The changed column must be one of the columns read")
+            names.append(table)
+        if len(set(names)) != len(names):
+            raise ValueError("A table is named twice")
+
+    def tables(self) -> list[tuple[str, tuple[str, ...], str]]:
+        """Every table the source reads: (table, columns, changed column), the first one first."""
+        return [(self.table, tuple(self.columns), self.changed_column)] + [
+            (str(t[0]), tuple(t[1]), str((tuple(t) + ("",))[2] or "")) for t in self.more_tables]
+
+    def columns_of(self, table: str) -> tuple[str, ...] | None:
+        return next((columns for name, columns, _ in self.tables() if name == table), None)
 
 
 def resolve_address(source: PostgresSource) -> str:
@@ -150,7 +172,8 @@ class PostgresConnector:
         self.source_schema = []
         if (request.organization_id, request.connection_id) != (source.organization_id, source.connection_id):
             raise ExtractionError("Connection scope mismatch")
-        if request.source_object != source.table or not set(request.columns).issubset(source.columns):
+        allowed = source.columns_of(request.source_object)
+        if allowed is None or not set(request.columns).issubset(allowed):
             raise ExtractionError("Source object or columns are not permitted")
         if cancelled.is_set():
             raise ExtractionCancelled("Extraction cancelled")
@@ -190,7 +213,7 @@ class PostgresConnector:
                 cursor.itersize = request.limits.batch_rows
                 select = sql.SQL("SELECT {} FROM {}.{}").format(
                     sql.SQL(", ").join(sql.Identifier(column) for column in request.columns),
-                    sql.Identifier(source.schema), sql.Identifier(source.table),
+                    sql.Identifier(source.schema), sql.Identifier(request.source_object),
                 )
                 if request.since_column and request.since is not None:
                     # Only what changed since the last read; >= so rows stamped in the same instant are not lost.

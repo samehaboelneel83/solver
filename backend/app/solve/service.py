@@ -135,8 +135,12 @@ def enqueue_run(
     alternatives: int | None = None,
     alternatives_within: float | None = None,
     alternatives_min_changes: int | None = None,
+    workers: int | None = None,
 ) -> int:
     """Freeze the data and queue the work. Returns the run's id.
+
+    `workers`, when given, is the threads this run asks for in place of the `solve.workers` setting: a batch of
+    runs queued together asks for its share, so they solve side by side (`refresh.solve_again`).
 
     **A question already answered is not solved again** (`reuse`, on by
     default): when a run with the same model, data, patch and deciding
@@ -188,8 +192,12 @@ def enqueue_run(
     if seed is None:
         seed = int(settings["solve.seed"].value)
         from_settings["seed"] = settings["solve.seed"].source
+    asked_workers = workers
     workers = int(settings["solve.workers"].value)
     from_settings["workers"] = settings["solve.workers"].source
+    if asked_workers is not None:
+        workers = max(1, int(asked_workers))
+        from_settings["workers"] = "request"
     gap_rel = float(settings["solve.gap_rel"].value)
     from_settings["gap_rel"] = settings["solve.gap_rel"].source
     cpsat_scaling = bool(settings["solve.cpsat_scaling"].value)
@@ -629,6 +637,15 @@ def variable_count(ir: dict[str, Any], data: dict[str, Any]) -> int:
     """How many decisions the model has on this data: each variable once per
     combination of its index sets' members."""
     sets = data.get("sets") or {}
+    if ir.get("generate"):
+        # A generated set has no stored members: counted by building it (a recipe too large refuses at the run).
+        from app.solve import generate
+
+        try:
+            counts = generate.sizes(ir, data)
+        except generate.Refused:
+            counts = {}
+        sets = {**sets, **{name: range(n) for name, n in counts.items()}}
     total = 0
     for spec in (ir.get("variables") or {}).values():
         size = 1
@@ -897,6 +914,14 @@ def _execute(
             events.stage("compiling", model_class=found.model_class)
             t_compile = time.monotonic()
             with tracing.span("compile") as compiling:
+                # The sets a recipe makes, built here once (app.solve.generate): the rest of the run -- locks,
+                # blocks, the result's read-back -- sees them as if stored.
+                from app.solve import generate
+
+                try:
+                    data = generate.apply(ir, data)
+                except generate.Refused as refused:
+                    raise Unsupported(f"generate: {refused}") from None
                 compiled = unlocked = compile_model(ir, data)
                 if (params.get("_locks") or params.get("_stay_close")) and params.get("stochastic_samples")                         and stochastic_rows.wanted(ir):
                     raise Unsupported("locks and stay_close are not kept by a stochastic solve: each future is "

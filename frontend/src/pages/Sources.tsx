@@ -45,7 +45,7 @@ export const ERROR_TEXT: Record<string, string> = {
   extraction_failed: "The source could not be read. Check that the host is reachable from the import worker, that the credential is current, and that the table and columns exist.",
   deadline_exceeded: "The extraction ran past its time limit (about five minutes). Extract fewer columns, or a smaller table or view.",
   worker_lost: "The import worker stopped during the extraction. Run it again; nothing was changed.",
-  authentication_failed: "The database refused the user name or password. Check the user exists on the source and replace the credential.",
+  authentication_failed: "The source refused the login: the user name and password, the token, or the client id and secret. Check it is current on the source and replace the credential.",
   tls_failed: "The secure connection could not be verified. The source's certificate must be signed by the CA this server trusts and name the host you entered.",
   source_unreachable: "The database could not be reached from the import worker. Check the host name and port, and that the database is running and accepts connections.",
   network_not_allowed: "The database's address is outside the networks this server may connect to. An administrator can add its network to the integration policy.",
@@ -349,22 +349,36 @@ export function engineDefaults(fields: { engine: string; port: string; schema: s
   };
 }
 
+/** "table: col, col" per line, as further tables of a database source. */
+export function moreTables(text: string): { table: string; columns: string[] }[] {
+  return text.split("\n").map((line) => line.trim()).filter(Boolean).flatMap((line) => {
+    const [table, rest = ""] = line.split(":");
+    const columns = rest.split(",").map((c) => c.trim()).filter(Boolean);
+    return table.trim() && columns.length ? [{ table: table.trim(), columns }] : [];
+  });
+}
+
 function SourceForm({ domainId, onDone }: { domainId: string; onDone: (created: boolean) => void }) {
   const id = useId();
   const [kind, setKind] = useState<"postgres" | "http">("postgres");
   const [fields, setFields] = useState({ name: "", engine: "postgres", host: "", port: "5432", database: "", username: "", schema: "public", table: "", columns: "", password: "",
-    url: "", format: "json", auth: "none", sheet: "", records_at: "", paging: "none", next_at: "", page_param: "", changed_column: "" });
+    url: "", format: "json", auth: "none", sheet: "", records_at: "", paging: "none", next_at: "", page_param: "", changed_column: "", more_tables: "",
+    token_url: "", client_id: "", scope: "", audience: "", client_auth: "basic" });
   const columns = fields.columns.split(",").map((c) => c.trim()).filter(Boolean);
   const create = useMutation({
     mutationFn: () => post<{ id: number }>("/api/v1/connections", kind === "postgres" ? {
       domain_id: Number(domainId), name: fields.name.trim(), password: fields.password,
       source: { engine: fields.engine, host: fields.host.trim(), port: Number(fields.port), database: fields.database.trim(), username: fields.username.trim(),
         schema: fields.schema.trim() || (fields.engine === "mysql" ? fields.database.trim() : ""), table: fields.table.trim(), columns,
-        ...(fields.changed_column.trim() ? { changed_column: fields.changed_column.trim() } : {}) },
+        ...(fields.changed_column.trim() ? { changed_column: fields.changed_column.trim() } : {}),
+        ...(moreTables(fields.more_tables).length ? { more_tables: moreTables(fields.more_tables) } : {}) },
     } : {
       domain_id: Number(domainId), name: fields.name.trim(), ...(fields.auth === "none" ? {} : { password: fields.password }),
       source: { kind: "http", url: fields.url.trim(), format: fields.format, auth: fields.auth, columns,
         ...(fields.auth === "basic" ? { username: fields.username.trim() } : {}),
+        // OAuth 2 client credentials: the secret is exchanged at the token address for each read's token.
+        ...(fields.auth === "oauth_client" ? { token_url: fields.token_url.trim(), client_id: fields.client_id.trim(), client_auth: fields.client_auth,
+          ...(fields.scope.trim() ? { scope: fields.scope.trim() } : {}), ...(fields.audience.trim() ? { audience: fields.audience.trim() } : {}) } : {}),
         ...(fields.format === "xlsx" && fields.sheet.trim() ? { sheet: fields.sheet.trim() } : {}),
         ...(fields.format === "json" && fields.records_at.trim() ? { records_at: fields.records_at.trim() } : {}),
         // A REST answer in pages: every page is read, under the same rules as the first.
@@ -380,7 +394,7 @@ function SourceForm({ domainId, onDone }: { domainId: string; onDone: (created: 
         onChange={(event) => setFields({ ...fields, [key]: event.target.value })} className="mt-1 w-full rounded border border-slate-300 px-2 py-1" />
     </label>
   );
-  const choice = (key: "format" | "auth" | "engine" | "paging", label: string, options: [string, string][]) => (
+  const choice = (key: "format" | "auth" | "engine" | "paging" | "client_auth", label: string, options: [string, string][]) => (
     <label className="block text-sm" htmlFor={`${id}-${key}`}>{label}
       <select id={`${id}-${key}`} value={fields[key]} onChange={(event) => setFields({ ...fields, [key]: event.target.value,
         // A new engine brings its usual port and schema, unless the person typed their own.
@@ -393,6 +407,7 @@ function SourceForm({ domainId, onDone }: { domainId: string; onDone: (created: 
   const needed: (keyof typeof fields)[] = kind === "postgres"
     ? ["name", "host", "database", "username", "table", "columns", "password", ...(fields.engine === "mysql" ? [] : ["schema" as const])]
     : ["name", "url", "columns", ...(fields.auth === "none" ? [] : ["password" as const]), ...(fields.auth === "basic" ? ["username" as const] : []),
+       ...(fields.auth === "oauth_client" ? ["token_url" as const, "client_id" as const] : []),
        ...(fields.format === "json" && fields.paging === "next_link" ? ["next_at" as const] : []),
        ...(fields.format === "json" && fields.paging === "page_number" ? ["page_param" as const] : [])];
   const missing = needed.filter((k) => !fields[k].trim());
@@ -413,6 +428,10 @@ function SourceForm({ domainId, onDone }: { domainId: string; onDone: (created: 
       {field("schema", fields.engine === "oracle" ? "Owner (schema)" : fields.engine === "mysql" ? "Database the table is in" : "Schema")}
       {field("table", "Table or view")}
       {field("changed_column", "Changed column, to read only what changed (an update time or version; optional)")}
+      <label className="block text-sm sm:col-span-2" htmlFor={`${id}-more`}>Further tables of the same schema, read with it (one per line: table: column, column)
+        <textarea id={`${id}-more`} rows={2} value={fields.more_tables} onChange={(event) => setFields({ ...fields, more_tables: event.target.value })}
+          className="mt-1 w-full rounded border border-slate-300 px-2 py-1 font-mono text-xs" placeholder="shifts: id, day, hours" />
+      </label>
     </> : <>
       <div className="sm:col-span-2">{field("url", "Address (https://…)")}</div>
       {choice("format", "What it answers", [["json", "JSON list of records"], ["csv", "CSV file"], ["xlsx", "Excel workbook"]])}
@@ -423,9 +442,17 @@ function SourceForm({ domainId, onDone }: { domainId: string; onDone: (created: 
       {fields.format === "json" && fields.paging === "next_link" && field("next_at", "Where the next address is (e.g. next, links.next)")}
       {fields.format === "json" && fields.paging === "page_number" && field("page_param", "The address's page parameter (e.g. page)")}
       {fields.format === "xlsx" && field("sheet", "Sheet (empty for the first)")}
-      {choice("auth", "Login", [["none", "None"], ["bearer", "Token (bearer)"], ["basic", "User name and password"]])}
+      {choice("auth", "Login", [["none", "None"], ["bearer", "Token (bearer)"], ["basic", "User name and password"],
+        ["oauth_client", "Client id and secret (OAuth 2 client credentials)"]])}
       {fields.auth === "basic" && field("username", "User name")}
-      {fields.auth !== "none" && field("password", fields.auth === "bearer" ? "Token" : "Password", "password")}
+      {fields.auth === "oauth_client" && <>
+        <div className="sm:col-span-2">{field("token_url", "Token address (https://…)")}</div>
+        {field("client_id", "Client id")}
+        {choice("client_auth", "Secret sent", [["basic", "As HTTP Basic (usual)"], ["post", "In the form"]])}
+        {field("scope", "Scope (optional)")}
+        {field("audience", "Audience (optional; some providers ask for it)")}
+      </>}
+      {fields.auth !== "none" && field("password", fields.auth === "bearer" ? "Token" : fields.auth === "oauth_client" ? "Client secret" : "Password", "password")}
     </>}
     <div className="sm:col-span-2">{field("columns", "Columns to extract, separated by commas")}</div>
     <p className="text-xs text-slate-600 sm:col-span-2">
@@ -497,7 +524,7 @@ function JobHistory({ domainId, source, canManage, onChanged }: { domainId: stri
 
 // -- the import wizard ---------------------------------------------------------------
 
-type Preview = { columns: string[]; rows_total: number; rows: Record<string, unknown>[]; sha256: string; source_object: string | null };
+type Preview = { columns: string[]; rows_total: number; rows: Record<string, unknown>[]; sha256: string; source_object: string | null; tables?: string[] };
 type Fault = { row: number; column: string | null; message: string };
 type Validation = {
   validation_id: number; ok: boolean; rows: number; would_write: number; faults: Fault[];
@@ -547,7 +574,10 @@ export function guessMapping(sources: string[], targets: string[]): Record<strin
 export function ImportWizard() {
   const { domainId, jobId } = useParams();
   useDocumentTitle("Import an extraction");
-  const preview = useQuery({ queryKey: ["import-preview", jobId], queryFn: () => apiFetch<Preview>(`/api/v1/ingestion-jobs/${jobId}/preview?limit=20`) });
+  // A source of several tables: each is imported on its own (a mapping names its table).
+  const [table, setTable] = useState<string | null>(null);
+  const preview = useQuery({ queryKey: ["import-preview", jobId, table],
+    queryFn: () => apiFetch<Preview>(`/api/v1/ingestion-jobs/${jobId}/preview?limit=20${table ? `&table=${encodeURIComponent(table)}` : ""}`) });
   const types = useEntityTypes(Number(domainId), { limit: 500 });
   const relationships = useRelationshipTypes(Number(domainId), { limit: 500 });
   const parameters = useParameters(Number(domainId), { limit: 500 });
@@ -561,7 +591,8 @@ export function ImportWizard() {
   const chosen = options.find((t) => t.id === typeId) ?? null;
   const { columns: targets, required } = targetColumns(kind, chosen, typeItems);
   const validate = useMutation({
-    mutationFn: () => post<Validation>(`/api/v1/ingestion-jobs/${jobId}/validate`, { [`${kind}_id`]: typeId, columns: mapping }),
+    mutationFn: () => post<Validation>(`/api/v1/ingestion-jobs/${jobId}/validate`, { [`${kind}_id`]: typeId, columns: mapping,
+      ...(table ? { table } : {}) }),
     onSuccess: setReport,
   });
   const load = useMutation({
@@ -580,6 +611,14 @@ export function ImportWizard() {
 
     <section aria-labelledby="step-preview">
       <h2 id="step-preview" className="mb-2 text-lg font-semibold">1. Preview</h2>
+      {(preview.data.tables?.length ?? 0) > 1 && (
+        <label className="mb-2 block text-sm">Table
+          <select className="ms-2 rounded border border-slate-300 px-2 py-1" value={table ?? preview.data.tables![0]}
+            onChange={(event) => { setTable(event.target.value === preview.data!.tables![0] ? null : event.target.value); setMapping({}); setReport(null); }}>
+            {preview.data.tables!.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </label>
+      )}
       <p className="mb-2 text-sm text-slate-600">{preview.data.rows_total} rows from {preview.data.source_object ?? "the source"}; the first {preview.data.rows.length} below.</p>
       <div className="overflow-x-auto rounded border border-slate-200">
         <table className="w-full text-left text-sm" aria-label="Extracted rows">

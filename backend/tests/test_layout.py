@@ -116,8 +116,11 @@ def test_the_assistant_tool_attaches_the_files_and_returns_the_plan(tmp_path, mo
     text = agent.run_tool("make_layout", {"area_layers": ["BOUNDARY"], "blocked_layers": ["OBSTACLES"],
                                           "items": [{"name": "bed", "length": 1.5, "width": 0.5, "rotations": [0, 90]}],
                                           "aisle": 0.35, "aisle_side": "short", "form": "candidates"})
-    assert text.startswith("LAYOUT made") and '"entities_from_file"' in text
-    assert {"layout_items.csv", "layout_occupies.csv", "layout_keeps_free.csv"} <= {x["name"] for x in agent.ctx.files}
+    assert text.startswith("LAYOUT made") and '"entities_from_file"' in text and '"generate"' in text
+    # The candidate list is its recipe: the areas and kinds are attached, no positions or links (plan 1B).
+    names = {x["name"] for x in agent.ctx.files}
+    assert {"layout_areas.csv", "layout_kinds.csv"} <= names and "layout_occupies.csv" not in names
+    assert "each run builds the positions" in text
     assert "make_layout" in {t["function"]["name"] for t in core.MODEL_TOOLS}
 
 

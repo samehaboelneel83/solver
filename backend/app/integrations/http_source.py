@@ -10,6 +10,12 @@ A JSON answer may come in pages (`paging`): the next page's address in the answe
 number in the address (`page_number`, `page_param`, from `first_page`, until a page is empty). Every page is read
 under the same policy: the same host (so the same approved network), https, no redirects, and one byte budget for all
 of them; at most MAX_PAGES pages, and an address seen twice ends the reading.
+
+A source may sign in by OAuth 2 client credentials (`auth="oauth_client"`): the client id and the stored secret are
+exchanged at `token_url` for an access token, sent as a bearer token. The token endpoint is read under the same
+policy as the data -- https, inside the approved networks, verified TLS, no redirects, a small answer -- and the
+secret goes as HTTP Basic (`client_auth="basic"`, RFC 6749's default) or in the form (`"post"`). The token lives
+only for the extraction; a page refused with 401 takes one fresh token, then the refusal stands.
 """
 from __future__ import annotations
 
@@ -28,7 +34,10 @@ from uuid import UUID
 from .contracts import ConnectorCapabilities, ExtractionCancelled, ExtractionError, ExtractionRequest
 
 FORMATS = ("json", "csv", "xlsx")
-AUTHS = ("none", "bearer", "basic")
+AUTHS = ("none", "bearer", "basic", "oauth_client")
+CLIENT_AUTHS = ("basic", "post")
+#: The most a token endpoint's answer may be.
+MAX_TOKEN_BODY = 64 * 1024
 #: The most a response may be -- all its pages together: the extraction's own byte budget.
 MAX_BODY = 20 * 1024 * 1024
 PAGINGS = ("none", "next_link", "link_header", "page_number")
@@ -55,6 +64,11 @@ class HttpSource:
     next_at: str = ""  # next_link: where the next page's address is in the answer ("next", "links.next")
     page_param: str = ""  # page_number: the address's parameter for the page ("page")
     first_page: int = 1
+    token_url: str = ""  # oauth_client: the token endpoint
+    client_id: str = ""
+    scope: str = ""
+    audience: str = ""  # some providers ask for the API's name with the grant
+    client_auth: str = "basic"
 
     def __post_init__(self):
         parts = urlsplit(self.url or "")
@@ -70,6 +84,12 @@ class HttpSource:
             ipaddress.ip_network(network)
         if self.auth == "basic" and not self.username:
             raise ValueError("Basic authentication needs a user name")
+        if self.auth == "oauth_client":
+            token = urlsplit(self.token_url or "")
+            if token.scheme != "https" or not token.hostname or token.username or token.password:
+                raise ValueError("Client-credential sign-in needs an https:// token address without a user name in it")
+            if not self.client_id or self.client_auth not in CLIENT_AUTHS:
+                raise ValueError("Client-credential sign-in needs a client id, its secret sent as basic or post")
         if self.paging not in PAGINGS:
             raise ValueError("Unknown paging")
         if self.paging != "none" and self.format != "json":
@@ -85,8 +105,9 @@ class HttpSource:
         return self.sheet or (urlsplit(self.url).path.rstrip("/").rsplit("/", 1)[-1] or urlsplit(self.url).hostname)
 
 
-def resolve(source: HttpSource) -> str:
-    host = urlsplit(source.url).hostname or ""
+def resolve(source: HttpSource, url: str | None = None) -> str:
+    """The address's host checked to resolve inside the approved networks (the source's own, or `url`'s)."""
+    host = urlsplit(url or source.url).hostname or ""
     networks = [ipaddress.ip_network(n) for n in source.allowed_networks]
     try:
         addresses = sorted({item[4][0] for item in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)})
@@ -185,6 +206,10 @@ def _records(source: HttpSource, body: bytes) -> list[dict]:
         raise ExtractionError("The answer could not be read as " + source.format, "format_invalid") from None
 
 
+class _Refused(Exception):
+    """A page answered 401 / 407: the caller decides whether a fresh token may be tried."""
+
+
 class HttpConnector:
     capabilities = ConnectorCapabilities("https", "1")
 
@@ -211,7 +236,9 @@ class HttpConnector:
             verify = source.root_certificate
         headers = {"Accept": "application/json" if source.format == "json" else "*/*"}
         auth = None
-        if source.auth == "bearer":
+        if source.auth == "oauth_client":
+            headers["Authorization"] = "Bearer " + self._token(verify, cancelled)
+        elif source.auth == "bearer":
             headers["Authorization"] = "Bearer " + self._resolve_secret(source.secret_ref)
         elif source.auth == "basic":
             auth = (source.username, self._resolve_secret(source.secret_ref))
@@ -226,7 +253,17 @@ class HttpConnector:
             if len(seen) >= MAX_PAGES:
                 raise ExtractionError(f"The answer has more than {MAX_PAGES} pages", "limit_exceeded")
             seen.add(url)
-            body, link = self._page(url, headers, auth, verify, cancelled, MAX_BODY - used)
+            try:
+                body, link = self._page(url, headers, auth, verify, cancelled, MAX_BODY - used)
+            except _Refused:
+                if source.auth != "oauth_client":
+                    raise ExtractionError("The source refused the credential", "authentication_failed") from None
+                # The token may have run out during a long read: one fresh token, then the refusal stands.
+                headers["Authorization"] = "Bearer " + self._token(verify, cancelled)
+                try:
+                    body, link = self._page(url, headers, auth, verify, cancelled, MAX_BODY - used)
+                except _Refused:
+                    raise ExtractionError("The source refused the access token", "authentication_failed") from None
             used += len(body)
             if source.paging == "none":
                 records = _records(source, body)
@@ -261,7 +298,7 @@ class HttpConnector:
                               transport=self._transport, trust_env=False) as client:
                 with client.stream("GET", url, headers=headers, auth=auth) as answer:
                     if answer.status_code in (401, 407):
-                        raise ExtractionError("The source refused the credential", "authentication_failed")
+                        raise _Refused()
                     if answer.status_code == 403:
                         raise ExtractionError("The credential may not read this", "not_permitted")
                     if answer.status_code in (404, 410):
@@ -279,7 +316,7 @@ class HttpConnector:
                         if len(body) > budget:
                             raise ExtractionError("The answer is larger than one extraction allows", "limit_exceeded")
                     link = answer.headers.get("link", "")
-        except ExtractionError:
+        except (ExtractionError, _Refused):
             raise
         except httpx.ConnectError as exc:
             said = str(exc).lower()
@@ -290,3 +327,61 @@ class HttpConnector:
         except Exception:
             raise ExtractionError("The source could not be read", "extraction_failed") from None
         return bytes(body), link
+
+    def _token(self, verify, cancelled: Event) -> str:
+        """An access token by the client-credentials grant, from the source's token endpoint."""
+        import httpx
+
+        source = self.source
+        if cancelled.is_set():
+            raise ExtractionCancelled("Extraction cancelled")
+        if self._transport is None:
+            resolve(source, source.token_url)
+        secret = self._resolve_secret(source.secret_ref)
+        form = {"grant_type": "client_credentials"}
+        if source.scope:
+            form["scope"] = source.scope
+        if source.audience:
+            form["audience"] = source.audience
+        auth = None
+        if source.client_auth == "post":
+            form.update(client_id=source.client_id, client_secret=secret)
+        else:
+            auth = (source.client_id, secret)
+        try:
+            with httpx.Client(verify=verify, timeout=source.timeout_seconds, follow_redirects=False,
+                              transport=self._transport, trust_env=False) as client:
+                with client.stream("POST", source.token_url, data=form, auth=auth,
+                                   headers={"Accept": "application/json"}) as answer:
+                    if answer.status_code in (400, 401, 403):
+                        raise ExtractionError("The token address refused the client id or secret",
+                                              "authentication_failed")
+                    if 300 <= answer.status_code < 400:
+                        raise ExtractionError("The token address redirects elsewhere; give the final address",
+                                              "source_missing")
+                    if answer.status_code >= 400:
+                        raise ExtractionError("The token address answered with an error", "source_unreachable")
+                    body = bytearray()
+                    for chunk in answer.iter_bytes():
+                        body += chunk
+                        if len(body) > MAX_TOKEN_BODY:
+                            raise ExtractionError("The token address's answer is too large", "format_invalid")
+        except ExtractionError:
+            raise
+        except httpx.ConnectError as exc:
+            said = str(exc).lower()
+            code = "tls_failed" if "certificate" in said or "ssl" in said or "tls" in said else "source_unreachable"
+            raise ExtractionError("The token address could not be reached", code) from None
+        except httpx.TimeoutException:
+            raise ExtractionError("The token address did not answer in time", "deadline_exceeded") from None
+        except Exception:
+            raise ExtractionError("The token address could not be read", "extraction_failed") from None
+        try:
+            data = json.loads(bytes(body).decode("utf-8-sig"))
+        except Exception:
+            data = None
+        token = data.get("access_token") if isinstance(data, dict) else None
+        kind = str(data.get("token_type") or "bearer").lower() if isinstance(data, dict) else ""
+        if not isinstance(token, str) or not token or kind != "bearer":
+            raise ExtractionError("The token address gave no bearer access token", "authentication_failed")
+        return token

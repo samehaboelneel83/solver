@@ -48,6 +48,7 @@ import {
   VARIABLE_DOMAINS,
   isName,
 } from "./contract";
+import { checkRecipe, outputs as recipeOutputs } from "./generate";
 
 export type IrLoc = (string | number)[];
 
@@ -157,6 +158,9 @@ function unknownKey(
   return null;
 }
 
+/** The most recipes one model's `generate` holds (as `MAX_RECIPES` in `app/ir/validate.py`). */
+const MAX_RECIPES = 20;
+
 class ShapeChecker {
   readonly sets = new Set<string>();
   readonly relationships = new Set<string>();
@@ -235,6 +239,28 @@ class ShapeChecker {
         );
       }
       this.relationships.add(name);
+    }
+    return null;
+  }
+
+  /** `generate` (version 2, plan phase 1B): sets the worker builds from a recipe (as `check_generate` in
+   * `app/ir/validate.py`); what each recipe makes is a set or relationship like any. */
+  checkGenerate(): IrRefusal | null {
+    const recipes = this.ir.generate;
+    if (recipes === undefined || recipes === null) return null;
+    if (this.ir.version === 1) {
+      return refusal("generate_needs_version_2", ["generate"],
+        "generated sets are a version 2 construct; publish the model as version 2");
+    }
+    if (!Array.isArray(recipes) || recipes.length < 1 || recipes.length > MAX_RECIPES) {
+      return refusal("generate_malformed", ["generate"], `generate is a list of 1 to ${MAX_RECIPES} recipes`);
+    }
+    for (let i = 0; i < recipes.length; i += 1) {
+      const fault = checkRecipe(recipes[i], this.sets, this.relationships);
+      if (fault) return refusal(fault[0], ["generate", i, ...fault[1]], fault[2]);
+      const made = recipeOutputs(recipes[i] as Json);
+      made.sets.forEach((name) => this.sets.add(name));
+      made.relationships.forEach((name) => this.relationships.add(name));
     }
     return null;
   }
@@ -2312,6 +2338,7 @@ export function checkIrShape(ir: unknown): IrRefusal | null {
   for (const step of [
     () => checker.checkSets(),
     () => checker.checkRelationships(),
+    () => checker.checkGenerate(),
     () => checker.checkParameters(),
     () => checker.checkPredictors(),
     () => checker.checkVariables(),

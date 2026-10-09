@@ -46,13 +46,16 @@ def job_sheet(job: dict, organization_id) -> dict:
         raise artifacts.ArtifactUnavailable(f"this extraction has no rows to read (it is {job['state']})")
     path = artifacts.folder(organization_id, job["connection_id"], job["artifact_id"])
     manifest = artifacts.manifest(path)
-    records = artifacts.verified_rows(path, manifest.get("sha256", ""), SOURCE_ROWS)
-    columns = list(manifest.get("columns") or (list(records[0]) if records else []))
-    rows = [[agent_files._cell(r.get(c)) for c in columns] for r in records]
-    total = int(manifest.get("rows") or len(rows))
-    return {"name": job["connection_name"],
-            "sheets": [{"name": str(manifest.get("source_object") or "rows"), "columns": columns, "rows": rows,
-                        "total_rows": total, "truncated": total > len(rows)}],
+    sheets = []
+    for entry in artifacts.tables(manifest):  # a sheet per table read (one source, several tables)
+        records = artifacts.verified_rows(path, entry.get("sha256", ""), SOURCE_ROWS, entry.get("file") or "rows.jsonl")
+        columns = list(entry.get("columns") or (list(records[0]) if records else []))
+        rows = [[agent_files._cell(r.get(c)) for c in columns] for r in records]
+        total = int(entry.get("rows") or len(rows))
+        sheets.append({"name": str(entry.get("source_object") or "rows"), "columns": columns, "rows": rows,
+                       "total_rows": total, "truncated": total > len(rows),
+                       **({"since": entry["since"]} if entry.get("since") is not None else {})})
+    return {"name": job["connection_name"], "sheets": sheets,
             "source": {"connection_id": job["connection_id"], "job_id": job["id"],
                        "sha256": manifest.get("sha256"), "extracted_at": manifest.get("completed_at"),
                        **({"since": manifest["since"]} if manifest.get("since") is not None else {})}}
@@ -288,7 +291,11 @@ def compare(db: Session, domain_id: int, binding: dict, sheet: dict) -> dict:
         out = _relationships(db, domain_id, binding, wanted)
     else:
         out = _cells(db, domain_id, binding, wanted)
-    since = (sheet.get("source") or {}).get("since")
+    # The binding's own table: each table of a source has its own mark.
+    named = (binding.get("mapping") or {}).get("sheet")
+    own = next((t for t in sheet.get("sheets") or [] if t.get("name") == named), None) if named else None
+    own = own or ((sheet.get("sheets") or [None])[0] if len(sheet.get("sheets") or []) == 1 else None)
+    since = own.get("since") if own is not None else (sheet.get("source") or {}).get("since")
     if since is not None:
         # An incremental read (migration 0118) has only what changed since `since`: a record it does not have is
         # unchanged, not gone. A full read finds what was removed.
@@ -470,6 +477,23 @@ def scenarios_reading(db: Session, domain_id: int, targets: set[str]) -> list[di
     return found
 
 
+def batch_share(db: Session, n: int) -> int | None:
+    """The threads each of `n` re-solves asks for, so they solve side by side: the long lane's threads (the host's,
+    less the reserve kept for short runs) over as many as run at once (the solve workers online, or `n` if fewer).
+    None for a single run: it asks for what the settings say. Each asking for its full share, two of three
+    re-solves fitted on a 16-thread host and the third waited (handover of 8 October 2026)."""
+    from app.api.preflight import ONLINE_WITHIN_SECONDS
+    from app.solve.reserve import host_capacity
+
+    if n <= 1:
+        return None
+    online = db.execute(text("SELECT count(*) FROM worker_heartbeat WHERE last_seen > now() - make_interval(secs => :w)"),
+                        {"w": ONLINE_WITHIN_SECONDS}).scalar() or 1
+    capacity = host_capacity()
+    lane = capacity.workers - int(capacity.workers * capacity.short_share)
+    return max(1, lane // max(1, min(n, int(online))))
+
+
 def solve_again(db: Session, domain_id: int, report: dict) -> list[dict]:
     """After an applied refresh: a new run of every scenario that reads the refreshed data, beside its last answer."""
     from app.solve.service import enqueue_run
@@ -478,11 +502,13 @@ def solve_again(db: Session, domain_id: int, report: dict) -> list[dict]:
                if (b.get("written") or {}).get("added") or (b.get("written") or {}).get("changed")
                or (b.get("written") or {}).get("removed")}
     runs = []
-    for s in scenarios_reading(db, domain_id, targets)[:SOLVE_AT_MOST]:
+    chosen = scenarios_reading(db, domain_id, targets)[:SOLVE_AT_MOST]
+    share = batch_share(db, len(chosen))
+    for s in chosen:
         last = db.execute(text("SELECT id, objective FROM run WHERE scenario_id = :s AND status IN ('optimal', 'feasible')"
                                " ORDER BY id DESC LIMIT 1"), {"s": s["scenario_id"]}).first()
         try:
-            run_id = enqueue_run(db, s["scenario_id"])
+            run_id = enqueue_run(db, s["scenario_id"], workers=share)
             runs.append({**s, "run_id": run_id,
                          **({"previous_run_id": last.id, "previous_objective": float(last.objective)}
                             if last is not None and last.objective is not None else {})})

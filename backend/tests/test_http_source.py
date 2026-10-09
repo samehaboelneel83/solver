@@ -158,3 +158,120 @@ def test_a_next_page_elsewhere_is_refused_and_a_loop_ends():
     assert len(rows) == 1 and len(asked) == 1  # the same address again: read once
     with pytest.raises(ValueError):
         _source(paging="next_link")  # where the link is must be said
+
+
+def _oauth(**kw):
+    return _source(auth="oauth_client", secret_ref="x", token_url="https://login.internal/oauth/token",
+                   client_id="planner", scope="read:projects", **kw)
+
+
+def _signing_in(tokens: list[str], data_refusals: int = 0, token_answer=None):
+    """A token endpoint giving `tokens` in turn, and a data address refusing its first `data_refusals` reads."""
+    asked = []
+
+    def answer(request: httpx.Request):
+        if request.url.host == "login.internal":
+            from urllib.parse import parse_qsl
+
+            asked.append(("token", dict(parse_qsl(request.content.decode())), request.headers.get("authorization")))
+            if token_answer is not None:
+                return token_answer
+            return httpx.Response(200, json={"access_token": tokens.pop(0), "token_type": "Bearer", "expires_in": 60})
+        asked.append(("data", request.headers.get("authorization")))
+        if sum(1 for a in asked if a[0] == "data") <= data_refusals:
+            return httpx.Response(401)
+        return httpx.Response(200, json=[{"project": "P1", "cost": 4}])
+    return answer, asked
+
+
+def test_client_credentials_sign_in_sends_the_secret_as_basic_and_reads_with_the_token():
+    import base64
+
+    answer, asked = _signing_in(["t1"])
+    rows, seen = _read(_oauth(), answer, secret="s3")
+    assert rows == [{"project": "P1", "cost": 4}]
+    kind, form, header = asked[0]
+    assert kind == "token" and form == {"grant_type": "client_credentials", "scope": "read:projects"}
+    assert header == "Basic " + base64.b64encode(b"planner:s3").decode()
+    assert asked[1] == ("data", "Bearer t1")
+
+
+def test_client_credentials_may_go_in_the_form_with_an_audience():
+    answer, asked = _signing_in(["t1"])
+    _read(_oauth(client_auth="post", audience="https://api.internal"), answer, secret="s3")
+    kind, form, header = asked[0]
+    assert header is None
+    assert form == {"grant_type": "client_credentials", "scope": "read:projects", "audience": "https://api.internal",
+                    "client_id": "planner", "client_secret": "s3"}
+
+
+def test_a_refused_token_is_renewed_once_then_the_refusal_stands():
+    answer, asked = _signing_in(["t1", "t2"], data_refusals=1)
+    rows, _ = _read(_oauth(), answer)
+    assert rows and [a for a in asked if a[0] == "data"] == [("data", "Bearer t1"), ("data", "Bearer t2")]
+    answer, asked = _signing_in(["t1", "t2", "t3"], data_refusals=5)
+    with pytest.raises(ExtractionError) as failed:
+        _read(_oauth(), answer)
+    assert failed.value.code == "authentication_failed"
+    assert sum(1 for a in asked if a[0] == "token") == 2
+
+
+@pytest.mark.parametrize("token_answer,code", [
+    (httpx.Response(401), "authentication_failed"),
+    (httpx.Response(400, json={"error": "invalid_client"}), "authentication_failed"),
+    (httpx.Response(302, headers={"location": "https://elsewhere.example/"}), "source_missing"),
+    (httpx.Response(500), "source_unreachable"),
+    (httpx.Response(200, json={"token_type": "bearer"}), "authentication_failed"),
+    (httpx.Response(200, json={"access_token": "t", "token_type": "mac"}), "authentication_failed"),
+    (httpx.Response(200, content=b"x" * (65 * 1024)), "format_invalid"),
+])
+def test_token_failures_are_named(token_answer, code):
+    answer, _ = _signing_in([], token_answer=token_answer)
+    with pytest.raises(ExtractionError) as failed:
+        _read(_oauth(), answer)
+    assert failed.value.code == code
+
+
+def test_client_credentials_need_an_https_token_address_and_a_client_id():
+    good = dict(auth="oauth_client", secret_ref="x", token_url="https://login.internal/t", client_id="planner")
+    _source(**good)
+    for bad in (dict(token_url="http://login.internal/token"), dict(token_url="https://u:p@login.internal/t"),
+                dict(token_url=""), dict(client_id=""), dict(client_auth="jwt")):
+        with pytest.raises(ValueError):
+            _source(**{**good, **bad})
+
+
+def test_the_token_address_must_resolve_inside_the_approved_networks(monkeypatch):
+    import socket
+
+    from app.integrations import http_source
+
+    monkeypatch.setattr(socket, "getaddrinfo", lambda host, *a, **k: [(0, 0, 0, "", ("8.8.8.8" if host == "login.internal" else "10.0.0.4", 443))])
+    connector = HttpConnector(_oauth(), lambda _: "s")
+    with pytest.raises(ExtractionError) as failed:
+        connector._token(True, Event())
+    assert failed.value.code == "network_not_allowed"
+    assert http_source.resolve(_oauth()) == "10.0.0.4"
+
+
+def test_a_client_credential_source_is_saved_with_its_token_address_never_its_secret(setup):  # noqa: F811
+    client, body, tenants = setup
+    source = {"kind": "http", "url": "https://127.0.0.1:9/projects", "format": "json", "columns": ["project"],
+              "auth": "oauth_client", "token_url": "https://127.0.0.1:9/token", "client_id": "planner", "scope": "read"}
+    made = client.post("/api/v1/connections", headers=tenants["a"], json={
+        "domain_id": body["domain_id"], "name": "Signed-in API", "source": source, "password": "client-secret"})
+    assert made.status_code == 201, made.text
+    listed = client.get(f"/api/v1/connections?domain_id={body['domain_id']}", headers=tenants["a"]).json()
+    saved = next(c for c in listed["items"] if c["id"] == made.json()["id"])
+    assert saved["config"]["token_url"] == "https://127.0.0.1:9/token" and saved["config"]["client_id"] == "planner"
+    assert "client-secret" not in json.dumps(listed)
+    for bad in ({"token_url": ""}, {"token_url": "http://127.0.0.1:9/token"}, {"client_id": ""}):
+        assert client.post("/api/v1/connections", headers=tenants["a"], json={
+            "domain_id": body["domain_id"], "name": "x", "source": {**source, **bad}, "password": "s"}).status_code == 422
+    # The sign-in fields belong to the client-credential sign-in only.
+    assert client.post("/api/v1/connections", headers=tenants["a"], json={
+        "domain_id": body["domain_id"], "name": "x", "source": {**source, "auth": "bearer"}, "password": "s"}).status_code == 422
+    from app.integrations.policy import source_for
+
+    row = {"organization_id": ORG, "id": 1, "config": saved["config"]}
+    assert source_for(row).token_url == "https://127.0.0.1:9/token"

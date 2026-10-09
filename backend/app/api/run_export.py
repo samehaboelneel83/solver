@@ -56,10 +56,14 @@ def _record(db: Session, run_id: int) -> dict[str, Any]:
     results = [dict(r) for r in db.execute(
         text("SELECT constraint_id, label, hard, satisfied, total_violation, penalty_paid, slack, dual, violations"
              "  FROM constraint_result WHERE run_id = :r ORDER BY constraint_id"), {"r": run_id}).mappings()]
+    from app.solve.generate import for_run
     from app.solve.place_rule import with_positions
 
+    rec = dict(row)
+    # The sets the model's recipes make, built as the run built them (none are stored).
+    rec["data"] = for_run(run_id, rec.get("ir") or {}, rec.get("data") or {})
     # A place rule's chosen slots carry their rectangle in metres, as any placed record does (plan phase 1C).
-    return with_positions({**dict(row), "results": results})
+    return with_positions({**rec, "results": results})
 
 
 def with_map_shapes(db: Session | None, rec: dict[str, Any]) -> dict[str, Any]:

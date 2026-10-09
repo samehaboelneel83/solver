@@ -41,7 +41,7 @@ export function isName(value: unknown): value is string {
 }
 
 export const REQUIRED_KEYS = ["version", "sets", "parameters", "variables", "constraints"] as const;
-export const OPTIONAL_KEYS = ["objective", "relationships", "predictors"] as const;
+export const OPTIONAL_KEYS = ["objective", "relationships", "predictors", "generate"] as const;
 export const ALL_KEYS: ReadonlySet<string> = new Set<string>([...REQUIRED_KEYS, ...OPTIONAL_KEYS]);
 
 export const VARIABLE_DOMAINS = ["binary", "integer", "continuous", "interval"] as const;

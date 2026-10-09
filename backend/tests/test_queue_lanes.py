@@ -97,3 +97,23 @@ def test_the_queue_lists_waiting_and_solving_runs_with_lane_and_reason(db, empty
     assert mine[short]["lane"] == "short" and mine[long_]["lane"] == "long"
     assert mine[long_]["waits_because"] == "waiting for room" and mine[short]["status"] == "queued"
     assert mine[short]["problem"] and mine[short]["waited_s"] >= 0 and body["capacity"]["workers"] >= 1
+
+
+def test_re_solves_after_a_refresh_ask_for_a_share_so_they_run_side_by_side(db, monkeypatch):  # noqa: F811
+    """Three re-solves on a 16-thread host keeping a quarter for short runs, with three workers online: 12 / 3 = 4
+    threads each, so all three start at once (each asking for its full share, the third waited)."""
+    from app.integrations.refresh import batch_share
+
+    monkeypatch.setenv("SOLVE_HOST_WORKERS", "16")
+    monkeypatch.setenv("SOLVE_SHORT_SHARE", "0.25")
+    db.execute(text("DELETE FROM worker_heartbeat"))
+    for n in range(3):
+        db.execute(text("INSERT INTO worker_heartbeat (worker_id, host, pid) VALUES (:w, 'here', :p)"),
+                   {"w": f"w-share-{n}", "p": n + 1})
+    db.commit()
+    try:
+        assert batch_share(db, 3) == 4 and batch_share(db, 2) == 6 and batch_share(db, 9) == 4
+        assert batch_share(db, 1) is None  # one run asks for what its settings say
+    finally:
+        db.execute(text("DELETE FROM worker_heartbeat WHERE worker_id LIKE 'w-share-%'"))
+        db.commit()

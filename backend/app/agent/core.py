@@ -251,7 +251,8 @@ LAYOUT_TOOL: dict[str, Any] = {"type": "function", "function": {
                    "in metres. By default (form 'place') there is NO list of positions: the placement solver lays "
                    "the items out on the drawing's exact grid itself (any step, however fine: the aisle exactly as "
                    "asked), with access_layers too (every item reachable from a door). Form 'candidates' lists every "
-                   "position instead: only when the user asks for a candidate list.",
+                   "position instead (built by each run from the areas and kinds, so nothing is stored row by row): "
+                   "only when the user asks for a candidate list.",
     "parameters": {"type": "object", "properties": {
         "file": {"type": "string", "description": "The attached drawing (optional when there is one)"},
         "area_layers": {"type": "array", "items": {"type": "string"},
@@ -1933,9 +1934,13 @@ def unsupported_numbers(answer: str, results: list[str], person: list[str]) -> l
         return i < len(pool) and pool[i] <= target + tol
 
     text = _NOT_AMOUNTS.sub(lambda m: " " * len(m.group(0)), answer)
+    # A condition's own numbers ("if demand rose to 220, ...") are an assumption, not a claim: the amounts said to
+    # follow from it are checked by `unsupported_what_ifs` (the replay set, October 2026: "220" was sent back).
+    text = re.sub(r"[^.!?\n]+", lambda s: _HYPOTHESIS.sub(lambda h: " " * len(h.group(0)), s.group(0))
+                  if _COUNTERFACTUAL.search(s.group(0)) else s.group(0), text)
     flagged: list[str] = []
     for m in _ANSWER_NUMBER.finditer(text):
-        raw, unit = m.group(1), (m.group(2) or "").lower()
+        raw, unit = m.group(1).rstrip(","), (m.group(2) or "").lower()
         try:
             value = float(raw.replace(",", ""))
         except ValueError:
@@ -2617,13 +2622,14 @@ class Agent:
                                     aisle=float(args.get("aisle") or 0),
                                     aisle_side=str(args.get("aisle_side") or "any"), step=step,
                                     access_layers=list(args.get("access_layers") or []) or None)
-            return layout.make(self.ctx.files, into, file=args.get("file"),
-                               area_layers=list(args.get("area_layers") or []),
-                               blocked_layers=list(args.get("blocked_layers") or []),
-                               label_layer=args.get("label_layer"), items=list(args.get("items") or []),
-                               aisle=float(args.get("aisle") or 0), aisle_side=str(args.get("aisle_side") or "any"),
-                               step=step, max_file_rows=agent_files.MAX_GENERATED_ROWS,
-                               access_layers=list(args.get("access_layers") or []) or None)
+            # The candidate list as its recipe (plan 1B): the run's worker builds the positions, cells and links.
+            return layout.generated(self.ctx.files, into, file=args.get("file"),
+                                    area_layers=list(args.get("area_layers") or []),
+                                    blocked_layers=list(args.get("blocked_layers") or []),
+                                    label_layer=args.get("label_layer"), items=list(args.get("items") or []),
+                                    aisle=float(args.get("aisle") or 0),
+                                    aisle_side=str(args.get("aisle_side") or "any"), step=step,
+                                    access_layers=list(args.get("access_layers") or []) or None)
 
         try:
             out = run(float(args["step"]) if args.get("step") else None, folder)
@@ -2666,7 +2672,8 @@ class Agent:
                 + "\n\nTHE PLAN, ready: give it to check_spec as it is, adding only domain_id (the domain the drawing "
                 "is imported into; import it first if it is not) or domain_name, and problem_name. Tell the user the "
                 "numbers (candidates, grid step, the aisle as modelled, the upper bound) and what is not modelled, in "
-                "words, before proposing.\n" + json.dumps(spec))
+                "words, before proposing. The candidates are not stored: the plan keeps the areas and kinds, and each "
+                "run builds the positions from them.\n" + json.dumps(spec))
 
     def _what_if(self, args: dict) -> str:
         base_id = int(args.get("scenario_id") or 0)

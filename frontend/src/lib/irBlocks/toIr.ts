@@ -15,6 +15,7 @@
  */
 import type { IrLoc, SerialBlock } from "./toBlocks";
 import { parseCell } from "./catalogue";
+import { relationshipsToDeclare } from "../../ir/generate";
 
 type Json = Record<string, unknown>;
 type SavedWorkspace = { blocks?: { blocks?: SerialBlock[] } };
@@ -344,10 +345,15 @@ export function blocksToIr(workspace: SavedWorkspace): { ir: Json; paths: Map<st
     ir.objective = { sense: (root && fieldOf(root, "SENSE")) || "minimize", ...(mode === "lex" ? { mode: "lex" } : {}), terms: goal };
   }
 
+  // The top-level keys no block draws, as the model block carried them (`generate`, ...).
+  Object.assign(ir, (((root?.extraState ?? {}) as Json).carried ?? {}) as Json);
+
   const walked = new Set<string>();
   walkedIn(ir.constraints, walked);
   walkedIn(ir.objective, walked);
-  if (walked.size) ir.relationships = [...walked].sort();
+  // Less what the model's recipes make, plus what they read (`generate`, plan 1B).
+  const declaredRels = relationshipsToDeclare(ir, [...walked].sort());
+  if (declaredRels.length) ir.relationships = declaredRels;
 
   // Predictors (Epic ML): the declaration the model block carries, and any
   // prediction a block makes that it does not declare, at the inputs given.

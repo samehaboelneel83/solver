@@ -95,6 +95,7 @@ import { parseRouteId } from "../lib/routeId";
 import { ApiError } from "../api/client";
 import ContextMismatch from "../components/ContextMismatch";
 import ProblemReadiness from "../components/ProblemReadiness";
+import { generatedSets } from "../ir/generate";
 
 /**
  * Writing a model: its constraints and its objective.
@@ -365,7 +366,8 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
     // From the **draft**, not the stored version: a set or variable declared
     // a moment ago has to be offered by the term editor immediately, or the
     // two halves of this page disagree about what the model is.
-    const sets = draft.sets;
+    // The sets the model's recipes make (`generate`) are ranged over like any, though nothing stores them.
+    const sets = [...draft.sets, ...generatedSets(ir).filter((name) => !draft.sets.includes(name))];
     return {
       sets,
       setIds: Object.fromEntries(

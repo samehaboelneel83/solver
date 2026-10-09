@@ -56,6 +56,8 @@ class Mapping(BaseModel):
     parameter_id: int | None = Field(default=None, gt=0)
     #: source column -> target column, in the order the report lists them.
     columns: dict[str, str] = Field(min_length=1, max_length=200)
+    #: Which table of a several-table source the rows come from; none for its first (or only) table.
+    table: str | None = Field(default=None, max_length=128)
 
     @model_validator(mode="after")
     def _one_target(self) -> "Mapping":
@@ -102,21 +104,29 @@ def _job(db: Session, job_id: int, organization_id) -> dict:
     return dict(row)
 
 
-def _artifact(job: dict, organization_id):
+def _artifact(job: dict, organization_id, table: str | None = None):
+    """The extraction's folder and its manifest as seen for one table (the first unless named): that table's
+    columns, rows, hash and file in the manifest's own fields, its tables' names under `tables`."""
     if job["state"] != "extracted" or job["artifact_id"] is None:
         raise HTTPException(409, f"This job has no extracted rows to read (it is {job['state']}).")
     try:
         path = artifacts.folder(organization_id, job["connection_id"], job["artifact_id"])
-        return path, artifacts.manifest(path)
+        manifest = artifacts.manifest(path)
+        entry = artifacts.table(manifest, table)
     except artifacts.ArtifactUnavailable as exc:
         raise HTTPException(409, str(exc)) from None
+    names = [t.get("source_object") for t in artifacts.tables(manifest)]
+    view = {**manifest, **{k: entry[k] for k in ("source_object", "columns", "rows", "sha256", "source_schema")
+                           if k in entry}, "file": entry.get("file") or "rows.jsonl", "table_names": names}
+    return path, view
 
 
 def mapping_hash(mapping: Mapping) -> str:
     # An entity mapping hashes as it always has, so earlier loads still match it.
     kind, identity = mapping.target
     canonical = json.dumps({f"{kind}_id": identity,
-                            "columns": sorted(mapping.columns.items())},
+                            "columns": sorted(mapping.columns.items()),
+                            **({"table": mapping.table} if mapping.table else {})},
                            sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
 
@@ -154,10 +164,10 @@ def list_jobs(connection_id: int, limit: int = Query(20, ge=1, le=100), offset: 
 
 
 @router.get("/ingestion-jobs/{job_id}/preview")
-def preview(job_id: int, limit: int = Query(20, ge=1, le=PREVIEW_MAX), db: Session = Depends(get_db),
-            user=Depends(requires("integration.run"))) -> dict:
+def preview(job_id: int, limit: int = Query(20, ge=1, le=PREVIEW_MAX), table: str | None = Query(None, max_length=128),
+            db: Session = Depends(get_db), user=Depends(requires("integration.run"))) -> dict:
     job = _job(db, job_id, user.organization_id)
-    path, manifest = _artifact(job, user.organization_id)
+    path, manifest = _artifact(job, user.organization_id, table)
     return {
         "job_id": job_id,
         "columns": manifest.get("columns", []),
@@ -166,7 +176,8 @@ def preview(job_id: int, limit: int = Query(20, ge=1, le=PREVIEW_MAX), db: Sessi
         "rows_total": manifest.get("rows", 0),
         "sha256": manifest.get("sha256"),
         "completed_at": manifest.get("completed_at"),
-        "rows": artifacts.head(path, limit),
+        "rows": artifacts.head(path, limit, manifest["file"]),
+        "tables": manifest["table_names"],
     }
 
 
@@ -207,7 +218,7 @@ def _check(db: Session, job: dict, manifest: dict, mapping: Mapping, path, *, wr
         raise HTTPException(422, f"Not columns of this extraction: {', '.join(unknown)}.")
     sources = list(mapping.columns.keys())
     try:
-        records = artifacts.verified_rows(path, manifest.get("sha256", ""), bulk.MAX_ROWS)
+        records = artifacts.verified_rows(path, manifest.get("sha256", ""), bulk.MAX_ROWS, manifest.get("file", "rows.jsonl"))
     except artifacts.ArtifactChanged as exc:
         raise HTTPException(409, str(exc)) from None
     except artifacts.ArtifactUnavailable as exc:
@@ -286,9 +297,9 @@ def _target_columns(target: Target) -> dict:
 def validate(job_id: int, mapping: Mapping, db: Session = Depends(get_db),
              user=Depends(requires("integration.run"))) -> dict:
     job = _job(db, job_id, user.organization_id)
-    path, manifest = _artifact(job, user.organization_id)
+    path, manifest = _artifact(job, user.organization_id, mapping.table)
     report, target = _check(db, job, manifest, mapping, path, write=False)
-    notices = _defaults_taken(db, target, mapping, artifacts.verified_rows(path, manifest.get("sha256", ""), bulk.MAX_ROWS))
+    notices = _defaults_taken(db, target, mapping, artifacts.verified_rows(path, manifest.get("sha256", ""), bulk.MAX_ROWS, manifest.get("file", "rows.jsonl")))
     identity = db.execute(text(
         "INSERT INTO import_validation (job_id, entity_type_id, relationship_type_id, parameter_id, mapping, mapping_hash,"
         " artifact_sha256, rows, ok, faults, validated_by) VALUES (:j, :entity_type_id, :relationship_type_id,"
@@ -325,10 +336,10 @@ def load(job_id: int, body: LoadBody, request: Request, db: Session = Depends(ge
                          {"j": job_id, "h": validation["mapping_hash"]}).scalar_one_or_none()
     if earlier is not None:
         raise HTTPException(409, f"This extraction was already loaded with this mapping (load {earlier}).")
-    path, manifest = _artifact(job, user.organization_id)
+    mapping = Mapping.model_validate(validation["mapping"])
+    path, manifest = _artifact(job, user.organization_id, mapping.table)
     if manifest.get("sha256") != validation["artifact_sha256"]:
         raise HTTPException(409, "The extracted rows are not the ones validated; validate again.")
-    mapping = Mapping.model_validate(validation["mapping"])
     kind, identity = mapping.target
     targets = {f"{k}_id": (identity if k == kind else None) for k in ("entity_type", "relationship_type", "parameter")}
     loaded: dict = {}

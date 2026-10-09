@@ -98,3 +98,27 @@ describe("blocksToIr", () => {
     expect(outside).toBe(1);
   });
 });
+
+describe("a model with generated sets (plan 1B)", () => {
+  const GENERATED = JSON.parse(readFileSync(above("backend/tests/generate_fixtures.json"), "utf8")) as {
+    base: Record<string, unknown>;
+  };
+
+  it("keeps its recipes through Blocks and declares only the relationships the run freezes", async () => {
+    const { checkIrShape } = await import("../../ir/validate");
+    const { ir } = throughWorkspace(GENERATED.base);
+    expect(ir.generate).toEqual(GENERATED.base.generate);
+    // occupies is made by the positions recipe (not declared); can_work is read by the product recipe (declared).
+    expect(ir.relationships).toEqual(["can_work"]);
+    expect(checkIrShape(ir)).toBeNull();
+  });
+
+  it("publishes from the forms without declaring what its recipes make", async () => {
+    const { checkIrShape } = await import("../../ir/validate");
+    const { publishable } = await import("../../model/draftIr");
+    const out = publishable(GENERATED.base);
+    expect(out.generate).toEqual(GENERATED.base.generate);
+    expect(out.relationships).toEqual(["can_work"]);
+    expect(checkIrShape(out)).toBeNull();
+  });
+});
