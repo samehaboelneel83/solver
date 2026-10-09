@@ -64,6 +64,7 @@ from app.solve import symmetry as symmetry_rows
 from app.solve import warm
 from app.solve import locks as lock_rows
 from app.solve import adapters as adapters_rows
+from app.solve import fixed_charge as fixed_charge_rows
 from app.solve import greedy as greedy_rows
 from app.solve import verify as verify_rows
 from app.solve import answers as answer_rows
@@ -1010,6 +1011,7 @@ def _execute(
         decomposition_record = None
         network_record = None
         cuts_record = None
+        fixed_charge_record = None
         start_record, start_key = None, "connected_start_run"
         search_record = None
         exact_failed = None
@@ -1194,6 +1196,20 @@ def _execute(
             hint = hint if start_record["feasible"] else None
             start_key = "greedy_start_run"
             time_limit = max(1.0, time_limit - float(start_record.get("seconds", 0)))
+
+        if (params.get("fixed_charge_start", True) and backend.name in warm.HINTED
+                and not params.get("pareto_steps") and fixed_charge_rows.applies(solving_model) is None
+                and (start_key in ("join_start_run", "greedy_start_run") or not hint)):
+            # Any model with fixed charges (app.solve.fixed_charge): slope scaling read off the compiled model,
+            # kept when it is a better start than one already made.
+            charged, charge_record = fixed_charge_rows.start(
+                solving_model, seconds=min(fixed_charge_rows.CEILING, fixed_charge_rows.SHARE * time_limit))
+            time_limit = max(1.0, time_limit - float(charge_record.get("seconds", 0)))
+            kept = fixed_charge_rows.better_of(solving_model, charged, hint)
+            charge_record = {"used": kept, **charge_record}
+            if kept:
+                hint = charged
+            fixed_charge_record = charge_record
 
         from app.solve import join as join_cuts
 
@@ -1631,6 +1647,8 @@ def _execute(
         extra["network_run"] = network_record
     if cuts_record is not None:
         extra["join_cuts_run"] = cuts_record
+    if fixed_charge_record is not None:
+        extra["fixed_charge_start_run"] = fixed_charge_record
     computed = _computed_sources(db, run_id, ir)
     if computed:
         extra["computed_inputs"] = computed

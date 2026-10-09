@@ -1208,6 +1208,7 @@ function RunDetail({
     routing_start_run?: RoutingStartRecord;
     join_start_run?: { used?: boolean; why?: string; how?: string; built?: number; used_places?: number; seconds?: number; overloaded?: number; dropped?: number; moves?: number; swaps?: number };
     join_cuts_run?: { rounds?: number; cuts?: number; bound_before?: number | null; bound_after?: number | null; seconds?: number };
+    fixed_charge_start_run?: { used?: boolean; why?: string; charges?: number; open?: number; rounds?: number; dropped?: number; added?: number; swapped?: number; objective?: number; seconds?: number };
     computed_inputs?: (ComputedSource & { input: string; name: string })[];
     metaheuristic_run?: MetaheuristicRecord;
     network_run?: NetworkRunRecord;
@@ -1452,6 +1453,10 @@ function RunDetail({
           )}
           {params.connected_start_run && <Fact label="Started from" value={connectedStartText(params.connected_start_run)} />}
           {params.routing_start_run && <Fact label="Started from" value={routingStartText(params.routing_start_run)} />}
+          {params.fixed_charge_start_run && <Fact label="Fixed charges" value={params.fixed_charge_start_run.why
+            ? `no start (${params.fixed_charge_start_run.why})`
+            : `slope scaling over ${params.fixed_charge_start_run.charges ?? "?"} on/off decisions with a cost: ${params.fixed_charge_start_run.open ?? "?"} on, goal ${params.fixed_charge_start_run.objective?.toLocaleString() ?? "?"}`
+              + `${params.fixed_charge_start_run.used ? " (the start)" : " (another start was better)"}`} />}
           {params.join_cuts_run && <Fact label="Cuts added" value={`${params.join_cuts_run.cuts ?? 0} where the relaxation broke them, in ${params.join_cuts_run.rounds ?? 0} rounds`
             + (typeof params.join_cuts_run.bound_before === "number" && typeof params.join_cuts_run.bound_after === "number"
               ? `; the relaxation's bound ${params.join_cuts_run.bound_before.toLocaleString()} → ${params.join_cuts_run.bound_after.toLocaleString()}` : "")} />}

@@ -138,6 +138,34 @@ its time stops the search, and the conflict is reported as not shown minimal. Co
 `test_alternatives.py`, `test_multistart.py`, `test_benders.py`, `test_selector_acts.py`,
 `test_quickxplain.py` (backend); `Runs.test.tsx` (alternatives and selector wording).
 
+## Fixed charges, in any model (9 October 2026)
+
+A fixed charge is an on/off decision that costs something and lets other quantities be non-zero only while it is
+on: a rule `a1*x1 + ... <= M * open` with every `a > 0`, every `x >= 0`, and `open` charged in the goal. Facility
+location, lot sizing (produce only with a set-up), network design (the `join` rule compiles to such rows too),
+unit commitment, renting a vehicle, opening a route -- `app/solve/fixed_charge.py` reads the shape off the compiled
+model and knows none of these by name. Branch and bound is slow on them because the relaxation opens every charge
+a little (`open = usage / M`) and pays almost nothing for it.
+
+The start (`fixed_charge_start_run`), before any MIP solve with a hinted solver (HiGHS, SCIP, CP-SAT), for up to
+30 s or 20% of the run:
+
+1. **Slope scaling** (Kim and Pardalos): the charges are set aside and each one's cost spread over what it limits,
+   per unit, at first over its M, then over what the last round used; the relaxation is solved; a charge is on
+   exactly when what it limits is used. Each design is completed by solving the model itself with the charges
+   fixed (its other rules and whole-number decisions included), so the start keeps every rule. Up to 20 rounds,
+   while new designs come.
+2. **Local search** over the best design: every charge switched off in turn (dearest first) while that solves for
+   less; then one switched on; then one swapped for another; then two for one -- back to the first move after
+   any gain, until none pays or the time is spent.
+
+All of it runs in the HiGHS worker process on one model changed in place (bounds, costs, integrality), so a
+design costs milliseconds. Another start already made (the join rule's, the greedy one) is kept when it is
+better. Results: facility location (10 sites, 25 customers) and lot sizing within 5% of the optimum in under a
+second; an 18×18 capacitated network design (612 links) 21,891 in 30 s where HiGHS alone has 23,175 after 60 s
+(and the join rule's own start 22,648); a 60×300 facility model 1.5% above the optimum HiGHS proves in 18 s --
+there the start only costs time.
+
 ## NetworkX as a solver
 
 NetworkX (BSD licence, `networkx==3.6.1`) is in the image and used two ways.
