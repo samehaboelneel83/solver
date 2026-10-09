@@ -1012,6 +1012,7 @@ def _execute(
         decomposition_record = None
         network_record = None
         cuts_record = None
+        tuning_record = None
         # Choices learnt from this problem's own runs (app.solve.choices): made once, when first asked.
         choices_record: dict[str, dict[str, Any]] = {}
 
@@ -1260,6 +1261,18 @@ def _execute(
 
         points: list = []
         parts, blocks_record = None, None
+        tuning_record = None
+        if params.get("auto_tune", True) and not tuned.get(backend.name) and not params.get("pareto_steps"):
+            # The solver's own options, tuned for this problem by Bayesian optimisation over its runs
+            # (app.solve.tuning); the setting `solve.solver_params` or a run's own options override it.
+            from app.solve.tuning import tune
+
+            chosen_options = tune(backend.name, _tuning_history(db, run_id, backend.name))
+            if chosen_options is not None:
+                tuned = {**tuned, backend.name: chosen_options.options}
+                tuning_record = {"backend": backend.name, "options": chosen_options.options,
+                                 "trial": chosen_options.trial, "why": chosen_options.evidence}
+
         if params.get("pareto_steps"):
             # A trade-off front between the goal's two terms (app.solve.pareto):
             # each point solved in full, the first end standing as this run's
@@ -1728,6 +1741,8 @@ def _execute(
         extra["join_cuts_run"] = cuts_record
     if choices_record:
         extra["choices"] = choices_record
+    if tuning_record is not None:
+        extra["tuning"] = tuning_record
     if fixed_charge_record is not None:
         extra["fixed_charge_start_run"] = fixed_charge_record
     if strengthen_record is not None:
@@ -2154,6 +2169,7 @@ def _solve_lex(
     should_stop=None,
     seed: int | None = None,
     gap_rel: float = 0.0,
+    solver_params: dict | None = None,
 ) -> Solution:
     """Optimise terms in order, freezing each before the next.
 
@@ -2176,6 +2192,7 @@ def _solve_lex(
             should_stop=should_stop,
             seed=seed,
             gap_rel=gap_rel,
+            **({"solver_params": solver_params} if solver_params else {}),
         )
 
     deadline = time.monotonic() + time_limit
@@ -2196,6 +2213,7 @@ def _solve_lex(
             should_stop=should_stop,
             seed=seed,
             gap_rel=gap_rel,
+            **({"solver_params": solver_params} if solver_params else {}),
         )
         wall += result.wall_seconds
         stage_gap = gap_of(result.objective, result.best_bound)
@@ -2764,6 +2782,25 @@ def _admissible(found, params: dict | None = None) -> set[str]:
 
 def _rank_of(name: str) -> tuple[int, str]:
     return (by_name(name).rank, name)
+
+
+def _tuning_history(db: Session, run_id: int, backend: str) -> list[dict[str, Any]]:
+    from app.solve.tuning import RECENT
+
+    rows = db.execute(
+        text(
+            "SELECT r.params->'tuning', r.status, r.wall_time_s, r.gap, r.params->>'time_limit_s'"
+            " FROM run r JOIN scenario s ON s.id = r.scenario_id"
+            " WHERE s.problem_id = (SELECT s2.problem_id FROM run r2 JOIN scenario s2 ON s2.id = r2.scenario_id WHERE r2.id = :r)"
+            "   AND r.id <> :r AND r.params->'tuning'->>'backend' = :b AND r.reused_from IS NULL"
+            "   AND r.status NOT IN ('queued', 'running', 'cancelled', 'error')"
+            " ORDER BY r.id DESC LIMIT :n"
+        ),
+        {"r": run_id, "b": backend, "n": RECENT},
+    ).all()
+    return [{"options": (t or {}).get("options"), "trial": bool((t or {}).get("trial")), "status": status,
+             "seconds": seconds, "gap": gap, "limit": float(limit) if limit else None}
+            for t, status, seconds, gap, limit in rows]
 
 
 def _decide_choice(db: Session, run_id: int, name: str):

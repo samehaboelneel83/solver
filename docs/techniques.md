@@ -89,12 +89,13 @@ Rules are held by Deb's feasibility order; every answer is checked on every comp
 | Per-problem memory of the fastest solver | `memory.py` | setting `solve.memory` |
 | Learned solver selector (nearest neighbours on model fingerprints) | `selector.py` | shadow, or acting with `solve.selector_acts` |
 | On/off choices learnt per problem (starts, cuts) | `choices.py` | every run with history |
+| Bayesian optimisation of each solver's options per problem (Gaussian process, expected improvement) | `tuning.py` | every run with history; `solve.solver_params` overrides |
 | Infeasibility explanation (IIS, QuickXplain) | `diagnose.py` | infeasible runs |
 
 ## Not yet in the platform
 
-- Automated tuning of solver parameters per problem (Bayesian optimisation or SMAC-style configuration): today
-  parameters come from benchmark settings (`solve.solver_params`).
+- A wider space for the tuning: it searches only the options the benchmark whitelisted (two or three per
+  solver), since an option must never change what a solver may answer.
 - QUBO export for annealing hardware, and quantum-inspired solvers.
 - Constraint learning from data (rules inferred from past plans).
 - Many-objective fronts (three goals or more) on the run page: NSGA-II computes them, the chart draws two.

@@ -237,6 +237,16 @@ best answer keeping every rule is the run's (`metaheuristic_run.raced`). A two-g
 decisions, which no exact epsilon-constraint solve takes, is drawn by NSGA-II (`evolve.nsga2`), each point
 `feasible`. The full map of techniques is `docs/techniques.md`.
 
+## Solver options tuned per problem (`app/solve/tuning.py`)
+
+Each problem tunes its solver's whitelisted options (`app.solve.params`) over its own runs: the defaults for the
+first two runs on a backend; then, every other run, a trial chosen by Bayesian optimisation -- a Gaussian process
+on the options one-hot encoded, fitted to the log of each run's score (seconds to a proof; unproven, the time
+allowed times 2 + gap), and the configuration of greatest expected improvement over the best median; otherwise the
+configuration with the lowest median measured at least twice. Up to twelve trials, then one every ten runs. A
+run's own options and `solve.solver_params` override it; `auto_tune` turns it off. Each run records `tuning`
+(options, trial or not, why), shown as "Solver options" on the run page; the answer never changes, only how fast.
+
 ## NetworkX as a solver
 
 NetworkX (BSD licence, `networkx==3.6.1`) is in the image and used two ways.

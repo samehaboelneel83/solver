@@ -1217,6 +1217,7 @@ function RunDetail({
     join_start_run?: { used?: boolean; why?: string; how?: string; built?: number; used_places?: number; seconds?: number; overloaded?: number; dropped?: number; moves?: number; swaps?: number };
     join_cuts_run?: { rounds?: number; cuts?: number; bound_before?: number | null; bound_after?: number | null; seconds?: number };
     choices?: Record<string, { on?: boolean; why?: string }>;
+    tuning?: { backend?: string; trial?: boolean; why?: string };
     strengthen_run?: { added?: number; limits?: number; covers?: number; flow_nodes?: number; flow_cuts?: number; forms?: { won?: string; remembered?: boolean }; skipped?: string; rounds?: number; bound_before?: number | null; bound_after?: number | null; seconds?: number; why?: string };
     fixed_charge_start_run?: { used?: boolean; why?: string; charges?: number; open?: number; rounds?: number; dropped?: number; added?: number; swapped?: number; objective?: number; seconds?: number };
     computed_inputs?: (ComputedSource & { input: string; name: string })[];
@@ -1463,6 +1464,7 @@ function RunDetail({
           )}
           {params.connected_start_run && <Fact label="Started from" value={connectedStartText(params.connected_start_run)} />}
           {params.routing_start_run && <Fact label="Started from" value={routingStartText(params.routing_start_run)} />}
+          {params.tuning?.why && <Fact label="Solver options" value={params.tuning.why} />}
           {params.choices && Object.keys(params.choices).length > 0 && <Fact label="Learnt from earlier runs"
             value={Object.values(params.choices).map((c) => c.why ?? "").filter(Boolean).join("; ")} />}
           {params.strengthen_run && <Fact label="Rows implied" value={params.strengthen_run.skipped
