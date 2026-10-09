@@ -510,11 +510,51 @@ def test_what_a_capacitated_rule_needs_is_said():
         compile_model(ir, data)
 
 
-def test_the_start_of_a_capacitated_network_says_what_it_overloads():
+def test_the_start_of_a_capacitated_network_carries_every_demand_within_capacity():
     places = ["s", "a", "b", "c"]
     links = [("sa", "s", "a", 1), ("ab", "a", "b", 1), ("bc", "b", "c", 1), ("sc", "s", "c", 5)]
     compiled = compile_model(*_capacitated(places, links, {"s"}, {"a": 1, "b": 1, "c": 1}, {l: 2 for l, *_ in links}))
     hint, record = join.start(compiled)
-    assert record["how"] == "spanning forest" and record["overloaded"] == 1  # s-a would carry 3 of its 2
+    assert record["how"].startswith("capacity-aware"), record  # the spanning tree would overload s-a
+    values = {k: hint.get(k, 0) for k in compiled.variables}
+    assert _holds(compiled, values)
+    assert float(compiled.objective.evaluated_at(values)) == 7 == record["estimate"]  # s-a, a-b and s-c: the optimum
     result = _mip(compiled)
-    assert result.status == "optimal" and round(float(result.objective)) == 7  # s-a, a-b and s-c
+    assert result.status == "optimal" and round(float(result.objective)) == 7
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_the_capacity_aware_start_keeps_every_row_and_is_near_the_optimum(seed):
+    rnd = random.Random(seed)
+    places, links = _graph(7, 500 + seed, extra=0.4)
+    links = [(l, a, b, abs(c) + 1) for l, a, b, c in links]
+    sources = {"p0"} if seed % 3 else {"p0", "p6"}
+    need = {p: rnd.randint(0, 5) for p in places if p not in sources}
+    cap = {l: rnd.randint(3, 9) for l, *_ in links}
+    supply = {s: 12 + seed for s in sources} if seed % 2 else None
+    unit = {l: rnd.randint(0, 3) for l, *_ in links}
+    try:
+        compiled = compile_model(*_capacitated(places, links, sources, need, cap, supply=supply, unit=unit))
+    except Unsupported:
+        pytest.skip("not every place can be fed")
+    hint, record = join.start(compiled)
+    result = _mip(compiled)
+    if result.status == "infeasible":
+        assert "design_why" in record or not record.get("how", "").startswith("capacity")
+        return
+    assert record["how"].startswith("capacity-aware"), record
+    values = {k: hint.get(k, 0) for k in compiled.variables}
+    assert _holds(compiled, values), seed
+    ours = float(compiled.objective.evaluated_at(values))
+    assert ours == pytest.approx(record["estimate"])
+    best = float(result.objective)
+    assert best - 1e-6 <= ours <= best * 1.5 + 1e-6, (seed, ours, best)
+
+
+def test_demand_no_design_can_carry_is_refused_with_the_shortfall():
+    places = ["s", "a", "b"]
+    links = [("sa", "s", "a", 1), ("ab", "a", "b", 1), ("sb", "s", "b", 1)]
+    with pytest.raises(Unsupported, match="at most 5 of the 6"):
+        compile_model(*_capacitated(places, links, {"s"}, {"a": 3, "b": 3}, {"sa": 2, "ab": 5, "sb": 3}))
+    compiled = compile_model(*_capacitated(places, links, {"s"}, {"a": 3, "b": 2}, {"sa": 2, "ab": 5, "sb": 3}))
+    assert _mip(compiled).status == "optimal"

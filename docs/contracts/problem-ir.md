@@ -776,7 +776,8 @@ sends; `"carry": {"var": "carried", "index": ["l"]}` names an integer or continu
 holds what each link carries, so the goal can price it per unit and other rules can read it. A record with no value
 takes (or limits) nothing; a negative or non-numeric value is refused. Whole numbers keep the flow whole. A demand
 without a capacity, supply or carry is still a spanning forest; with any of them it is solved as a MIP, starting
-from the spanning tree (the run says how many links that start overloads).
+from a capacity-aware design (min-cost flows with slope scaling, then links dropped). When every place must be
+fed and even every link built cannot carry the demand, the run is refused with the shortfall.
 
 Refusals, all `shape` but the last three:
 

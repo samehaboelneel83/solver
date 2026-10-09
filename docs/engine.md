@@ -201,7 +201,16 @@ join rule gets the tree as a start (`params.join_start_run`); with `use`, a Stei
 approximation) joining the places forced in and the sources. With `demand` (and `capacity`, `supply`, `carry`), the rule
 also carries what each place takes from the sources; a demand alone keeps the spanning lane (the demand flow is set
 from each subtree's total), while capacities, supplies or a priced carry make it a capacitated network design for
-the MIP solver, started from the tree; `join_start_run.overloaded` counts the links that start sends over capacity.
+the MIP solver, started from the tree; The start for a capacitated design (no `use`) is
+built for it: the demand is sent at least cost with every link open, each link priced per unit at its carrying
+cost plus its building cost spread over what it carried last round (slope scaling, up to 12 rounds, the cheapest
+design kept); places that take nothing are joined by Kruskal; then links are dropped, dearest first, while the
+rest still joins and carries everything for less. Every flow is a NetworkX min-cost flow, so the start keeps
+every row of the rule. On an 18×18 grid (324 places, 612 links, capacities and per-unit costs) it gives 22,648 in
+2.4 s where HiGHS alone has 23,659 after 60 s; on small cases it is within a few per cent of the optimum. With
+`use`, the Steiner start is kept and `join_start_run.overloaded` counts the links it sends over capacity. Before
+any of this, a maximum flow with every link built checks that the demand can be carried at all: when it cannot,
+the run is refused with the shortfall ("at most 285 of the 303 ... can reach them").
 
 The Assistant's `run_python` has NetworkX too (paths, connectivity, components), e.g. to work out which
 cells of a layout reach a door before the model is written.
