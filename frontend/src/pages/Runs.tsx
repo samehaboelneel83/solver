@@ -1207,6 +1207,7 @@ function RunDetail({
     connected_start_run?: ConnectedStartRecord;
     routing_start_run?: RoutingStartRecord;
     join_start_run?: { used?: boolean; why?: string; how?: string; built?: number; used_places?: number; seconds?: number; overloaded?: number; dropped?: number; moves?: number; swaps?: number };
+    join_cuts_run?: { rounds?: number; cuts?: number; bound_before?: number | null; bound_after?: number | null; seconds?: number };
     computed_inputs?: (ComputedSource & { input: string; name: string })[];
     metaheuristic_run?: MetaheuristicRecord;
     network_run?: NetworkRunRecord;
@@ -1451,6 +1452,9 @@ function RunDetail({
           )}
           {params.connected_start_run && <Fact label="Started from" value={connectedStartText(params.connected_start_run)} />}
           {params.routing_start_run && <Fact label="Started from" value={routingStartText(params.routing_start_run)} />}
+          {params.join_cuts_run && <Fact label="Cuts added" value={`${params.join_cuts_run.cuts ?? 0} where the relaxation broke them, in ${params.join_cuts_run.rounds ?? 0} rounds`
+            + (typeof params.join_cuts_run.bound_before === "number" && typeof params.join_cuts_run.bound_after === "number"
+              ? `; the relaxation's bound ${params.join_cuts_run.bound_before.toLocaleString()} → ${params.join_cuts_run.bound_after.toLocaleString()}` : "")} />}
           {params.join_start_run && <Fact label="Started from" value={params.join_start_run.used && params.join_start_run.how
             ? `a ${params.join_start_run.how}${params.join_start_run.built !== undefined ? `, ${params.join_start_run.built} links built` : ""}${params.join_start_run.dropped ? `, ${params.join_start_run.dropped} dropped as not worth their cost` : ""}${params.join_start_run.used_places !== undefined ? `, ${params.join_start_run.used_places} places used` : ""}${params.join_start_run.moves ? ` after ${params.join_start_run.moves} improvements` : ""}${params.join_start_run.overloaded ? `; ${params.join_start_run.overloaded} over capacity, mended by the solver` : ""}`
             : `no network start${params.join_start_run.why ? ` (${params.join_start_run.why})` : ""}`} />}

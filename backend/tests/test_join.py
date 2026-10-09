@@ -376,6 +376,8 @@ def test_a_run_choosing_its_places_starts_from_a_steiner_tree(db, empty_queue): 
     assert row["status"] == "optimal", row["error"]
     start = row["params"]["join_start_run"]
     assert start["used"] is True and start["how"].startswith("Steiner"), start
+    cuts = row["params"]["join_cuts_run"]
+    assert cuts["bound_after"] >= cuts["bound_before"] - 1e-6, cuts
 
 
 # --- what each place takes, carried along the built links (capacitated network design) -------------------------
@@ -627,3 +629,34 @@ def test_the_cuts_raise_the_relaxations_bound_and_leave_the_optimum(shape, monke
     assert with_cuts.joins[0]["cuts"] > len(with_cuts.joins[0]["places"]) // 2 and without.joins[0]["cuts"] == 0
     assert _relaxed_bound(with_cuts) > _relaxed_bound(without) + 1e-6
     assert round(float(_mip(with_cuts).objective)) == round(float(_mip(without).objective))
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_separated_cuts_leave_the_optimum(seed):
+    if seed % 4 == 3:  # one network with no sources, the places chosen (Steiner, with prizes)
+        rnd = random.Random(seed)
+        places, links = _graph(7, 700 + seed, extra=0.3)
+        prize = {p: rnd.choice([0, 15, 30]) for p in places}
+        compiled = compile_model(*_model(places, links, use=True, prize=prize, required={places[2]}))
+    elif seed % 2:
+        compiled = compile_model(*_prize_capacitated(seed))
+    else:
+        rnd = random.Random(seed)
+        places, links = _graph(7, 800 + seed, extra=0.4)
+        links = [(l, a, b, abs(c) + 3) for l, a, b, c in links]
+        need = {p: rnd.randint(1, 4) for p in places if p != "p0"}
+        try:
+            compiled = compile_model(*_capacitated(places, links, {"p0"}, need,
+                                                   {l: rnd.choice([4, 8, 30]) for l, *_ in links}))
+        except Unsupported:
+            pytest.skip("not every place can be fed")
+    assert join.separate_applies(compiled) is None
+    cut, record = join.separate(compiled, seconds=10)
+    if seed in (3, 7):
+        assert record["cuts"] > 0 and record["bound_after"] > record["bound_before"], record
+    assert len(cut.constraints) == len(compiled.constraints) + record["cuts"]
+    before, after = _mip(compiled), _mip(cut)
+    assert before.status == after.status
+    if before.status == "optimal":
+        assert round(float(before.objective)) == round(float(after.objective))
+        assert record["bound_after"] >= record["bound_before"] - 1e-6

@@ -1091,3 +1091,127 @@ def start(compiled: Compiled, *, seconds: float = CEILING) -> tuple[dict[VarKey,
     record.update(how="Steiner tree (NetworkX approximation)", terminals=len(must), used_places=len(used),
                   built=len(built))
     return hint, {**record, "seconds": round(time.monotonic() - began, 3)}
+
+
+# --- cuts where the relaxation breaks them (separation, 9 October 2026) --------------------------------------
+
+
+def separate_applies(compiled: Compiled) -> str | None:
+    joins = getattr(compiled, "joins", None) or []
+    if len(joins) != 1:
+        return "the model has no single join rule"
+    if applies(compiled) is None:
+        return "the model is a spanning tree, solved exactly"
+    if compiled.objective_mode == "lex" or compiled.objective_quadratic:
+        return "the goal is not one linear sum"
+    if compiled.pwl or compiled.functions or compiled.intervals or compiled.placements:
+        return "the model has curves, functions, schedules or placements"
+    return None
+
+
+def separate(compiled: Compiled, *, seconds: float = 20.0, rounds: int = 12, per_round: int = 60):
+    """The model with the cuts its relaxation breaks, found round by round: (model, record).
+
+    The relaxation (every decision fractional) is solved; for each place it joins, a minimum cut between the
+    sources (or the place most used, without sources) and that place, with the links weighed by how much of
+    each the relaxation builds, says whether that much building could join it. When not, the links across the
+    cut must be built at least as much as the place is used -- a row the flow formulation implies only at whole
+    answers. With capacities and every place fed, the same set's links must also cover the demand beyond it,
+    each counting at most that demand. The rows are added, the relaxation solved again, until it breaks none, the
+    rounds are spent or the time is. Every row holds at every answer, so the optimum is unchanged."""
+    from dataclasses import replace
+
+    import networkx as nx
+
+    from app.solve.backends import by_name
+    from app.solve.compile import Constraint, Linear, Variable
+    from app.solve.service import solve_compiled
+
+    began = time.monotonic()
+    meta = compiled.joins[0]
+    rule, ends, places, sources = meta["rule"], meta["ends"], meta["places"], meta["sources"]
+    build, use, root = meta["build"], meta["use"], meta["root"]
+    need, cap = meta.get("need") or {}, meta.get("capacity") or {}
+    fixed = use is None
+    one = Decimal(1)
+    added: list[Any] = []
+    seen: set[tuple[frozenset[str], str]] = set()
+    record: dict[str, Any] = {"rounds": 0, "cuts": 0, "bound_before": None, "bound_after": None}
+    model = compiled
+    loose = {k: Variable(k, "continuous", v.lower, v.upper) for k, v in compiled.variables.items()}
+
+    def x(p: str) -> Linear:
+        return Linear(coeffs={use[p]: one}) if use is not None else Linear(const=one)
+
+    for _ in range(rounds):
+        left = seconds - (time.monotonic() - began)
+        if left <= 0.5:
+            break
+        relaxed, _ = solve_compiled(by_name("highs"), replace(model, variables=loose), time_limit=left, seed=1,
+                                    workers=1)
+        if relaxed.status != "optimal":
+            break
+        bound = float(relaxed.objective)
+        record["bound_before"] = bound if record["bound_before"] is None else record["bound_before"]
+        record["bound_after"] = bound
+        values = relaxed.assignments
+        y = {l: float(values.get(k, 0) or 0) for l, k in build.items()}
+        xv = {p: (float(values.get(use[p], 0) or 0) if use is not None else 1.0) for p in places}
+        g = nx.Graph()
+        g.add_nodes_from(places)
+        for l, (a, b) in ends.items():
+            if a == b or y[l] <= 1e-9:
+                continue
+            if g.has_edge(a, b):
+                g[a][b]["capacity"] += y[l]
+            else:
+                g.add_edge(a, b, capacity=y[l])
+        if sources is not None:
+            anchor = "\x00S"
+            for s_ in sources:
+                g.add_edge(anchor, s_, capacity=float(len(places) + 1))
+            candidates = [p for p in places if p not in sources and xv[p] > 1e-6]
+        else:
+            anchor = max(places, key=lambda p: (xv[p], p)) if places else None
+            candidates = [p for p in places if p != anchor and xv[p] > 1e-6]
+        found: list[tuple[float, Any]] = []
+        for p in sorted(candidates, key=lambda p: (-xv[p], p)):
+            if time.monotonic() - began > seconds:
+                break
+            if anchor is None or p not in g or anchor not in g:
+                continue
+            value, (side, _) = nx.minimum_cut(g, anchor, p)
+            want = xv[p] if sources is not None else xv[p] + xv[anchor] - 1
+            if value >= want - 1e-4:
+                continue
+            crossing = frozenset(l for l, (a, b) in ends.items() if a != b and ((a in side) != (b in side)))
+            if (crossing, p) in seen:
+                continue
+            seen.add((crossing, p))
+            row = Linear(coeffs={})
+            for l in crossing:
+                row.add(Linear(coeffs={build[l]: one}))
+            row.add(x(p), factor=-1)
+            if sources is None:
+                row.add(x(anchor), factor=-1)
+                row.add(Linear(const=one))
+            found.append((want - value, Constraint(rule, {}, row, ">=", Linear())))
+            if cap and fixed:
+                beyond = sum((d for q, d in need.items() if q not in side), Decimal(0))
+                if beyond > 0:
+                    strong = Linear(coeffs={})
+                    for l in crossing:
+                        strong.add(Linear(coeffs={build[l]: min(cap.get(l, beyond), beyond)}))
+                    lhs = sum(float(min(cap.get(l, beyond), beyond)) * y[l] for l in crossing)
+                    if lhs < float(beyond) - 1e-4:
+                        found.append((float(beyond) - lhs, Constraint(rule, {}, strong, ">=", Linear(const=beyond))))
+        if not found:
+            break
+        found.sort(key=lambda item: -item[0])
+        fresh = [c for _, c in found[:per_round]]
+        added.extend(fresh)
+        model = replace(model, constraints=[*model.constraints, *fresh])
+        record["rounds"] += 1
+        record["cuts"] = len(added)
+    record["seconds"] = round(time.monotonic() - began, 3)
+    return model, record

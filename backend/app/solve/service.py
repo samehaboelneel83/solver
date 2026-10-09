@@ -1009,6 +1009,7 @@ def _execute(
         horizon_record = None
         decomposition_record = None
         network_record = None
+        cuts_record = None
         start_record, start_key = None, "connected_start_run"
         search_record = None
         exact_failed = None
@@ -1193,6 +1194,15 @@ def _execute(
             hint = hint if start_record["feasible"] else None
             start_key = "greedy_start_run"
             time_limit = max(1.0, time_limit - float(start_record.get("seconds", 0)))
+
+        from app.solve import join as join_cuts
+
+        if (params.get("connected_start") and "join" in kinds and backend.name in warm.HINTED
+                and join_cuts.separate_applies(solving_model) is None):
+            # Cuts the relaxation breaks, added before the solve (app.solve.join.separate): the bound rises,
+            # the optimum stays.
+            solving_model, cuts_record = join_cuts.separate(solving_model, seconds=min(20.0, 0.15 * time_limit))
+            time_limit = max(1.0, time_limit - float(cuts_record.get("seconds", 0)))
 
         points: list = []
         parts, blocks_record = None, None
@@ -1619,6 +1629,8 @@ def _execute(
         extra["decomposition"] = decomposition_record
     if network_record is not None:
         extra["network_run"] = network_record
+    if cuts_record is not None:
+        extra["join_cuts_run"] = cuts_record
     computed = _computed_sources(db, run_id, ir)
     if computed:
         extra["computed_inputs"] = computed

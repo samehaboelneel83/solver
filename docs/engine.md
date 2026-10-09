@@ -230,7 +230,15 @@ links leaving the sources and their first, second and third rings of neighbours 
 strengthening when every place is fed; the plain capacity sum against the used places' demand with `use`). The
 compiled rule records how many (`cuts`). With HiGHS for 60 s: a 10×10 capacitated grid closes from a 28.5% gap to
 3.2%, an 18×18 one from 34% to 11% (and finds 23,175 instead of 23,659), and the 14×14 grid with prizes has its
-bound raised from -2,609 to -1,814. `app.solve.join.CUTS` turns them off only to measure this. Before
+bound raised from -2,609 to -1,814. `app.solve.join.CUTS` turns them off only to measure this. Beyond these, cuts are found where the relaxation breaks them
+(`join.separate`, run before a MIP solve when `solve.connected_start` is on, for up to 20 s or 15% of the time):
+the relaxation is solved, and for each place it joins a minimum cut between the sources (or, without sources, the
+place most used) and that place, with each link weighed by how much of it the relaxation builds, says whether that
+building could join it; when not, the links across the cut must be built at least as much as the place is used
+(and, with capacities and every place fed, cover the demand beyond it). Up to 60 per round, 12 rounds, until none
+is broken. On the 14×14 grid with prizes, HiGHS alone now finds -1,190 (before: no answer in 60 s) and its bound
+rises to -1,687 (from -1,814); on the 18×18 capacitated grid the bound barely moves (the weak part there is how
+capacities round, not how places join), though HiGHS finds 22,624. The run records `join_cuts_run`. Before
 any of this, a maximum flow with every link built checks that the demand can be carried at all: when it cannot,
 the run is refused with the shortfall ("at most 285 of the 303 ... can reach them").
 
