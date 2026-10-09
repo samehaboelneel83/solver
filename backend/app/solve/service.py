@@ -1495,24 +1495,62 @@ def _execute(
                     # outgrows them fails with a reason, not the worker.
                     began_solve = time.monotonic()
                     try:
-                        result, reason = sandbox.run(
-                            "app.solve.sandbox:solve_in_child",
-                            {
-                                "backend": backend.name,
-                                "compiled": solving_model,
-                                "time_limit": time_limit,
-                                "seed": seed,
-                                "workers": workers,
-                                "gap_rel": gap_rel,
-                                "hint": hint,
-                                "symmetry": bool(params.get("symmetry")),
-                                "solver_params": tuned.get(backend.name),
-                            },
-                            time_limit=time_limit,
-                            workers=workers,
-                            on_progress=events.progress,
-                            should_stop=stop.is_set,
-                        )
+                        forms = {"with implied rows": solving_model}
+                        if (strengthen_record or {}).get("added") and params.get("hedge_forms", True) and workers >= 2:
+                            # Rows a model implies help one solver and slow another (HiGHS on lot sizing finds
+                            # them itself): both forms run at once on half the threads each, the first proof
+                            # ends both, else the better answer stands (app.solve.race).
+                            forms = {"as written": unstrengthened, "with implied rows": solving_model}
+
+                        def one_form(name: str, seconds: float, share: int, stop_others):
+                            return sandbox.run(
+                                "app.solve.sandbox:solve_in_child",
+                                {
+                                    "backend": backend.name,
+                                    "compiled": forms[name],
+                                    "time_limit": seconds,
+                                    "seed": seed,
+                                    "workers": share,
+                                    "gap_rel": gap_rel,
+                                    "hint": hint,
+                                    "symmetry": bool(params.get("symmetry")),
+                                    "solver_params": tuned.get(backend.name),
+                                },
+                                time_limit=seconds,
+                                workers=share,
+                                on_progress=events.progress if name == "with implied rows" else None,
+                                should_stop=(lambda: stop.is_set() or stop_others()) if len(forms) > 1 else stop.is_set,
+                            )
+
+                        if len(forms) == 1:
+                            result, reason = one_form("with implied rows", time_limit, workers, lambda: False)
+                        else:
+                            answers: dict[str, Any] = {}
+
+                            failed: dict[str, Exception] = {}
+
+                            def keep(name: str, seconds: float, share: int, stop_others):
+                                try:
+                                    answers[name] = one_form(name, seconds, share, stop_others)
+                                except sandbox.SandboxFailed as exc:  # the other form may still answer
+                                    failed[name] = exc
+                                    answers[name] = (Solution("unknown", False, None, {}, 0.0, backend.name), None)
+                                return answers[name][0]
+
+                            outcomes, forms_record = race_rows._all_at_once(list(forms), keep, time_limit, workers,
+                                                                            race_rows.DECISIVE)
+                            if len(failed) == len(forms):
+                                # Both failed (out of memory, most often): the strengthened form alone, on all the
+                                # threads, says why the way a single solve does -- or answers.
+                                left = max(1.0, time_limit - (time.monotonic() - began_solve))
+                                result, reason = one_form("with implied rows", left, workers, lambda: False)
+                                strengthen_record["forms"] = {"won": "with implied rows", "raced": forms_record,
+                                                              "both_failed": True}
+                            else:
+                                won = min((n for n in forms if n not in failed),
+                                          key=lambda name: race_rows._key(outcomes[name], compiled.sense))
+                                result, reason = answers[won]
+                                strengthen_record["forms"] = {"won": won, "raced": forms_record}
                     except sandbox.SandboxFailed as exc:
                         if not ((start_record or {}).get("feasible") or params.get("metaheuristic")):
                             raise

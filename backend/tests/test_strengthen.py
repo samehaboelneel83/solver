@@ -172,3 +172,18 @@ def test_a_network_design_written_by_the_join_rule_gets_its_cut_sets_without_it(
     stronger, record = strengthen.strengthen(compiled, seconds=10)
     assert record["flow_cuts"] > 0 and record["bound_after"] > record["bound_before"], record
     assert float(_solve(stronger).objective) == pytest.approx(float(_solve(compiled).objective))
+
+
+def test_a_run_races_the_model_as_written_against_the_strengthened_one(db, empty_queue):  # noqa: F811
+    from sqlalchemy import text
+
+    from tests.test_run_events import _run
+
+    run_id = _run(db, _multi_item(1), "two forms")
+    row = db.execute(text("SELECT status, objective, params FROM run WHERE id = :r"), {"r": run_id}).mappings().one()
+    assert row["status"] == "optimal"
+    forms = row["params"]["strengthen_run"]["forms"]
+    assert forms["won"] in ("as written", "with implied rows")
+    assert {r["solver"] for r in forms["raced"]} == {"as written", "with implied rows"}
+    best = float(_solve(compile_model(_multi_item(1), {})).objective)
+    assert float(row["objective"]) == pytest.approx(best)

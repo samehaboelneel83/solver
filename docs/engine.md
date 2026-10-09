@@ -196,6 +196,13 @@ sizing (20 × 30) -- the relaxation rises from 5,952 to 34,796, but HiGHS's own 
 rows pay off where the solver's own do not (facility location, network design). Rows the last relaxation does not
 hold tight are dropped before the solve (they made HiGHS take 22 s instead of 5 on the lot-sizing case).
 
+**Both forms race.** Whether the rows help depends on the solver and the model, and no rule read off the model
+says which in advance. So when rows were added (and the run has two threads or more), the model as written and the
+strengthened one are solved at once by the same solver on half the threads each: the first proof (optimum,
+infeasible, unbounded) ends both, otherwise the better answer at the deadline stands (`app.solve.race`, as the
+portfolio does with solvers). `strengthen_run.forms` records both and which won; setting `hedge_forms` turns it
+off. A run is then never slower than the faster form by more than what half the threads cost.
+
 All candidates are checked against the relaxation as one sparse product per round; up to 2,000 are added a
 round, in the HiGHS worker on one model. Uncapacitated facility location, 100 sites × 400 customers: the
 relaxation's bound goes from 17,876 to 35,695 -- the optimum -- in 3.9 s, and HiGHS then proves it in 1.5 s
