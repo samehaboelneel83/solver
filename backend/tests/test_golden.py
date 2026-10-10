@@ -382,6 +382,21 @@ def test_golden(ir, backend, status, objective):
     if backend.name in SEARCHES:
         _search_golden(ir, backend, status, objective)
         return
+    if backend.name == "qubo-anneal":
+        # The model as a QUBO, annealed (app.solve.qubo): a model a QUBO cannot hold is refused by name;
+        # otherwise held to what a search is held to.
+        try:
+            compile_model(ir, NO_DATA)
+            from app.solve.qubo import to_qubo
+
+            to_qubo(compile_model(ir, NO_DATA))
+        except Exception as exc:  # noqa: BLE001
+            with pytest.raises(Unsupported, match="qubo-anneal takes a model written as a QUBO"):
+                solve_compiled(backend, compile_model(ir, NO_DATA), time_limit=2, seed=1)
+            assert str(exc)
+            return
+        _search_golden(ir, backend, status, objective)
+        return
     if backend.name == "networkx" and network.applies(compile_model(ir, NO_DATA), ceilings=True) is not None:
         # Its class fits, its shape does not: refused with the reason, never answered as something else.
         with pytest.raises(Unsupported, match="networkx solves a network"):

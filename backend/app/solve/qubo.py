@@ -125,6 +125,8 @@ def to_qubo(compiled: Compiled, *, penalty: float | None = None) -> Qubo:
         if not var.is_integral:
             raise NotQubo(f"{_name(key)} is continuous, and a QUBO holds only yes/no and bounded whole-number "
                           "decisions")
+        if var.default_upper:
+            raise NotQubo(f"{_name(key)} has no finite bound, and a QUBO needs one to write it as bits")
         low, high = int(math.ceil(float(var.lower))), int(math.floor(float(var.upper)))
         if high < low:
             raise NotQubo(f"{_name(key)} has no whole value within its bounds")
@@ -288,7 +290,8 @@ def anneal(compiled: Compiled, *, time_limit: float = 10.0, seed: int | None = N
     if n == 0:
         values = q.decode([])
         ok = holds(compiled, values)
-        return Solution("feasible" if ok else "infeasible", False, objective_at(compiled, values) if ok else None,
+        # An annealer proves nothing, so never "infeasible": no answer is "unknown".
+        return Solution("feasible" if ok else "unknown", False, objective_at(compiled, values) if ok else None,
                         values if ok else {}, round(time.monotonic() - began, 3), "qubo-anneal")
     W = np.zeros((n, n))
     for (i, j), w in q.terms.items():
