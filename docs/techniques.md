@@ -100,10 +100,10 @@ Rules are held by Deb's feasibility order; every answer is checked on every comp
 | Escalation: the solver alone first, the steps before a solve only when it settles nothing | `service.py` | setting `solve.probe_first` (on) |
 | Bayesian optimisation of each solver's options per problem (Gaussian process, expected improvement) | `tuning.py` | every run with history; `solve.solver_params` overrides |
 | Infeasibility explanation (IIS, QuickXplain) | `diagnose.py` | infeasible runs |
+| Constraint acquisition from past plans (grouped-sum bounds every plan kept, dropped when the model's LP relaxation already implies them) | `learn.py`, `GET /problems/{id}/learned-rules` | on request, from approved plans or recent answers |
 
 ## Not yet in the platform
 
 - A wider space for the tuning: it searches only the options the benchmark whitelisted (two or three per
   solver), since an option must never change what a solver may answer.
 - Calling a quantum or digital annealer as a service: the QUBO file is what one takes, but no such service is connected.
-- Constraint learning from data (rules inferred from past plans).

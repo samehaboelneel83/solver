@@ -36,6 +36,7 @@ import { declareCalled, offered } from "../model/predictors";
 import WhenEditor from "../model/WhenEditor";
 import ConnectedEditor from "../model/ConnectedEditor";
 import JoinEditor from "../model/JoinEditor";
+import LearnedRules from "../model/LearnedRules";
 import RouteEditor from "../model/RouteEditor";
 import SchedulingEditor, { newSchedulingRule } from "../model/SchedulingEditor";
 import TermBuilder, { BindingsEditor } from "../model/TermBuilder";
@@ -1058,6 +1059,17 @@ function Editor({ problemId, domainId }: { problemId: Id; domainId: Id }) {
           >
             Add a join rule (network design)
           </button>
+        )}
+        {problemId && (
+          <LearnedRules
+            problemId={Number(problemId)}
+            taken={draft.constraints.map((constraint) => constraint.id)}
+            onAdd={(rule) =>
+              setDraft((current) =>
+                current ? { ...current, constraints: [...current.constraints, rule as (typeof current.constraints)[number]] } : current
+              )
+            }
+          />
         )}
           </>
         )}

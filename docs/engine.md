@@ -290,6 +290,21 @@ the best one- or two-bit move on the decisions that keeps every rule, checked a 
 own rows, until none improves -- the moves a penalty's barrier keeps single flips from making. A 120-item
 knapsack with a count rule: 859 against CP-SAT's 1,110 in 10 s by annealing alone, 1,110 with the polish.
 
+## Rules learnt from past plans (`app/solve/learn.py`, 10 October 2026)
+
+`GET /api/v1/problems/{id}/learned-rules?source=approved|answered` finds the limits every past plan kept that the
+model does not say -- constraint acquisition from examples (ModelSeeker, COUNT-CP), the same for every model.
+For each decision over sets and each way of grouping it (by one set, by several, all at once; each cell alone
+for a whole-number or continuous decision), the sum in each group across every plan gives a `<=` (most seen)
+and a `>=` (least seen) rule that every plan keeps by construction. A rule the decisions' bounds already keep is
+dropped; so is one the model already implies, judged on the groups the plans pushed hardest by the model's LP
+relaxation (built once as a sparse LP, solved in-process by SciPy's HiGHS; a rule an LP cannot hold is left out
+of it, so it can only allow more and never drops a rule wrongly). What remains is proposed in the model's own
+contract with both numbers ("never more than 3; the model allows 5"), the widest gap first, from at least two
+plans. The source is the plans people approved (default) or the problem's last 50 answers. In the Model
+editor, "Rules your past plans kept" lists them, each with "Add as a rule" into the draft; nothing is added by
+itself.
+
 ## Solver options tuned per problem (`app/solve/tuning.py`)
 
 Each problem tunes its solver's whitelisted options (`app.solve.params`) over its own runs: the defaults for the
