@@ -1591,3 +1591,30 @@ def test_a_spec_is_read_wherever_the_model_put_it():
     named, notes = spec_of({"spec": {"model": ir}})
     assert named["ir"] == ir and "model" not in named
     assert spec_of({"summary": "only words"})[0] == {}
+
+
+def test_a_bracket_dropped_or_doubled_in_a_long_spec_is_mended():
+    """The production-planning trace: `{"attr": {"of": "p", "name": "rate"}, {"var": ...` -- one brace short, in the
+    middle of a 12 KB spec, six times. Any closer dropped or doubled anywhere gives valid JSON back."""
+    import json
+    import random
+
+    from app.agent.toolcall import fix_spec
+
+    rule = {"id": "c_line", "forall": [{"index": "w", "set": "week"}],
+            "left": {"sum": {"add": [{"mul": [{"attr": {"of": "p", "name": "rate"}}, {"var": "make", "index": ["p", "w"]}]},
+                                     {"mul": [{"attr": {"of": "p", "name": "change"}}, {"var": "setup", "index": ["p", "w"]}]}]},
+                     "over": [{"index": "p", "set": "product"}]},
+            "relation": "<=", "right": {"add": [{"attr": {"of": "w", "name": "hours"}}, {"var": "overtime", "index": ["w"]}]}}
+    text = json.dumps({"ir": {"constraints": [rule] * 6}, "seed": {"entities": [{"type": "week", "key": f"W{i}"} for i in range(30)]}})
+    dropped = text.replace('"name": "rate"}}', '"name": "rate"}', 1)
+    mended = json.loads(fix_spec(dropped))
+    assert len(mended["ir"]["constraints"]) == 6 and mended["seed"] == json.loads(text)["seed"]
+    rnd = random.Random(3)
+    closers = [i for i, ch in enumerate(text) if ch in "}]"]
+    for k in range(30):
+        i = rnd.choice(closers)
+        broken = text[:i] + text[i + 1:] if k % 2 else text[:i] + text[i] + text[i:]
+        mended = fix_spec(broken)
+        assert mended is not None, (k, i)
+        json.loads(mended)

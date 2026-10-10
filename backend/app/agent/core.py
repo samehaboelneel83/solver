@@ -3412,9 +3412,9 @@ class Agent:
                         if fixed is None:
                             raise
                         args = toolcall.strict_loads(fixed, self.joined)
-                        self.joined.append("your call's JSON had a slip (a rule's \"right\" key left out, or the "
-                                           "closing brackets out of order) and was put right; write it correctly "
-                                           "next time")
+                        self.joined.append("your call's JSON had a slip (a rule's \"right\" key left out, or closing "
+                                           "brackets dropped, doubled or out of order) and was put right; check the "
+                                           "spec says what you meant, and write it correctly next time")
                     if not isinstance(args, dict):
                         raise ValueError("arguments must be a JSON object")
                     if name not in self.tool_names:
