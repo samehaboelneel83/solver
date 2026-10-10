@@ -129,3 +129,30 @@ problem's domain": its model read `demand` as a parameter while the data put dem
 field, and three attempts did not reconcile them. The harness's one "continue" did not get it built either.
 The time-indexed parts (battery level carried hour to hour, start-up when a generator turns on) were never
 reached, so the owner's "important test" for #7 is still open.
+
+## #5 Emergency vehicle stationing
+
+| Case | Built first time | Minutes | Goal | Reference | Status |
+|---|---|---|---|---|---|
+| S (8 stations × 25 zones, road minutes typed) | **no** — stopped after 16.5 min | 20 | — | 1,792,842 | — |
+
+**S — not built.** Three tool calls in a row were refused before they ran: the goal's terms came back
+merged into one object with two `id` keys (`o_operating` and `o_ambulance`) — a dropped `}, {` between two
+terms, which the repair cannot safely guess. Whether the model reads the road travel-time matrix or
+computes straight lines (the owner's "important test") was never reached.
+
+## Small cases so far
+
+| # | Problem | Built | Right answer | What happened |
+|---|---|---|---|---|
+| 2 | Supply chain | yes | **no** | proven optimal while breaking the approved-warehouse rule |
+| 4 | Factory | yes | **no** | proven optimal at 10x the true profit, 7 rules broken |
+| 6 | Timetabling | yes | — | **platform crash** on a quadratic goal (race entrant) |
+| 1 | Hospital | yes | **yes** | the true optimum, every rule held, full report |
+| 8 | Cybersecurity | yes | **no** | full protection claimed with nothing bought |
+| 7 | Smart grid | no | — | stopped: a parameter read but never loaded |
+| 5 | Ambulances | no | — | stopped: the same JSON slip three times |
+
+1 right answer in 7. Of the 5 that were built and solved, 3 were wrong and were reported as proven optimal;
+the platform's own verification accepted all three. Every wrong answer was found only by the independent
+checker.
