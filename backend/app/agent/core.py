@@ -3159,9 +3159,13 @@ class Agent:
         """The dry run. "PLAN_OK" lets the plan through to the person; anything else goes back to the model."""
         # The person's own go-ahead ("you decide the rest and go ahead") is the discussion: the evaluation's
         # routing test deadlocked between this rule and the go-ahead guard, which forbids asking.
+        # A summary of the earlier conversation keeps the person's words, and counts (phase 1 rerun, 10 October
+        # 2026: the go-ahead in a long first message was compacted into a [Platform] summary, and the plan was
+        # refused for "not discussing the problem").
         if self._user_turns() < MIN_USER_TURNS_BEFORE_PLAN and not any(
                 _GO_AHEAD.search(str(m.get("content") or "")) for m in self.messages
-                if m.get("role") == "user" and not str(m.get("content") or "").startswith(PLATFORM)):
+                if m.get("role") == "user" and (not str(m.get("content") or "").startswith(PLATFORM)
+                                                or agent_compact.is_summary(m))):
             return ("Refused: you have not discussed the problem with the user yet. Restate what you "
                     "understood, ask your open questions (decisions, goal, rules hard/soft, data and units), "
                     "and propose only after they answer.")

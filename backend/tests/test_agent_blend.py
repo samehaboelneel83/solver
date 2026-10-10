@@ -1729,3 +1729,14 @@ def test_propose_without_further_questions_is_a_go_ahead():
     said = "Everything you need is here: please propose the model without further questions, then solve it."
     assert core._GO_AHEAD.search(said)
     assert not core._GO_AHEAD.search("We bottle juice on one line and need a plan for eight weeks.")
+
+
+def test_a_summarised_first_message_keeps_its_go_ahead():
+    """Phase 1 rerun (10 October 2026): a 5,000-character first message lost its last line, the go-ahead, when the
+    conversation was summarised, and the plan was refused for "not discussing the problem"."""
+    from app.agent import compact
+
+    long = "Data:\n" + "ST001,12,14\n" * 450 + "Everything you need is here: please propose the model without further questions."
+    kept = compact._clip_ends(long, compact.BRIEF_CHARS)
+    assert len(kept) < len(long) and kept.endswith("without further questions.") and kept.startswith("Data:")
+    assert core._GO_AHEAD.search(kept)

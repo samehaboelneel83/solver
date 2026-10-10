@@ -191,6 +191,8 @@ def check(folder: Path, export_csv: str) -> list[str]:
     opened: set[str] = set()
     for r in export_rows(export_csv):
         keys = [r.get(f"key{i}") for i in range(1, 5)]
+        if len(G) == 1 and not keys[3] and keys[2] in D:
+            keys[3] = G[0]  # one good: a model may leave its index out
         if keys[0] in wh and keys[1] in loc and keys[2] in D and keys[3] in G:
             ship[tuple(keys)] = ship.get(tuple(keys), 0.0) + float(r["value"])
         elif keys[0] in wh and not keys[1] and float(r["value"]) > 0.5 and "open" in r["decision"].lower():

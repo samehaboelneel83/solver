@@ -131,6 +131,14 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit] + f" ...[{len(text) - limit} characters more]"
 
 
+def _clip_ends(text: str, limit: int, tail: int = 800) -> str:
+    """Its beginning and its end: a request's last lines are often what to do ("propose the model without further
+    questions") -- clipped off, the go-ahead was lost in the phase 1 rerun (10 October 2026)."""
+    if len(text) <= limit:
+        return text
+    return text[:limit - tail] + f" ...[{len(text) - limit} characters left out]... " + text[-tail:]
+
+
 def transcript(messages: list[dict[str, Any]]) -> list[str]:
     """The conversation as lines a summarizer reads, one per message."""
     lines = []
@@ -217,7 +225,7 @@ def compact(messages: list[dict[str, Any]], *, summarize: Callable[[str, str], s
     parts = [SUMMARY_MARK + " (to stay within the model's memory; the recent messages follow word for word)"]
     parts.append(TURNS_LINE + str(len(real_users) + sum(recorded_turns(m) for m in earlier)))
     if brief:
-        parts.append("The person's first message, word for word:\n" + _clip(brief, BRIEF_CHARS) + "\n" + BRIEF_END)
+        parts.append("The person's first message, word for word:\n" + _clip_ends(brief, BRIEF_CHARS) + "\n" + BRIEF_END)
     parts.append(notes.strip() or "(no notes)")
     if latest:
         parts.append("The person's latest request, word for word (still being worked on):\n" + _clip(latest, BRIEF_CHARS))
