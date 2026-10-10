@@ -12,6 +12,7 @@ import Skeleton from "../components/Skeleton";
 import ProblemPicker from "../components/ProblemPicker";
 import { useDomainProblem } from "../hooks/useDomainProblem";
 import { formatApiError } from "../api/errors";
+import { downloadFrom } from "../api/download";
 import {
   useCancelRun,
   useCreateRun,
@@ -865,6 +866,21 @@ function ScenarioRuns({
               <label>within (% of the best){" "}
                 <input className="w-16 rounded border border-slate-300 px-2 py-1" inputMode="decimal" value={more.within}
                   onChange={(e) => setMore({ ...more, within: e.target.value.replace(/[^0-9.]/g, "") })} /></label>
+              {/* The model as an annealer takes it (app.solve.qubo): yes/no and bounded whole numbers only; the
+                  reason comes back when it cannot be one. */}
+              <span className="inline-flex items-center gap-2">
+                For an annealer:
+                {(["json", "qubo"] as const).map((format) => (
+                  <button key={format} type="button" className="text-blue-700 underline"
+                    onClick={() => {
+                      setFailure(null);
+                      downloadFrom(`/api/v1/scenarios/${scenarioId}/qubo?format=${format}`)
+                        .catch((error: unknown) => setFailure(formatApiError(error)));
+                    }}>
+                    {format === "json" ? "QUBO as JSON (dimod)" : "QUBO as .qubo (qbsolv)"}
+                  </button>
+                ))}
+              </span>
             </div>
           </details>
         )}

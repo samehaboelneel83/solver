@@ -3,6 +3,8 @@
     GET /api/v1/workers                       online workers, runs solving and queued
     GET /api/v1/scenarios/{id}/preflight      the scenario's model on today's data:
                                               ready or not, and why; which solvers fit
+    GET /api/v1/scenarios/{id}/qubo           the same model as a QUBO for an annealer
+                                              (?format=json|qubo&penalty=), a file
 
 The preflight does what a run's first steps do -- the scenario's patch applied,
 the model compiled on the domain's live data (not a snapshot: nothing is
@@ -15,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -376,3 +378,36 @@ def preflight(scenario_id: int, db: Session = Depends(get_db), user: UserAccount
         "structure": checked["structure"],
         "workers": worker_status(db),
     }
+
+
+@router.get("/scenarios/{scenario_id}/qubo")
+def qubo_file(scenario_id: int, format: str = Query("json", pattern="^(json|qubo)$"),
+              penalty: float | None = Query(None, gt=0),
+              db: Session = Depends(get_db), user: UserAccount = Depends(get_current_user)) -> Response:
+    """The scenario's model on today's data as a QUBO (`app.solve.qubo`): JSON in dimod's binary quadratic
+    model layout, or qbsolv's `.qubo` text. Refused with the reason when the model is not one a QUBO holds."""
+    from app.solve import qubo, whatif
+    from app.solve.compile import Unsupported, compile_model
+    from app.solve.preview import live_data
+    from app.solve.service import patched
+
+    scenario = db.execute(text(
+        "SELECT s.id, s.name, s.patch, p.domain_id, mv.ir FROM scenario s"
+        " JOIN model_version mv ON mv.id = s.model_version_id JOIN problem p ON p.id = s.problem_id WHERE s.id = :s"),
+        {"s": scenario_id}).mappings().one_or_none()
+    if scenario is None:
+        raise HTTPException(404, "scenario not found")
+    ir = patched(scenario["ir"], scenario["patch"] or {})
+    data = live_data(db, scenario["domain_id"], ir)
+    if whatif.has_data_changes(scenario["patch"]):
+        data = whatif.apply(data, ir, scenario["patch"])
+    try:
+        compiled = compile_model(ir, data)
+        made = qubo.to_qubo(compiled, penalty=penalty)
+    except (Unsupported, qubo.NotQubo) as exc:
+        raise HTTPException(422, {"code": "not_a_qubo", "message": str(exc)}) from exc
+    body = qubo.export(made, format)
+    stem = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in str(scenario["name"] or "scenario"))[:60]
+    return Response(content=body, media_type="application/json" if format == "json" else "text/plain",
+                    headers={"Content-Disposition": f'attachment; filename="{stem}.{format}"',
+                             "X-Qubo-Bits": str(len(made.bits)), "X-Qubo-Penalty": f"{made.penalty:g}"})
