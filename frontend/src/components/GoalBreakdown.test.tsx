@@ -53,3 +53,13 @@ it("splits one goal term by decision (the production-planning trace)", () => {
   expect(screen.getByLabelText("o cost by decision")).toHaveTextContent(
     `setup ${(88500).toLocaleString("en-US")} · stock ${(16440).toLocaleString("en-US")} · overtime ${(11295).toLocaleString("en-US")}`);
 });
+
+it("shows a large value to its units and decimals, as the goal is shown (the feed mill trace)", () => {
+  render(<GoalBreakdown breakdown={{ sense: "minimize", mode: "weighted", terms: [
+    { id: "o_cost", weight: 1, value: 3937795.79, contribution: 3937795.79, share: 0.99, records: [] },
+    { id: "o_other", weight: 1, value: 12.345678, contribution: 12.345678, share: 0.01, records: [] },
+  ] }} />);
+  const table = screen.getByRole("table", { name: "Goal by term" });
+  expect(table).toHaveTextContent("3,937,795.79");
+  expect(table).toHaveTextContent("12.3457");
+});

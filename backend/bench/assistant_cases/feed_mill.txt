@@ -1,0 +1,20 @@
+Please build this in a new workspace called "{workspace}". Call the problem "This week's feed blends".
+
+We mix poultry feed from five ingredients and must decide how many tons of each ingredient go into each of our two feeds this week, at the lowest ingredient cost.
+
+Ingredients (cost in EGP per ton; protein, fibre and calcium as a percentage of the ingredient's weight; tons we can get this week):
+id,name,cost_per_ton,protein_pct,fibre_pct,calcium_pct,available_tons
+CORN,Yellow corn,11500,8.5,2.2,0.03,300
+SOY,Soybean meal,24000,46,3.5,0.3,120
+BRAN,Wheat bran,8200,15,10,0.12,90
+FISH,Fish meal,42000,62,0.5,5,15
+LIME,Limestone,1200,0,0,38,40
+
+Feeds (tons to make this week, exactly; limits on the finished feed as a percentage of its weight):
+id,name,tons,protein_min_pct,fibre_max_pct,calcium_min_pct,calcium_max_pct
+START,Starter,120,21,4.5,0.9,1.2
+FINISH,Finisher,180,17.5,5.5,0.8,1.1
+
+Rules: the ingredients put into a feed add up to exactly the tons of that feed. In each feed, protein is at least its minimum percentage of the feed's weight, fibre is at most its maximum percentage, and calcium is between its minimum and maximum percentage. Fish meal is at most 5 percent of the weight of any feed. Across both feeds we cannot use more of an ingredient than is available. Tons can be fractions. Goal: the lowest total cost of the ingredients used.
+
+Everything you need is above: please propose the model without further questions, then solve it.

@@ -15,7 +15,9 @@ export type Breakdown = {
 };
 
 const words = (id: string) => id.replace(/_/g, " ");
-const show = (n: number) => n.toLocaleString("en-US", { maximumSignificantDigits: 6 });
+// Six significant digits for small numbers; a large one keeps its units and two decimals, as the goal above it
+// does (the feed mill trace, 10 October 2026: 3,937,800 beside a goal of 3,937,795.79).
+const show = (n: number) => n.toLocaleString("en-US", Math.abs(n) >= 1000 ? { maximumFractionDigits: 2 } : { maximumSignificantDigits: 6 });
 
 /**
  * Each goal term's value and share of the whole, and the records it comes from -- "transport 61 %,
