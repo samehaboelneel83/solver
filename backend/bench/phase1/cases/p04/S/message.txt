@@ -1,0 +1,46 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Weekly production plan". Our factory makes 4 products on 2 machines over 2 shifts this week.
+
+Products (price, unit cost and setup cost in EGP; labour hours per unit; demand range in units):
+id,price,unit_cost,setup_cost,labour_hours_per_unit,min_demand,max_demand
+P01,105,68,395,0.59,10,109
+P02,45,22,598,0.44,19,173
+P03,102,66,471,0.52,22,210
+P04,46,26,553,0.35,7,92
+
+Machines:
+id,hours_per_shift
+M01,8
+M02,8
+
+Shifts (labour hours available):
+id,labour_hours
+MORNING,22
+EVENING,25
+
+Machine times (which machines can make each product, hours per unit):
+product,machine,hours_per_unit
+P01,M02,0.136
+P02,M02,0.072
+P03,M02,0.061
+P04,M02,0.148
+
+Materials (stock for the week):
+id,stock
+MAT1,100
+MAT2,312
+
+Material use per unit:
+product,material,per_unit
+P01,MAT1,0.17
+P01,MAT2,1.01
+P02,MAT2,0.67
+P03,MAT2,1.65
+P04,MAT1,1.86
+
+Incompatible products (never on the same machine in the same shift):
+product_a,product_b
+P02,P04
+
+Rules: a product can run only on the machines listed for it in machine times, and a unit there takes the hours listed. On each machine, in each shift, the hours used are at most its hours per shift. In each shift the labour hours used (units times labour hours per unit, over all products and machines) are at most that shift's labour hours. Over the week, each material used (units times use per unit) is at most its stock. Each product's total over all machines and shifts is at least its minimum and at most its maximum demand. A product run on a machine in a shift costs its setup cost once for that machine and shift. The two products of an incompatible pair can never run on the same machine in the same shift. Units are whole numbers. Goal: the largest profit = (price - unit cost) x units, minus all setup costs. Report production per product, machine and shift, revenue, production cost, setup cost and net profit, machine utilization, unmet demand (below the maximum), and how profit changes if demand changes.
+
+Everything you need is here: please propose the model without further questions, then solve it.

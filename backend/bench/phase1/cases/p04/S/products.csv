@@ -1,0 +1,5 @@
+id,price,unit_cost,setup_cost,labour_hours_per_unit,min_demand,max_demand
+P01,105,68,395,0.59,10,109
+P02,45,22,598,0.44,19,173
+P03,102,66,471,0.52,22,210
+P04,46,26,553,0.35,7,92

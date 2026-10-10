@@ -1,0 +1,7 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Distribution plan". We ship from 15 warehouses to 300 customers and need the cheapest shipping plan.
+
+The data are in the attached files: warehouses.csv (stock and shipping capacity per warehouse), customers.csv (demand per customer), routes.csv (cost per unit for every warehouse-customer pair, and whether the route is open), approved.csv (for the customers listed, the only warehouses allowed to serve them).
+
+Rules: every customer receives exactly its demand. A warehouse ships no more than its stock and no more than its shipping capacity, in total over all its customers. A route marked open = no cannot be used. A customer listed in the approved list may be served only from the warehouses listed for it; customers not in that list may be served from any warehouse. A customer may be served from several warehouses. Shipments are whole units. Goal: the lowest total shipping cost (units on a route times its cost per unit). Then compare that cost with our current plan, whose cost is 620,693, and say which warehouses are bottlenecks.
+
+Everything you need is here: please propose the model without further questions, then solve it.

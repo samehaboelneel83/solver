@@ -1,0 +1,42 @@
+{
+  "problem": "p02",
+  "size": "M",
+  "kind": "exact",
+  "goal": 90677.0,
+  "sense": "minimize",
+  "report": [
+    [
+      "shipment quantities per warehouse-customer pair",
+      "W0\\d\\W+.{0,40}C0\\d\\d.{0,40}\\d"
+    ],
+    [
+      "total transportation cost",
+      "90,?677"
+    ],
+    [
+      "warehouse utilization",
+      "utili[sz]|capacity used|% of (its )?(capacity|stock)|full"
+    ],
+    [
+      "customer demand fulfilment",
+      "demand (is |are )?(fully )?(met|fulfil|satisf)|every customer|all (customers|demand)"
+    ],
+    [
+      "bottlenecks",
+      "bottleneck"
+    ],
+    [
+      "comparison with the current plan",
+      "current plan|sav(e|ing)|98,?129"
+    ]
+  ],
+  "current_plan_cost": 98129.0,
+  "files": [
+    "warehouses.csv",
+    "customers.csv",
+    "routes.csv",
+    "approved.csv"
+  ],
+  "routes": 150,
+  "open_routes": 114
+}

@@ -1,0 +1,49 @@
+{
+  "problem": "p04",
+  "size": "M",
+  "kind": "bounded",
+  "goal": null,
+  "known_feasible": 34963.0,
+  "bound": 34981.0,
+  "sense": "maximize",
+  "report": [
+    [
+      "production per product, machine and shift",
+      "P\\d\\d[^\\n]{0,60}M\\d\\d[^\\n]{0,60}(MORNING|EVENING|NIGHT)"
+    ],
+    [
+      "revenue",
+      "revenue"
+    ],
+    [
+      "production cost",
+      "production cost|unit cost"
+    ],
+    [
+      "net profit",
+      "34,?963"
+    ],
+    [
+      "machine utilization",
+      "utili[sz]|hours used|% of"
+    ],
+    [
+      "unmet demand",
+      "unmet|below (its|the) max|not (fully )?met|short"
+    ],
+    [
+      "sensitivity to demand",
+      "if demand|sensitiv|demand (rises|falls|changes|increase|decrease)"
+    ]
+  ],
+  "files": [
+    "products.csv",
+    "machines.csv",
+    "shifts.csv",
+    "machine_times.csv",
+    "materials.csv",
+    "material_use.csv",
+    "incompatible.csv"
+  ],
+  "binaries": 123
+}

@@ -1,0 +1,7 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Weekly production plan". Our factory makes 20 products on 10 machines over 3 shifts this week.
+
+The data are in the attached files: products.csv, machines.csv, shifts.csv, machine_times.csv (which machines can make each product and hours per unit), materials.csv, material_use.csv, incompatible.csv (pairs never on the same machine in the same shift).
+
+Rules: a product can run only on the machines listed for it in machine times, and a unit there takes the hours listed. On each machine, in each shift, the hours used are at most its hours per shift. In each shift the labour hours used (units times labour hours per unit, over all products and machines) are at most that shift's labour hours. Over the week, each material used (units times use per unit) is at most its stock. Each product's total over all machines and shifts is at least its minimum and at most its maximum demand. A product run on a machine in a shift costs its setup cost once for that machine and shift. The two products of an incompatible pair can never run on the same machine in the same shift. Units are whole numbers. Goal: the largest profit = (price - unit cost) x units, minus all setup costs. Report production per product, machine and shift, revenue, production cost, setup cost and net profit, machine utilization, unmet demand (below the maximum), and how profit changes if demand changes.
+
+Everything you need is here: please propose the model without further questions, then solve it.
