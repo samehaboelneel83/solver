@@ -100,6 +100,7 @@ Rules are held by Deb's feasibility order; every answer is checked on every comp
 | Escalation: the solver alone first, the steps before a solve only when it settles nothing | `service.py` | setting `solve.probe_first` (on) |
 | Bayesian optimisation of each solver's options per problem (Gaussian process, expected improvement) | `tuning.py` | every run with history; `solve.solver_params` overrides |
 | Infeasibility explanation (IIS, QuickXplain) | `diagnose.py` | infeasible runs |
+| Shape checks on a model that solves: a decision that can never help (dual fixing read as a finding), data given and never read | `lint.py`, a plan's dry run (`shape`) | every plan the Assistant proposes, before a person sees it |
 | Constraint acquisition from past plans (grouped-sum bounds every plan kept, dropped when the model's LP relaxation already implies them) | `learn.py`, `GET /problems/{id}/learned-rules` | on request, from approved plans or recent answers |
 
 ## Not yet in the platform

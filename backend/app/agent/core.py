@@ -1770,6 +1770,28 @@ def trial_sent_back(trial: Any) -> str:
     return ""
 
 
+def shape_sent_back(shape: Any) -> str:
+    """What the Assistant is told when the model's shape gives a mistake away (app.solve.lint), before the person
+    sees the plan. Empty when nothing was found."""
+    said = [str(f.get("said")) for f in shape or [] if isinstance(f, dict) and f.get("said")]
+    if not said:
+        return ""
+    return ("The plan was NOT shown to the user yet. It builds and may even solve, but its shape says it is not "
+            "what the person described: " + "; ".join(said) + ". A decision that can never help has a term on "
+            "the wrong side or with the wrong sign (what adds room -- overtime, extra capacity, a purchase -- "
+            "belongs where it makes the limit larger, not where it uses the limit up). Data the person gave that "
+            "nothing reads belongs in a rule or the goal (an opening amount in the first period's balance, a cost "
+            "in the goal, a limit in its rule). Read the person's words again for each of these, fix the model and "
+            "call propose_plan again. Only if the person's words really leave it out, propose the same plan again: "
+            "it will be shown with these findings for them to judge.")
+
+
+def shape_for_person(shape: Any) -> str:
+    """The same findings as lines of the plan card."""
+    said = [str(f.get("said")) for f in shape or [] if isinstance(f, dict) and f.get("said")]
+    return "".join(f"\n- CHECK THIS: {s}" for s in said)
+
+
 def trial_for_person(trial: Any) -> str:
     """The trial solve as one line of the plan card (the production test: a plan carrying stock from the month
     after made in 3 of 6 months and was late in 5 -- visible at once beside a plan that makes in all 6)."""
@@ -2166,6 +2188,7 @@ class Agent:
         self.refusals: dict[str, int] = {}
         #: Plans sent back because their trial solve had no answer (once; see `_check_plan`).
         self.trials_sent_back = 0
+        self.shape_sent_back = False
         self.api_rejections: dict[str, int] = {}
         self.total_api_rejections = 0
         import threading
@@ -3124,6 +3147,11 @@ class Agent:
             if back and self.trials_sent_back < TRIAL_SEND_BACKS:
                 self.trials_sent_back += 1
                 return back
+            # A plan that solves and whose shape still gives a mistake away goes back once, then is shown with it.
+            back = shape_sent_back((res.get("body") or {}).get("shape"))
+            if back and not self.shape_sent_back:
+                self.shape_sent_back = True
+                return back
             return "PLAN_OK " + json.dumps(res.get("body"), default=str)
         return ("The spec does not build yet; fix these and call propose_plan again (the user has not "
                 "seen it): " + clip(res.get("body"), 4000))
@@ -3804,7 +3832,7 @@ class Agent:
                     # What will be built, read back by the platform beside the model's own account of it -- and
                     # what it does on the data, solved once before anything is kept.
                     built_as = agent_readback.readback(self._spec(args)).split("\n", 1)[-1] + trial_for_person(
-                        body.get("trial"))
+                        body.get("trial")) + shape_for_person(body.get("shape"))
                     yield {"type": "plan", "summary": str(args.get("summary")) + "\n\n**As built** (read back "
                            "from the spec by the platform; check it says what you meant)\n```\n" + built_as + "\n```",
                            "counts": counts, "spec": self._spec(args, expand=False), "readback": built_as}

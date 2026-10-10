@@ -91,7 +91,8 @@ def _goal(base: str, headers: dict[str, str], scenario_id: int, wait: float = 30
         time.sleep(5)
 
 
-def run_case(name: str, base: str, headers: dict[str, str], nudges: int, stamp: str) -> dict[str, Any]:
+def run_case(name: str, base: str, headers: dict[str, str], nudges: int, stamp: str,
+             minutes: float = 15.0) -> dict[str, Any]:
     text = (CASES_DIR / f"{name}.txt").read_text(encoding="utf-8").replace("{workspace}", f"bench {stamp} {name}")
     conversation = uuid.uuid4().hex
     record: dict[str, Any] = {"case": name, "conversation": conversation, "built": False, "nudged": 0, "stopped": 0,
@@ -120,7 +121,7 @@ def run_case(name: str, base: str, headers: dict[str, str], nudges: int, stamp: 
         if plan is not None and "NO answer exists" in str(plan.get("readback") or plan.get("summary") or ""):
             # A person reads the plan card: a trial with no answer is not approved, it is sent back in their words.
             record["warned"] += 1
-            if record["nudged"] >= nudges:
+            if record["nudged"] >= nudges or time.monotonic() - started > minutes * 60:
                 break
             record["nudged"] += 1
             body = {"mode": "model", "text": "The trial on the plan says no answer exists, but this problem has one. "
@@ -129,7 +130,7 @@ def run_case(name: str, base: str, headers: dict[str, str], nudges: int, stamp: 
         if "plan" in kinds or "confirm" in kinds:
             body = {"mode": "model", "confirm": {"allow": True}}
             continue
-        if record["nudged"] >= nudges:
+        if record["nudged"] >= nudges or time.monotonic() - started > minutes * 60:
             break
         record["nudged"] += 1
         body = {"mode": "model", "text": "continue"}
@@ -178,6 +179,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m bench.assistant")
     parser.add_argument("--case", action="append", help="a case by name (default: all)")
     parser.add_argument("--runs", type=int, default=1, help="how many times to run each case (default 1)")
+    parser.add_argument("--minutes", type=float, default=15.0,
+                        help="no new turn is started on a case after this long (default 15)")
     parser.add_argument("--nudges", type=int, default=3, help='how many times to answer "continue" (default 3)')
     parser.add_argument("--base", default="http://localhost:8000")
     parser.add_argument("--out", default=None, help="report path (default: bench/results/<day>-assistant.md)")
@@ -192,7 +195,7 @@ def main(argv: list[str] | None = None) -> int:
     rows = []
     for attempt in range(1, max(1, args.runs) + 1):
         for name in names:
-            row = run_case(name, args.base, headers, args.nudges, f"{stamp}-{attempt}")
+            row = run_case(name, args.base, headers, args.nudges, f"{stamp}-{attempt}", args.minutes)
             rows.append(row)
             print(json.dumps({k: v for k, v in row.items() if k != "why"}), flush=True)
     day = date.today().isoformat()

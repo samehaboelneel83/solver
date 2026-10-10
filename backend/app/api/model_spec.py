@@ -310,7 +310,7 @@ TRIAL_CELLS = 200_000
 TRIAL_LISTED = 12
 
 
-def _trial(db: Session, domain_id: int, ir: dict[str, Any]) -> dict[str, Any]:
+def _trial(db: Session, domain_id: int, ir: dict[str, Any], keep: dict[str, Any] | None = None) -> dict[str, Any]:
     """One short solve of the planned model on its own data, inside the dry run's transaction (the field tests,
     October 2026: plans that passed every check read stock from the month after, or planned for futures with
     nothing decided later -- a trial shows what such a model does before a person approves it)."""
@@ -328,6 +328,8 @@ def _trial(db: Session, domain_id: int, ir: dict[str, Any]) -> dict[str, Any]:
         return {"status": "not compiled", "why": str(exc)[:500]}
     except Exception as exc:  # noqa: BLE001 -- a trial informs, it never refuses a plan
         return {"status": "not compiled", "why": f"{type(exc).__name__}: {str(exc)[:300]}"}
+    if keep is not None:
+        keep["compiled"] = compiled  # for the shape checks (app.solve.lint), which read the same rows
     if len(compiled.variables) > TRIAL_CELLS:
         return {"status": "skipped", "why": f"{len(compiled.variables):,} decisions: too big for a trial"}
     try:
@@ -501,9 +503,21 @@ def build_from_spec(
             **({"bound_to_sources": len(spec.seed["source_bindings"])} if spec.seed.get("source_bindings") else {}),
         }
         if spec.dry_run:
-            trial = _trial(db, domain_id, spec.ir) if spec.trial else None
+            kept: dict[str, Any] = {}
+            trial = _trial(db, domain_id, spec.ir, kept) if spec.trial else None
             db.rollback()
-            return {"ok": True, "dry_run": True, "would_create": counts, **({"trial": trial} if trial else {})}
+            shape: list[dict[str, Any]] = []
+            if spec.trial:
+                # What the model's shape gives away even when it solves (app.solve.lint): a decision that can
+                # never help, data given and never read. Findings, never a refusal.
+                from app.solve import lint
+
+                try:
+                    shape = lint.findings(spec.ir, spec.seed, kept.get("compiled"))
+                except Exception:  # noqa: BLE001 -- a check that fails says nothing
+                    shape = []
+            return {"ok": True, "dry_run": True, "would_create": counts, **({"trial": trial} if trial else {}),
+                    **({"shape": shape} if shape else {})}
 
         version_id = db.execute(
             insert(ModelVersion.__table__)
