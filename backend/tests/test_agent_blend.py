@@ -1598,6 +1598,31 @@ def test_a_spec_is_read_wherever_the_model_put_it():
     assert kept == {"ir": ir, "domain_name": "D"} and notes == []
 
 
+def test_values_for_a_parameter_only_the_ir_declares_and_a_sums_default_zero_are_repaired():
+    """The Nile Juice trace's two refusals after the spec was read: 48 cells of "demand" with no declaration in
+    the seed, and "default": 0 on a sum."""
+    from app.agent.repair import repair
+
+    def spec(cells, default=0):
+        return {"seed": {"entity_types": [], "parameter_values": cells},
+                "ir": {"version": 2, "sets": ["product", "week"],
+                       "parameters": {"demand": {"index": ["product", "week"]}},
+                       "objective": {"expression": {"sum": {"var": "x", "index": ["p"]}, "default": default,
+                                                    "over": [{"index": "p", "set": "product"}]}}}}
+
+    cell = {"parameter": "demand", "entities": [["product", "OJ1L"], ["week", "W01"]], "value": 12}
+    good = spec([cell, dict(cell, value=14)])
+    notes = repair(good)
+    assert good["seed"]["parameters"] == [{"name": "demand", "index": ["product", "week"]}]
+    assert "default" not in good["ir"]["objective"]["expression"]
+    assert any("demand" in n for n in notes) and any("default" in n for n in notes)
+    assert repair(good) == []  # once
+
+    odd = spec([dict(cell, entities=[["product", "OJ1L"]])], default=5)  # a cell that does not fit; a real default
+    repair(odd)
+    assert "parameters" not in odd["seed"] and odd["ir"]["objective"]["expression"]["default"] == 5
+
+
 def test_a_bracket_dropped_or_doubled_in_a_long_spec_is_mended():
     """The production-planning trace: `{"attr": {"of": "p", "name": "rate"}, {"var": ...` -- one brace short, in the
     middle of a 12 KB spec, six times. Any closer dropped or doubled anywhere gives valid JSON back."""

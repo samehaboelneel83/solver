@@ -58,6 +58,10 @@ def _walk(node: Any, notes: list[str]) -> None:
     if isinstance(node, dict):
         if "sum" in node:
             _lift_sum(node, notes)
+            if "default" in node and node["default"] in (0, None) and not isinstance(node["default"], bool):
+                # A sum over nothing is 0 already (the Nile Juice trace: "default": 0 on a sum was refused).
+                node.pop("default")
+                notes.append('"default": 0 on a sum was left out (a sum over nothing is 0)')
         for key in ("sub", "subtract", "minus", "neg", "negate"):
             # a - b, written as the arithmetic reads (the production-plan test: stock[q] - owed[q] as "sub"); the
             # language has add and mul only, so it is a + (-1 * b).
@@ -317,6 +321,20 @@ def repair(spec: dict[str, Any]) -> list[str]:
                              'where the model declares it')
             else:
                 p.pop("uncertainty")
+    cells = [v for v in seed.get("parameter_values") or [] if isinstance(v, dict)]
+    declared = {p.get("name") for p in seed.get("parameters") or [] if isinstance(p, dict)}
+    for name in dict.fromkeys(v.get("parameter") for v in cells):
+        # Values for a parameter only the IR declares (the Nile Juice trace: 48 cells of "demand", refused until
+        # the seed declared it too): the seed's declaration is the IR's, when every cell fits its index.
+        reads = (ir.get("parameters") or {}).get(name) if isinstance(ir.get("parameters"), dict) else None
+        index = reads.get("index") if isinstance(reads, dict) else None
+        if not isinstance(name, str) or name in declared or not isinstance(index, list)                 or not all(isinstance(t, str) for t in index) or not isinstance(spec.get("seed"), dict):
+            continue
+        if all(len(v.get("entities") or []) == len(index) for v in cells if v.get("parameter") == name):
+            seed.setdefault("parameters", []).append({"name": name, "index": list(index)})
+            declared.add(name)
+            notes.append(f"parameter {name} had values in the seed but was declared only in ir.parameters; it was "
+                         f"declared in the seed's parameters too, over {', '.join(index) or 'nothing'}")
     if "sets" not in ir:
         # A model over no records (the bakery test: one quantity, one uncertain number) still states its sets.
         ir["sets"] = []

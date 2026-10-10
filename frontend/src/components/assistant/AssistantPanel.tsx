@@ -915,28 +915,27 @@ function ItemView({ item, live, onDecide, onHandover }: {
 
 function Steps({ steps, notes }: { steps: Step[]; notes: string[] }) {
   const [open, setOpen] = useState(false);
+  // A step the platform sent back is the Assistant correcting itself, not a failure of the person's request:
+  // it stays folded, and reads as a correction when opened. What could not be done is the turn's own error.
   const failed = steps.filter((s) => s.ok === false).length;
-  useEffect(() => {
-    if (failed > 0) setOpen(true);
-  }, [failed]);
   if (steps.length === 0 && notes.length === 0) return null;
   return (
     <div className="text-xs text-slate-600">
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
         className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-slate-100">
         {open ? <ChevronDown className="h-3.5 w-3.5 rtl:rotate-0" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5 rtl:rotate-180" aria-hidden />}
-        {steps.length} step{steps.length === 1 ? "" : "s"}{failed ? ` · ${failed} retried` : ""}
+        {steps.length} step{steps.length === 1 ? "" : "s"}{failed ? ` · ${failed} corrected automatically` : ""}
       </button>
       {open && (
         <ul className="ms-5 mt-1 space-y-0.5">
           {notes.map((n, i) => <li key={`n${i}`} className="italic text-slate-500">{n}</li>)}
           {steps.map((s, i) => (
             <li key={i} className="flex flex-wrap items-start gap-1.5 font-mono text-[11px]">
-              {s.ok === false ? <XCircle className="mt-0.5 h-3 w-3 shrink-0 text-red-600" aria-hidden />
+              {s.ok === false ? <RotateCcw className="mt-0.5 h-3 w-3 shrink-0 text-slate-500" aria-hidden />
                 : <Check className="mt-0.5 h-3 w-3 shrink-0 text-green-600" aria-hidden />}
               <span className="break-all">{s.label}</span>
               {s.ok === false && s.preview && (
-                <span className="basis-full whitespace-pre-wrap break-words rounded bg-red-50 px-2 py-1 font-sans text-red-800">
+                <span className="basis-full whitespace-pre-wrap break-words rounded bg-slate-50 px-2 py-1 font-sans text-slate-600">
                   {s.preview}
                 </span>
               )}

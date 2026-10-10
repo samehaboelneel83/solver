@@ -54,7 +54,7 @@ afterEach(() => {
 });
 
 describe("AssistantPanel, describing a problem", () => {
-  it("shows the server's reason under a rejected assistant action", async () => {
+  it("keeps a rejected assistant action folded, with the server's reason one click away", async () => {
     mockFetch([ndjson([
       { type: "tool", name: "call_api", args: { method: "POST", path: "/api/v1/problems/from-spec" } },
       { type: "result", name: "call_api", ok: false, preview: "HTTP 422: problem_name is required" },
@@ -66,8 +66,11 @@ describe("AssistantPanel, describing a problem", () => {
     fireEvent.change(screen.getByLabelText("Message to the assistant"), { target: { value: "Create this" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
-    expect(await screen.findByText("HTTP 422: problem_name is required")).toBeInTheDocument();
-    expect(screen.getByText("I stopped after repeated validation errors.")).toBeInTheDocument();
+    expect(await screen.findByText("I stopped after repeated validation errors.")).toBeInTheDocument();
+    // The Assistant correcting itself is not shown as an error (the Nile Juice trace: red boxes mid-turn).
+    expect(screen.queryByText("HTTP 422: problem_name is required")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /1 step · 1 corrected automatically/ }));
+    expect(screen.getByText("HTTP 422: problem_name is required")).toBeInTheDocument();
   });
 
   it("shows the plan, builds only on approval and links what was built", async () => {
