@@ -65,10 +65,17 @@ from a problem type: a model is recognised by its shape (its rows), never by its
 | Tabu search (aspiration, restarts) | `evolve.py` (`tabu`) | mixed, at home on yes/no |
 | Differential evolution (JADE, current-to-pbest/1, archive) | `evolve.py` (`de`) | mixed |
 | Ant colony optimisation (ACO_R / ACO_MV) | `evolve.py` (`aco`) | mixed |
+| Simulated annealing on the model as a QUBO, polished by rule-keeping one- and two-bit moves | `qubo.py` (`qubo-anneal`) | yes/no and bounded whole numbers |
 
 Each runs when asked for by name. With setting `solve.metaheuristic`, after an exact solver ends with nothing,
 the searches that take the model race at once (one thread each) and the best answer keeping every rule stands.
 Rules are held by Deb's feasibility order; every answer is checked on every compiled row.
+
+## Annealer form
+
+| Technique | Where | When |
+|---|---|---|
+| QUBO export: decisions as bits (bounded binary expansion), rules as squared penalties with slack bits, a rule weight that keeps the least value the model's optimum | `qubo.py`, `GET /scenarios/{id}/qubo?format=json\|qubo` | yes/no and bounded whole-number decisions, linear rules, linear or quadratic goal |
 
 ## Several goals, uncertainty
 
@@ -93,10 +100,10 @@ Rules are held by Deb's feasibility order; every answer is checked on every comp
 | Escalation: the solver alone first, the steps before a solve only when it settles nothing | `service.py` | setting `solve.probe_first` (on) |
 | Bayesian optimisation of each solver's options per problem (Gaussian process, expected improvement) | `tuning.py` | every run with history; `solve.solver_params` overrides |
 | Infeasibility explanation (IIS, QuickXplain) | `diagnose.py` | infeasible runs |
+| Constraint acquisition from past plans (grouped-sum bounds every plan kept, dropped when the model's LP relaxation already implies them) | `learn.py`, `GET /problems/{id}/learned-rules` | on request, from approved plans or recent answers |
 
 ## Not yet in the platform
 
 - A wider space for the tuning: it searches only the options the benchmark whitelisted (two or three per
   solver), since an option must never change what a solver may answer.
-- QUBO export for annealing hardware, and quantum-inspired solvers.
-- Constraint learning from data (rules inferred from past plans).
+- Calling a quantum or digital annealer as a service: the QUBO file is what one takes, but no such service is connected.

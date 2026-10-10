@@ -270,6 +270,41 @@ Every goal's value is stored per point (`pareto_point.goal_values`, migration 01
 `pareto[].values`. The run page draws three goals or more as parallel axes, each point a line across them,
 with any two goals against each other below and every point listed with all its values; each opens its run.
 
+## The model as a QUBO (`app/solve/qubo.py`, 10 October 2026)
+
+`GET /api/v1/scenarios/{id}/qubo?format=json|qubo[&penalty=]` writes the scenario's model on today's data as a
+quadratic unconstrained binary optimisation -- what quantum annealers (D-Wave), digital annealers and
+simulated-bifurcation machines take: JSON in dimod's binary-quadratic-model layout (with each decision's bits),
+or qbsolv's `.qubo` text. Yes/no decisions are bits; a whole number in [l, u] is `l` plus bits weighted 1, 2, 4,
+... with the last cut so they add to exactly `u - l`; the goal is turned to a minimum; each rule, scaled to whole
+numbers, becomes `P (a.x - b)^2`, an inequality with slack bits in [0, b - least a.x], a rule no answer can break
+left out. `P` is 1 more than the goal can move over all the bits, so a broken rule always costs more than any
+goal gain: the QUBO's least value is the model's optimum. Continuous decisions, conditional, scheduling or
+quadratic rules, piecewise or function terms, and goals in order are refused by name (HTTP 422,
+`not_a_qubo`). "More run options" on the run page downloads both forms.
+
+The backend `qubo-anneal` (by name only, `local`) solves that QUBO here: simulated annealing over 32 replicas at
+once (single-bit flips with incremental fields, temperature from the largest flip's change down to a tenth of
+the goal's smallest step, restarts from the best), then the best answer that keeps every rule is polished by
+the best one- or two-bit move on the decisions that keeps every rule, checked a batch at a time on the model's
+own rows, until none improves -- the moves a penalty's barrier keeps single flips from making. A 120-item
+knapsack with a count rule: 859 against CP-SAT's 1,110 in 10 s by annealing alone, 1,110 with the polish.
+
+## Rules learnt from past plans (`app/solve/learn.py`, 10 October 2026)
+
+`GET /api/v1/problems/{id}/learned-rules?source=approved|answered` finds the limits every past plan kept that the
+model does not say -- constraint acquisition from examples (ModelSeeker, COUNT-CP), the same for every model.
+For each decision over sets and each way of grouping it (by one set, by several, all at once; each cell alone
+for a whole-number or continuous decision), the sum in each group across every plan gives a `<=` (most seen)
+and a `>=` (least seen) rule that every plan keeps by construction. A rule the decisions' bounds already keep is
+dropped; so is one the model already implies, judged on the groups the plans pushed hardest by the model's LP
+relaxation (built once as a sparse LP, solved in-process by SciPy's HiGHS; a rule an LP cannot hold is left out
+of it, so it can only allow more and never drops a rule wrongly). What remains is proposed in the model's own
+contract with both numbers ("never more than 3; the model allows 5"), the widest gap first, from at least two
+plans. The source is the plans people approved (default) or the problem's last 50 answers. In the Model
+editor, "Rules your past plans kept" lists them, each with "Add as a rule" into the draft; nothing is added by
+itself.
+
 ## Solver options tuned per problem (`app/solve/tuning.py`)
 
 Each problem tunes its solver's whitelisted options (`app.solve.params`) over its own runs: the defaults for the
