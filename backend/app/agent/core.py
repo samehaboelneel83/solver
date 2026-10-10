@@ -2242,7 +2242,7 @@ class Agent:
             if name == "check_spec":
                 if name not in self.tool_names:
                     return f"{name} is not available in this mode"
-                return self._check_spec(args.get("spec"))
+                return self._check_spec(args)
             if name == "run_python":
                 return self._run_python(str(args.get("code") or ""), args.get("timeout_s"))
             if name == "query_file":
@@ -2810,9 +2810,9 @@ class Agent:
                        if line.startswith(("Totals over", "Totals of field")) or "room left" in line)
         return out
 
-    def _check_spec(self, spec: Any) -> str:
+    def _check_spec(self, args: Any) -> str:
         try:
-            expanded = self._spec({"spec": spec})
+            expanded = self._spec(args if isinstance(args, dict) else {"spec": args})
         except agent_files.FileRefused as e:
             return f"Not valid yet: {e}"
         faults = self._order_faults(expanded)
@@ -2863,7 +2863,8 @@ class Agent:
     # -- the plan: checked before the person sees it, built exactly as approved --
     def _spec(self, args: dict, expand: bool = True) -> dict:
         """The spec as the model wrote it; expanded, its file references become rows."""
-        spec = args.get("spec") if isinstance(args.get("spec"), dict) else {}
+        spec, notes = agent_repair.spec_of(args)
+        self.joined.extend(notes)
         spec = {k: v for k, v in spec.items() if k != "dry_run"}
         self.joined.extend(agent_repair.misplaced(spec))
         self.joined.extend(agent_repair.joined_keys(spec))
@@ -3331,7 +3332,7 @@ class Agent:
             self.refusals[key] = self.refusals.get(key, 0) + 1
             if self.refusals[key] < MAX_SAME_ERROR:
                 continue
-            spec = _args(c).get("spec") if isinstance(_args(c).get("spec"), dict) else {}
+            spec = agent_repair.spec_of(_args(c))[0]
             fragment = ""
             loc = re.search(r'"loc":\s*(\[[^\]]*\])', result)
             if loc:

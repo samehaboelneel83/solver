@@ -1566,3 +1566,28 @@ def test_runs_with_the_same_answer_show_one_facts_card():
     agent = core.Agent(core.Settings(), core.ApiIndex(app.openapi()), lambda *a, **k: {}, core.Context("x"))
     agent.facts = {1: {"run_id": 1, "goal": 5}, 2: {"run_id": 2, "goal": 7}, 3: {"run_id": 3, "goal": 7}}
     assert agent._facts_shown() == [{"run_id": 1, "goal": 5}, {"run_id": 3, "goal": 7}]
+
+
+# -- where a spec arrives (the production-planning trace, 10 October 2026) --------------------------------------
+
+
+def test_a_spec_is_read_wherever_the_model_put_it():
+    from app.agent.repair import spec_of
+
+    ir = {"version": 2, "sets": [], "variables": {"x": {"index": [], "domain": "binary"}}, "constraints": [],
+          "objective": {"sense": "minimize", "terms": []}}
+    as_object, notes = spec_of({"summary": "s", "spec": {"ir": ir, "seed": {}}})
+    assert as_object["ir"] == ir and notes == []
+    import json
+
+    as_string, notes = spec_of({"spec": json.dumps({"ir": ir, "domain_name": "D"})})
+    assert as_string["ir"] == ir and as_string["domain_name"] == "D" and "JSON string" in notes[0]
+    broken, notes = spec_of({"spec": json.dumps({"ir": ir})[:-1]})
+    assert broken["ir"] == ir and "put right" in notes[0]
+    beside, notes = spec_of({"summary": "s", "ir": ir, "seed": {"entity_types": []}, "domain_name": "D"})
+    assert beside["ir"] == ir and beside["domain_name"] == "D" and "beside the summary" in notes[0]
+    nested, notes = spec_of({"spec": {"seed": {"ir": ir, "entity_types": []}}})
+    assert nested["ir"] == ir and "ir" not in nested["seed"] and "inside seed" in notes[0]
+    named, notes = spec_of({"spec": {"model": ir}})
+    assert named["ir"] == ir and "model" not in named
+    assert spec_of({"summary": "only words"})[0] == {}

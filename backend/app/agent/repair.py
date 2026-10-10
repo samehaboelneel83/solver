@@ -204,6 +204,52 @@ def joined_keys(spec: dict[str, Any]) -> list[str]:
     return [f'{changed} record key(s) given as lists were joined with "-" (["Gear", 1] is "Gear-1")'] if changed else []
 
 
+#: Keys a spec holds; a call that gives them at its top level (no "spec") meant them as the spec.
+SPEC_KEYS = ("ir", "seed", "domain_name", "domain_id", "problem_name", "scenario_name")
+
+
+def spec_of(args: Any) -> tuple[dict[str, Any], list[str]]:
+    """The spec of a check_spec / propose_plan call, wherever the model put it (the production-planning trace,
+    10 October 2026: a local model's spec came back "has no ir" three times running): the `spec` argument as an
+    object; or as a JSON string -- parsed, and repaired as tool calls are; or, with no `spec`, the spec's own keys
+    written beside the summary. A model the spec carries inside `seed`, or under `model`, is lifted to `ir`."""
+    from app.agent import toolcall
+
+    notes: list[str] = []
+    args = args if isinstance(args, dict) else {}
+    raw = args.get("spec")
+    spec: Any = raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            spec = toolcall.strict_loads(raw)
+        except Exception:  # noqa: BLE001 -- the repairs the tool calls get
+            fixed = toolcall.fix_spec(raw)
+            try:
+                spec = toolcall.strict_loads(fixed if fixed is not None else toolcall._repair(raw))
+                notes.append("the spec was written as a string with JSON slips; it was read and put right")
+            except Exception:  # noqa: BLE001
+                spec = None
+        else:
+            notes.append("the spec was written as a JSON string; send it as an object next time")
+    if not isinstance(spec, dict):
+        top = {k: args[k] for k in SPEC_KEYS if k in args}
+        if "ir" in top or "seed" in top:
+            spec = top
+            notes.append("the spec's parts were written beside the summary, not inside \"spec\"; they were taken as the spec")
+        else:
+            spec = {}
+    spec = dict(spec)
+    if not isinstance(spec.get("ir"), dict):
+        seed = spec.get("seed")
+        if isinstance(seed, dict) and isinstance(seed.get("ir"), dict):
+            spec["ir"] = seed.pop("ir")
+            notes.append("ir written inside seed was moved beside it")
+        elif isinstance(spec.get("model"), dict) and ("variables" in spec["model"] or "constraints" in spec["model"]):
+            spec["ir"] = spec.pop("model")
+            notes.append('the model written under "model" was taken as "ir"')
+    return spec, notes
+
+
 def misplaced(spec: dict[str, Any]) -> list[str]:
     """Keys written beside `seed` and `ir` that belong inside them, moved there (the fibre test, October 2026:
     entities_from_file, relationships_from_file and parameters at the top, and no `ir`; the platform answered
