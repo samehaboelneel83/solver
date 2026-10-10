@@ -1,12 +1,14 @@
-import { Fragment, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { downloadFrom } from "../../api/download";
 
 /**
  * The assistant's markdown, as React elements -- never as HTML, so nothing a
  * model writes can run in the page. Headings, paragraphs, lists, tables, code
  * blocks, **bold**, *italic*, `code` and [links](...). A link to a page of the
- * app (`/domains/3/problems/7`) opens in the app; any other http(s) link opens
- * in a new tab; anything else is plain text.
+ * app (`/domains/3/problems/7`) opens in the app; a link to a file of the API
+ * (`/api/v1/runs/7/export?format=pdf`) saves it, signed in; any other http(s)
+ * link opens in a new tab; anything else is plain text.
  */
 export default function Markdown({ text }: { text: string }) {
   return <div className="space-y-2 text-sm leading-relaxed text-slate-800">{blocks(text)}</div>;
@@ -154,6 +156,9 @@ export function inline(text: string): ReactNode[] {
 
 function link(label: string, href: string, key: string): ReactNode {
   const cls = "font-medium text-blue-700 underline underline-offset-2 hover:text-blue-900";
+  if (href.startsWith("/api/")) {
+    return <FileLink key={key} label={label} href={href} className={cls} />;
+  }
   if (href.startsWith("/") && !href.startsWith("//")) {
     return <Link key={key} to={href} className={cls}>{label}</Link>;
   }
@@ -161,4 +166,19 @@ function link(label: string, href: string, key: string): ReactNode {
     return <a key={key} href={href} target="_blank" rel="noreferrer noopener" className={cls}>{label}</a>;
   }
   return <Fragment key={key}>{label}</Fragment>;
+}
+
+/** A file of the API (a run's export): fetched as the signed-in person and saved. As a page link it opened a
+ *  page that does not exist (the ward roster trace in the browser, 10 October 2026). */
+function FileLink({ label, href, className }: { label: string; href: string; className: string }) {
+  const [failed, setFailed] = useState<string | null>(null);
+  return (
+    <>
+      <button type="button" className={className}
+        onClick={() => { setFailed(null); downloadFrom(href).catch((e: unknown) => setFailed(e instanceof Error ? e.message : "could not be saved")); }}>
+        {label}
+      </button>
+      {failed && <span role="alert" className="ms-1 text-red-700">({failed})</span>}
+    </>
+  );
 }

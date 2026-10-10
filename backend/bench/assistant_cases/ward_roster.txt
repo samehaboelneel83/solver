@@ -1,0 +1,43 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Next week's nurse roster".
+
+I need next week's roster for a hospital ward: which nurse works which shift on which day, at the lowest pay cost.
+
+Nurses (pay in EGP for one shift):
+id,name,pay_per_shift
+AML,Amal,520
+BSM,Basma,480
+DIN,Dina,450
+HNY,Hany,430
+MNA,Mona,410
+RNA,Rania,400
+SMR,Samir,390
+
+Days, in order (the week runs Saturday to Friday):
+id,position
+SAT,1
+SUN,2
+MON,3
+TUE,4
+WED,5
+THU,6
+FRI,7
+
+Shifts (extra pay in EGP on top of the nurse's pay for working that shift):
+id,name,extra_pay
+M,Morning,0
+E,Evening,0
+N,Night,150
+
+Nurses needed on each shift, exactly this many, no more and no fewer:
+day,M,E,N
+SAT,1,1,1
+SUN,2,2,1
+MON,2,2,1
+TUE,2,2,1
+WED,2,2,1
+THU,2,2,1
+FRI,1,1,1
+
+Rules: a nurse works at most one shift a day and at most 5 shifts in the week. A nurse who works the Night shift must not work the Morning shift of the next day (within this week; Friday night has no next day here). Mona cannot work on Friday. Hany cannot work on Saturday or Sunday. Samir never works the Night shift. Goal: the lowest total pay, where a shift costs the nurse's pay per shift plus the shift's extra pay.
+
+Everything you need is above: please propose the model without further questions, then solve it.
