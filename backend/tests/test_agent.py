@@ -492,3 +492,16 @@ def test_a_scenario_and_run_named_by_number_are_looked_up_for_the_model():
     assert 'scenario 53 "Base" belongs to problem 7 "Transport" in workspace (domain) 12 -- not the selected' in note
     assert "run 144 (optimal) is a run of scenario 53" in note and "run 999: not found" in note
     assert agent._named_records("Nothing named here.") is None
+
+
+def test_a_result_with_no_run_behind_it_is_never_shown(tenants, db, assistant):
+    """Phase 1, cloud S (10 October 2026): "The solver found an optimal solution. Goal Value: 106.64" was shown
+    though nothing had been solved. Sent back twice; then the person is told plainly that nothing was solved."""
+    claimed = "The solver found an optimal solution.\n\nGoal Value: 106.64 EGP/hour. All rules are satisfied."
+    llm = assistant([claimed, claimed, claimed])
+    events = _chat(tenants["b"], text="How much would the plan cost per hour?")
+    shown = [e["text"] for e in events if e["type"] == "answer"]
+    assert shown == [core.NO_RUN_SAID], shown
+    sent_back = [m["content"] for m in llm.requests[-1]["messages"] if m.get("role") == "user"]
+    assert any(m.startswith("[Platform] Your answer was NOT shown: it reports a solved result") for m in sent_back)
+    assert core.claims_result(claimed) and not core.claims_result("Shall I build the model with these rules?")

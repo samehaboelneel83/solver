@@ -48,22 +48,43 @@ def never_helps(compiled: Compiled) -> list[dict[str, Any]]:
     for key, value in compiled.penalty_objective.coeffs.items():
         cost[key] = cost.get(key, Decimal(0)) + value
     minted = {key for keys in compiled.violations.values() for key in keys}
-    # cell -> the rules it tightens; a cell that gives any rule room, or is in an equation, is dropped.
+    # Per rule instance: the cells it holds back (raising them uses its room up) and the cells that give it room.
+    # A cell helps when the goal wants more of it, when it is in an equation or a switch, or when it gives room to
+    # a rule that matters: one no plan keeps with every cell at its least, or one that holds back a cell that
+    # helps -- followed to the end (phase 1 evaluation, 10 October 2026: in `pick[CTL004] <= pick[CTL006]`, pick
+    # [CTL006] gives room, but only to another pick that never helps; protection written as at least what the
+    # chosen controls give made every pick useless, and the check, stopping at the first room given, was silent).
     tightens: dict[Any, set[str]] = {}
-    helps: set[Any] = set()
+    helps: set[Any] = {k for k, w in cost.items() if (w < 0 if minimize else w > 0)}
+    rows: list[tuple[str, set, set, bool]] = []  # (rule id, held back, given room, matters already)
     for c in compiled.constraints:
         if c.when is not None:
             helps.add(c.when[0])  # a switch: what it does is not a matter of more or less
         for pair in c.quadratic:
             helps.update(pair)
+        held, room = set(), set()
+        least = Decimal(0)
         for key in set(c.left.coeffs) | set(c.right.coeffs):
             net = c.left.coeffs.get(key, Decimal(0)) - c.right.coeffs.get(key, Decimal(0))
             if net == 0:
                 continue
-            if c.relation == "=" or (c.relation == "<=") != (net > 0):
+            var = compiled.variables.get(key)
+            least += net * (var.lower if var is not None else Decimal(0))
+            if c.relation == "=":
                 helps.add(key)
+            elif (c.relation == "<=") != (net > 0):
+                room.add(key)
             else:
+                held.add(key)
                 tightens.setdefault(key, set()).add(c.id)
+        limit = c.right.const - c.left.const
+        unmet = (least > limit) if c.relation == "<=" else (least < limit) if c.relation == ">=" else False
+        rows.append((c.id, held, room, unmet))
+    while True:
+        more = {k for _, held, room, unmet in rows if unmet or held & helps for k in room} - helps
+        if not more:
+            break
+        helps |= more
     by_decision: dict[str, list[Any]] = {}
     for key in compiled.variables:
         if not str(key[0]).startswith("__") and key not in minted:
@@ -74,7 +95,7 @@ def never_helps(compiled: Compiled) -> list[dict[str, Any]]:
         rules: set[str] = set()
         for key in cells:
             weight = cost.get(key, Decimal(0))
-            if key in helps or (weight < 0 if minimize else weight > 0):
+            if key in helps:
                 break
             costly = costly or weight != 0
             rules |= tightens.get(key, set())

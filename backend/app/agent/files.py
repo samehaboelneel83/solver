@@ -379,8 +379,40 @@ def _joined(row: list[Any], at: list[int]) -> str | None:
     return "-".join(part(p) for p in parts)
 
 
+_YES = {"yes", "y", "true", "t", "on"}
+_NO = {"no", "n", "false", "f", "off"}
+
+
+def _as_number(value: Any) -> Any:
+    """A yes/no cell where a number belongs, as 1/0 (phase 1 evaluation, 10 October 2026: an `open` column of
+    yes/no loaded into a number parameter was refused "a number is required" three times, and nothing was built)."""
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, str) and value.strip().casefold() in _YES:
+        return 1
+    if isinstance(value, str) and value.strip().casefold() in _NO:
+        return 0
+    return value
+
+
+def _rows(s: dict[str, Any], spec: dict[str, Any]) -> list[list[Any]]:
+    """The sheet's rows a *_from_file entry reads: all of them, or those its `where` keeps (phase 1 evaluation,
+    10 October 2026: routes loaded with `"where": [{"column": "open", "value": "yes"}]` stored every route as
+    open -- the filter was read by queries only, and a load ignored it without a word)."""
+    where = spec.get("where")
+    if not where:
+        return list(s.get("rows") or [])
+    if isinstance(where, dict):
+        where = [where]
+    if not isinstance(where, list) or not all(isinstance(f, dict) for f in where):
+        raise FileRefused('"where" is a list of filters: [{"column": ..., "op": "=", "value": ...}]')
+    at = {c: i for i, c in enumerate(s.get("columns") or [])}
+    return [r for r in s.get("rows") or [] if _keep(r, at, where)]
+
+
 def expand(seed: dict[str, Any], files: list[dict[str, Any]]) -> dict[str, Any]:
-    """`entities_from_file` and `parameter_values_from_file` as plain `entities` and `parameter_values`."""
+    """`entities_from_file` and `parameter_values_from_file` as plain `entities` and `parameter_values`; each may
+    keep only the rows its `where` matches."""
     out = {k: v for k, v in seed.items()
            if k not in ("entities_from_file", "parameter_values_from_file", "relationships_from_file")}
     bindings = list(seed.get("source_bindings") or [])
@@ -409,6 +441,10 @@ def expand(seed: dict[str, Any], files: list[dict[str, Any]]) -> dict[str, Any]:
                 kept_files[name] = found
 
     entities = list(seed.get("entities") or [])
+    # Fields declared as numbers: a yes/no cell read into one is 1/0.
+    numeric = {(t.get("name"), a.get("name")) for t in seed.get("entity_types") or [] if isinstance(t, dict)
+               for a in t.get("attributes") or [] if isinstance(a, dict)
+               and str(a.get("data_type") or "").lower() in ("number", "integer", "int", "float", "decimal")}
     for spec in seed.get("entities_from_file") or []:
         s = find_sheet(files, spec.get("file"), spec.get("sheet"))
         bound("entities", spec, spec.get("type"))
@@ -417,12 +453,13 @@ def expand(seed: dict[str, Any], files: list[dict[str, Any]]) -> dict[str, Any]:
         label_at = _column(s, spec["label"]) if spec.get("label") else None
         attrs_at = {attr: _column(s, col) for attr, col in (spec.get("attrs") or {}).items()}
         made: dict[str, dict[str, Any]] = {}
-        for row in s.get("rows") or []:
+        for row in _rows(s, spec):
             key = _joined(row, key_at)
             if key is None:
                 continue
             entity = {"type": spec.get("type"), "key": key,
-                      "attrs": {a: _shape_or_value(row[i]) for a, i in attrs_at.items() if row[i] is not None}}
+                      "attrs": {a: _as_number(row[i]) if (spec.get("type"), a) in numeric else _shape_or_value(row[i])
+                                for a, i in attrs_at.items() if row[i] is not None}}
             # A key repeated in the file (days from a sheet with a row per day and shift -- the retest):
             # one record, when the rows agree on its fields; when they disagree, the file is asked about.
             first = made.get(entity["key"])
@@ -448,7 +485,7 @@ def expand(seed: dict[str, Any], files: list[dict[str, Any]]) -> dict[str, Any]:
             if not (isinstance(pair, (list, tuple)) and len(pair) == 2):
                 raise FileRefused(f'relationships_from_file "{end}" must be [record type, column]')
             ends.append((str(pair[0]), _columns(s, pair[1])))
-        for row in s.get("rows") or []:
+        for row in _rows(s, spec):
             keys = [_joined(row, at) for _, at in ends]
             if None in keys:
                 continue
@@ -483,8 +520,8 @@ def expand(seed: dict[str, Any], files: list[dict[str, Any]]) -> dict[str, Any]:
         value_at = None if constant is not None else _column(
             s, spec.get("value"), f'parameter_values_from_file for "{spec.get("parameter")}": "value" (a column, or a '
                                   "number for every row)")
-        for row in s.get("rows") or []:
-            value = constant if value_at is None else row[value_at]
+        for row in _rows(s, spec):
+            value = constant if value_at is None else _as_number(row[value_at])
             keys = [_joined(row, at) for _, at in ends]
             if value is None or None in keys:
                 continue

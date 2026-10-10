@@ -28,4 +28,14 @@ def conflict_detail(exc: IntegrityError, table: str) -> str:
         return f"a {table} row with the same {cols or 'unique value'} already exists"
     if code == "23502":  # not_null_violation
         return f"{getattr(diag, 'column_name', 'a required field')} is required"
-    return "the change conflicts with existing data"
+    # A check constraint or a trigger's own rule (a relationship's cardinality, an attribute's type): say which,
+    # in the database's words -- they are the platform's own messages about the person's own records. "The change
+    # conflicts with existing data" alone was refused six times running in the phase 1 evaluation (10 October
+    # 2026), and the Assistant never learned what to change.
+    primary = (getattr(diag, "message_primary", None) or "").strip() if diag else ""
+    detail = (getattr(diag, "message_detail", None) or "").strip() if diag else ""
+    where = (getattr(diag, "table_name", None) or table) if diag else table
+    said = "; ".join(x for x in (primary, detail) if x)
+    if said:
+        return f"the change to {where} breaks a rule{f' ({constraint})' if constraint else ''}: {said}"[:500]
+    return f"the change to {where} conflicts with existing data{f' (rule {constraint})' if constraint else ''}"

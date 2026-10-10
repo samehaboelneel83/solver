@@ -113,6 +113,8 @@ def _key(solution, sense: str) -> tuple:
 
 
 def _said(name: str, solution) -> str:
+    if solution.status == "error":
+        return f"{name} could not take the model ({getattr(solution, 'error', 'it failed')}) and dropped out"
     if solution.status == "optimal":
         return f"{name} proved it in {solution.wall_seconds:.3g} s"
     if solution.status in ("infeasible", "unbounded"):
@@ -131,16 +133,35 @@ def _all_at_once(candidates: list[str], run_one, seconds: float, workers: int, d
     with ThreadPoolExecutor(max_workers=len(candidates)) as pool:
         futures = {pool.submit(run_one, name, seconds, share, proved.is_set): name for name in candidates}
         for future in as_completed(futures):
-            results[futures[future]] = future.result()
+            try:
+                results[futures[future]] = future.result()
+            except Exception as exc:  # noqa: BLE001 -- one entrant that cannot take the model drops out
+                # Phase 1 evaluation (10 October 2026): an entrant that writes the model as MPS raised on a
+                # quadratic goal, and the run failed although CP-SAT, the rules' choice, could solve it.
+                results[futures[future]] = _DroppedOut(f"{type(exc).__name__}: {exc}"[:300])
+                continue
             if results[futures[future]].status in decisive:
                 proved.set()
     results = {name: results[name] for name in candidates}
     record = [
         {"solver": name, "status": s.status, "objective": s.objective, "bound": s.best_bound,
-         "gap": _gap(s), "seconds": round(s.wall_seconds, 3)}
+         "gap": _gap(s), "seconds": round(s.wall_seconds, 3), **({"error": s.error} if s.status == "error" else {})}
         for name, s in results.items()
     ]
     return results, record
+
+
+class _DroppedOut:
+    """An entrant that failed: no answer, no bound, the reason kept for the race's record."""
+
+    status = "error"
+    objective = None
+    best_bound = None
+    wall_seconds = 0.0
+    assignments: dict = {}
+
+    def __init__(self, error: str) -> None:
+        self.error = error
 
 
 def run_race(candidates: list[str], run_one: Callable[[str, float, int, Callable[[], bool]], Any], *, workers: int,

@@ -1651,6 +1651,31 @@ def test_a_product_of_one_part_and_a_stray_backslash_are_put_right():
     assert toolcall.strict_loads(raw)["summary"] == 'ship: Continuous $\\ge$ 0, path C:\\data, a "quote"\n'
 
 
+def test_a_file_load_keeps_only_the_rows_its_filter_matches_and_reads_yes_no_as_1_0():
+    """Phase 1 evaluation (10 October 2026): routes loaded with "where open = yes" stored every route as open, so
+    the plan shipped on 42 closed routes; and a yes/no column read as a number was refused three times."""
+    routes = agent_files.parse("routes.csv", b"warehouse,customer,cost,open\nW1,C1,5,yes\nW1,C2,7,no\nW2,C1,4,yes\n")
+    places = agent_files.parse("places.csv", b"id,priority\nL1,yes\nL2,no\n")
+    seed = {"entity_types": [{"name": "place", "attributes": [{"name": "priority", "data_type": "integer"}]}],
+            "entities_from_file": [{"file": "places.csv", "type": "place", "key": "id", "attrs": {"priority": "priority"}}],
+            "parameter_values_from_file": [
+                {"file": "routes.csv", "parameter": "is_open", "entities": [["warehouse", "warehouse"], ["customer", "customer"]],
+                 "value": 1, "where": [{"column": "open", "op": "=", "value": "yes"}]},
+                {"file": "routes.csv", "parameter": "open_flag", "entities": [["warehouse", "warehouse"], ["customer", "customer"]],
+                 "value": "open"}]}
+    out = agent_files.expand(seed, [routes, places])
+    is_open = [(c["entities"][0][1], c["entities"][1][1]) for c in out["parameter_values"] if c["parameter"] == "is_open"]
+    assert is_open == [("W1", "C1"), ("W2", "C1")]
+    assert [c["value"] for c in out["parameter_values"] if c["parameter"] == "open_flag"] == [1, 0, 1]
+    assert {e["key"]: e["attrs"]["priority"] for e in out["entities"]} == {"L1": 1, "L2": 0}
+    import pytest
+
+    with pytest.raises(agent_files.FileRefused, match="no column"):
+        agent_files.expand({"parameter_values_from_file": [{"file": "routes.csv", "parameter": "p", "value": 1,
+                                                            "entities": [["warehouse", "warehouse"]],
+                                                            "where": [{"column": "nope", "value": "yes"}]}]}, [routes])
+
+
 def test_relationships_written_as_objects_are_listed_by_name():
     """The evaluation (10 October 2026): "relationships": [{"name": "next", ...}] crashed the plan check four turns
     running ("unhashable type: 'dict'")."""
@@ -1696,3 +1721,11 @@ def test_numbers_in_a_pasted_csv_row_are_each_known():
 
     found = numbers_in("product,W01,W02\nOJ1L,12,14,14,16\nid,rate\nOJ1L,1.1,3.0,4200,55,12\nbudget 1,500 at 35%")
     assert {12, 14, 16, 1.1, 3.0, 4200, 55, 1500, 0.35} <= found
+
+
+def test_propose_without_further_questions_is_a_go_ahead():
+    """Phase 1, cloud S (10 October 2026): the plan was refused for "not discussing the problem" although the
+    message said to propose without questions, which cost a "continue"."""
+    said = "Everything you need is here: please propose the model without further questions, then solve it."
+    assert core._GO_AHEAD.search(said)
+    assert not core._GO_AHEAD.search("We bottle juice on one line and need a plan for eight weeks.")

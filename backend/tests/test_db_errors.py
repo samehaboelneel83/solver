@@ -411,3 +411,22 @@ def test_real_fk_23503_still_uses_conflict_detail():
     http = translate_db_error(exc, table="entity_type")
     assert http.status_code == 409
     assert http.detail == "entity_type row is still referenced by parameter_def records"
+
+
+def test_a_conflict_says_which_rule_and_why_not_only_that_it_conflicts():
+    """Phase 1 evaluation (10 October 2026): "the change conflicts with existing data", six times running, and the
+    Assistant never learned what to change. A check or trigger rule is named, in the database's own words."""
+    from types import SimpleNamespace
+
+    from sqlalchemy.exc import IntegrityError
+
+    from app.crud.errors import conflict_detail
+
+    diag = SimpleNamespace(constraint_name="relationship_cardinality", table_name="relationship",
+                           message_primary="location LOC001 may have one served_by link", message_detail="", column_name=None)
+    exc = IntegrityError("stmt", {}, SimpleNamespace(pgcode="23514", diag=diag))
+    said = conflict_detail(exc, "relationship")
+    assert said == ("the change to relationship breaks a rule (relationship_cardinality): "
+                    "location LOC001 may have one served_by link")
+    bare = IntegrityError("stmt", {}, SimpleNamespace(pgcode="23P01", diag=None))
+    assert conflict_detail(bare, "run") == "the change to run conflicts with existing data"

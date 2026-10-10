@@ -42,6 +42,38 @@ def test_a_decision_in_an_equation_or_one_the_goal_wants_more_of_is_left_alone()
     assert lint.never_helps(compile_model(wanted, DATA)) == []
 
 
+def test_room_given_only_to_a_decision_that_never_helps_does_not_count():
+    """Phase 1, security S (10 October 2026): protection written as *at least* what the chosen controls give,
+    `prot >= 68 pick`, so picking never helps; the dependency `pick_a <= pick_b` gave pick_b room, which used to be
+    enough to call it helpful."""
+    pick_a, pick_b, prot = ({"var": n, "index": []} for n in ("pick_a", "pick_b", "prot"))
+
+    def model(protection_rule):
+        return {"version": 2, "sets": [], "parameters": {},
+                "variables": {"pick_a": {"index": [], "domain": "binary"}, "pick_b": {"index": [], "domain": "binary"},
+                              "prot": {"index": [], "domain": "continuous", "lower": 0, "upper": 100}},
+                "constraints": [{"id": "c_budget", "left": {"add": [{"mul": [{"const": 50}, pick_a]}, {"mul": [{"const": 40}, pick_b]}]},
+                                 "relation": "<=", "right": {"const": 60}, "severity": "hard"},
+                                {"id": "c_needs", "left": pick_a, "relation": "<=", "right": pick_b, "severity": "hard"},
+                                {"id": "c_prot", "severity": "hard", **protection_rule}],
+                "objective": {"sense": "maximize", "terms": [{"id": "o", "weight": 1, "expression": prot}]}}
+
+    wrong = model({"left": prot, "relation": ">=", "right": {"mul": [{"const": 68}, pick_a]}})
+    found = {f["decision"] for f in lint.never_helps(compile_model(wrong, DATA))}
+    assert found == {"pick_a", "pick_b"}, found
+    right = model({"left": prot, "relation": "<=", "right": {"mul": [{"const": 68}, pick_a]}})
+    assert lint.never_helps(compile_model(right, DATA)) == []  # pick_a gives prot room; pick_b gives pick_a room
+
+
+def test_a_rule_no_plan_keeps_at_its_least_makes_what_gives_it_room_helpful():
+    """Demand to be met: shipping costs and is held back by nothing, yet the plan needs it."""
+    ship = {"var": "ship", "index": []}
+    ir = {"version": 2, "sets": [], "parameters": {}, "variables": {"ship": {"index": [], "domain": "continuous", "lower": 0}},
+          "constraints": [{"id": "c_demand", "left": ship, "relation": ">=", "right": {"const": 9}, "severity": "hard"}],
+          "objective": {"sense": "minimize", "terms": [{"id": "o", "weight": 3, "expression": ship}]}}
+    assert lint.never_helps(compile_model(ir, DATA)) == []
+
+
 def test_a_decision_in_no_rule_and_no_goal_is_named():
     idle = _plan({"left": MAKE, "relation": "<=", "right": {"const": 12}})
     idle["objective"]["terms"][0]["expression"] = MAKE

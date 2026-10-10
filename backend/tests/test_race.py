@@ -262,3 +262,20 @@ def test_preparing_a_run_comes_off_its_solve_time(db, empty_queue, monkeypatch):
     phases = db.execute(text("SELECT params->'phases' FROM run WHERE id = :r"), {"r": run_id}).scalar_one()
     assert phases["before_solve_s"] >= 2.5
     assert seen["solving"]["time_limit_s"] <= 10.0 - 2.5 + 0.01
+
+
+def test_an_entrant_that_cannot_take_the_model_drops_out_and_the_race_goes_on():
+    """Phase 1 evaluation (10 October 2026): an entrant that writes MPS raised on a quadratic goal and failed the
+    whole run; it drops out with its reason, and the others' answers stand -- in a race and in a portfolio."""
+
+    def run_one(name, seconds, share, should_stop):
+        if name == "highs":
+            raise ValueError("only a linear model can be written as MPS")
+        return S("optimal", 9, 9, seconds=0.5)
+
+    raced = run_race(["cp-sat", "highs"], run_one, workers=4, time_limit=30, sense="minimize", rule="cp-sat")
+    assert raced.winner == "cp-sat" and raced.answer is not None
+    assert "highs could not take the model (ValueError: only a linear model can be written as MPS)" in raced.evidence
+    assert [r["status"] for r in raced.record] == ["optimal", "error"] and "MPS" in raced.record[1]["error"]
+    kept = run_portfolio(["cp-sat", "highs"], run_one, workers=4, time_limit=30, sense="minimize", rule="cp-sat")
+    assert kept.winner == "cp-sat"

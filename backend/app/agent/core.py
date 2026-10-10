@@ -428,7 +428,8 @@ _SECOND_THOUGHTS = re.compile(r"(?:^|[\n.!?*]\s*)(?:wait[,.!]|hmm[,.]|actually,?
                               r"re-?(?:read|check|verify|think|calculate|consider)|that seems (?:too|wrong)|"
                               r"correction on|on second thought)", re.I)
 _GO_AHEAD = re.compile(r"\b(?:go ahead|nothing else|no(?:thing)? more|you decide|proceed|just do it|that'?s all|"
-                       r"build it|solve it|carry on|continue)\b", re.I)
+                       r"build it|solve it|carry on|continue|without (?:any )?(?:further |more )?questions|"
+                       r"(?:no|don'?t) (?:need to )?ask|propose the model|everything you need)\b", re.I)
 _ASKS = re.compile(r"(?:open questions|shall i (?:proceed|go ahead|build)|do you want me to|please confirm|"
                    r"can you confirm|should i (?:proceed|go ahead))|\?\s*$", re.I)
 # The person's own word on where to build: the camp retest (October 2026) said "in new workspace", and the
@@ -1993,6 +1994,24 @@ def _numbers_in(text: str) -> list[float]:
     return out
 
 
+#: An answer that says something was solved: a status, a goal's value, "the solver found".
+_CLAIMS_RESULT = re.compile(
+    r"\b(?:solver (?:found|returned|reports?|proved)|(?:found|is) (?:an|the) optimal|optimal (?:solution|plan|answer)"
+    r"|(?:proven|proved) (?:best|optimal)|goal value\s*[:=]|objective(?: value)?\s*[:=]|status\s*[:=]\s*(?:optimal|feasible)"
+    r"|solved successfully|has been (?:built and )?solved)", re.I)
+RESULT_WITHOUT_RUN = (PLATFORM + "Your answer was NOT shown: it reports a solved result (a status, a goal's value, a "
+                      "plan), but nothing has been solved in this conversation -- no run exists. Solve it first: "
+                      "call_api POST /api/v1/scenarios/<scenario_id>/runs with body {}, then GET /api/v1/runs/<run_id> "
+                      "until it settles, and report only what that run's result says. Never write a result yourself.")
+NO_RUN_SAID = ("The model is built, but I have not solved it yet, so I have no result to report: any numbers I gave "
+               "before this were not from a solve. Open the problem's Runs page and solve it, or say \"solve it\".")
+
+
+def claims_result(answer: str) -> bool:
+    """Whether an answer reports a solved result."""
+    return bool(_CLAIMS_RESULT.search(answer or ""))
+
+
 def unsupported_numbers(answer: str, results: list[str], person: list[str]) -> list[str]:
     """Amounts in the answer that neither the results nor the person gave, and that no single step makes from them.
 
@@ -3046,6 +3065,16 @@ class Agent:
             made.add(str(self.built.get("domain_id")))
         return made
 
+    def _any_run(self, messages: list[dict]) -> bool:
+        """Whether this conversation made or read a run: a run's result, or a run created through the API."""
+        for m in messages:
+            if m.get("role") != "tool":
+                continue
+            text = str(m.get("content") or "")
+            if re.search(r"\bRUN \d+: |Run \d+ has settled", text) or re.search(r'"scenario_id": \d+, "dataset_id"', text):
+                return True
+        return False
+
     def _latest_results(self, messages: list[dict]) -> list[str]:
         """The latest runs the conversation read, read again now from the platform (the live job-shop retest: asked
         to re-read, the model re-typed a schedule from memory, and the stored text was an older format)."""
@@ -3773,6 +3802,17 @@ class Agent:
                     continue
                 # Only an answer that reports a run: a reply asking questions or proposing a plan may offer numbers.
                 reports = any(_REPORTS_RUN.search(t) for t in basis)
+                if not reports and claims_result(content) and not self._any_run(messages):
+                    # A result with no run behind it (phase 1 evaluation, cloud S, 10 October 2026: "The solver
+                    # found an optimal solution. Goal Value: 106.64" with a placement table -- no run existed).
+                    if nudge("result_without_run", 2):
+                        messages.append({"role": "assistant", "content": "(an answer reporting a result no run gave; "
+                                                                         "not shown)"})
+                        messages.append({"role": "user", "content": RESULT_WITHOUT_RUN})
+                        yield {"type": "note", "text": "The answer reported a result before anything was solved; "
+                                                       "asking it to solve first."}
+                        continue
+                    content = NO_RUN_SAID
                 unsupported = reports and unsupported_numbers(content, basis, [str(sys_msg.get("content") or "")] + [
                     str(m.get("content") or "") for m in messages if m.get("role") in ("user", "tool", "system")])
                 if unsupported and nudge("unsupported_numbers", 1):
