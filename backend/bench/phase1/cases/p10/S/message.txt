@@ -1,0 +1,75 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Relief plan". After a disaster we must plan relief for 3 days: which of 3 temporary warehouses to open and what to deliver each day to 6 affected locations.
+
+Warehouses:
+id,opening_cost,capacity_tons,truck_loads_per_day,intake_food_tons_per_day
+WH01,39680,51,7,17
+WH02,41521,51,3,17
+WH03,26648,51,3,17
+
+Locations:
+id,priority
+LOC001,no
+LOC002,no
+LOC003,no
+LOC004,yes
+LOC005,yes
+LOC006,no
+
+Days:
+id,order
+DAY1,1
+DAY2,2
+DAY3,3
+
+Demand (tons):
+location,day,good,tons
+LOC001,DAY1,FOOD,4
+LOC001,DAY2,FOOD,6
+LOC001,DAY3,FOOD,3
+LOC002,DAY1,FOOD,10
+LOC002,DAY2,FOOD,14
+LOC002,DAY3,FOOD,2
+LOC003,DAY1,FOOD,4
+LOC003,DAY2,FOOD,3
+LOC003,DAY3,FOOD,5
+LOC004,DAY1,FOOD,13
+LOC004,DAY2,FOOD,6
+LOC004,DAY3,FOOD,7
+LOC005,DAY1,FOOD,13
+LOC005,DAY2,FOOD,3
+LOC005,DAY3,FOOD,10
+LOC006,DAY1,FOOD,14
+LOC006,DAY2,FOOD,6
+LOC006,DAY3,FOOD,4
+
+Road travel minutes:
+warehouse,location,minutes
+WH01,LOC001,138
+WH01,LOC002,144
+WH01,LOC003,201
+WH01,LOC004,114
+WH01,LOC005,188
+WH01,LOC006,40
+WH02,LOC001,136
+WH02,LOC002,96
+WH02,LOC003,22
+WH02,LOC004,156
+WH02,LOC005,122
+WH02,LOC006,24
+WH03,LOC001,85
+WH03,LOC002,212
+WH03,LOC003,35
+WH03,LOC004,207
+WH03,LOC005,214
+WH03,LOC006,29
+
+Roads closed on a day:
+warehouse,location,day
+WH02,LOC002,DAY1
+WH02,LOC005,DAY3
+WH03,LOC001,DAY1
+WH03,LOC002,DAY1
+
+Rules: open at most 2 warehouses; an open warehouse costs its opening cost once. Every day, an open warehouse receives its intake of each good (a closed one receives nothing); what it does not ship stays in stock to the next day (starting from nothing), and its stock of all goods together is at most its capacity. It ships at most its truck loads per day x 10 tons in all, each ton costing 80 EGP of trucking. A road listed in closed_roads.csv carries nothing on that day. For each location, day and good, tons delivered + unmet = demand (deliveries arrive the same day). Goal, as small as possible: 1000 per ton unmet (5000 at a priority location -- hospitals and isolated communities) + tons x road minutes (delivery time) + opening and trucking costs. Report the warehouses opened, daily shipments and stock, unmet demand by location (priority first), delivery time, the cost breakdown, the trade-off between cost and unmet demand (Pareto alternatives), and what to change if a road closes or supplies fall.
+
+Everything you need is here: please propose the model without further questions, then solve it.

@@ -26,6 +26,8 @@ def main(module: str, sizes: list[str]) -> None:
             rows = "decision,key1,key2,value\n" + "".join(f"place,{w},{s},1\n" for w, s in plan)
         elif module == "p05_ambulance":
             rows = p.solve(p.make(size), 60)["export"]
+        elif module == "p10_disaster":
+            rows = p.solve(p.make(size), 120)["export"]
         elif module == "p07_grid":
             rows = p.solve(p.make(size), 120)["export"]
         else:

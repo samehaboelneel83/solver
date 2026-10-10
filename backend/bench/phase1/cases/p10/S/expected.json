@@ -1,0 +1,41 @@
+{
+  "problem": "p10",
+  "size": "S",
+  "kind": "exact",
+  "goal": 113733.0,
+  "known_feasible": 113733.0,
+  "bound": 113733.0,
+  "sense": "minimize",
+  "reference_unmet": 28.0,
+  "report": [
+    [
+      "warehouses opened",
+      "WH\\d\\d"
+    ],
+    [
+      "daily shipments and stock",
+      "DAY\\d"
+    ],
+    [
+      "unmet demand",
+      "unmet"
+    ],
+    [
+      "delivery time",
+      "minute|delivery time"
+    ],
+    [
+      "cost breakdown",
+      "cost"
+    ],
+    [
+      "Pareto trade-off",
+      "pareto|trade-?off"
+    ],
+    [
+      "re-optimisation advice",
+      "road (closes|closure)|re-?optimi|if .*suppl"
+    ]
+  ],
+  "files": []
+}

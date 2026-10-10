@@ -94,7 +94,8 @@ try {
     if (latest > startRun) runs.push(latest);
     const links = await page.locator('[aria-label="Assistant"] a[href*="/runs/"]').evaluateAll((as) => as.map((a) => a.getAttribute("href")));
     for (const h of links) { const m = /\/runs\/(\d+)/.exec(h || ""); if (m) runs.push(Number(m[1])); }
-    if (result.approved > 0 && (runs.length || /Built/.test(text))) { result.run = runs.length ? Math.max(...runs) : null; break; }
+    const mine = runs.filter((r) => r > startRun);  // only runs made during this case
+    if (result.approved > 0 && (mine.length || /Built/.test(text))) { result.run = mine.length ? Math.max(...mine) : null; break; }
     if (result.continues >= NUDGES) { log("no more continues; stopping"); break; }
     result.continues += 1;
     await page.getByLabel("Message to the assistant").fill("continue");
