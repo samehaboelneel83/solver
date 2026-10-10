@@ -1,0 +1,7 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Microgrid schedule". Schedule our microgrid over 168 hours: solar, one battery and 3 diesel generators.
+
+The data are in the attached files: hours.csv (order, demand and solar per hour) and generators.csv.
+
+The battery stores at most 1200 kWh, charges or discharges at most 300 kWh in an hour, keeps 0.92 of what it charges (a kWh charged adds 0.92 kWh stored), starts with 600 kWh and must end the last hour with at least 600 kWh. Rules: every hour, solar used (at most the solar available; the rest is curtailed) + diesel output + battery discharge - battery charge + unmet demand = demand. A generator that is on in an hour runs between its min and max kW; one that is off produces nothing. A generator switched on in an hour (off the hour before, or the first hour) pays its start cost. Stored energy = stored the hour before (or the initial) + charge x efficiency - discharge. Reserve: in every hour, the max kW of the generators that are on, plus the battery's discharge limit or the energy stored before the hour if that is smaller, is at least the demand x 1.1. Goal: the lowest cost = fuel + start costs + CO2 kg x 0.08 EGP + 50.0 EGP per kWh of unmet demand. Report the hourly schedule (generation, battery charge, discharge and level, generator on/off), total cost and CO2, solar used and curtailed, unmet demand, and how the cost changes with fuel price, demand and solar.
+
+Everything you need is here: please propose the model without further questions, then solve it.

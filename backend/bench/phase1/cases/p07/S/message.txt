@@ -1,0 +1,37 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Microgrid schedule". Schedule our microgrid over 24 hours: solar, one battery and 2 diesel generators.
+
+Hours (demand and solar available in kWh):
+id,order,demand_kwh,solar_kwh
+H001,1,640,0
+H002,2,640,0
+H003,3,603,0
+H004,4,501,0
+H005,5,482,0
+H006,6,423,0
+H007,7,420,0
+H008,8,424,140
+H009,9,492,270
+H010,10,502,382
+H011,11,632,468
+H012,12,663,521
+H013,13,635,540
+H014,14,650,521
+H015,15,599,468
+H016,16,481,382
+H017,17,477,270
+H018,18,402,140
+H019,19,394,0
+H020,20,402,0
+H021,21,452,0
+H022,22,527,0
+H023,23,590,0
+H024,24,594,0
+
+Generators:
+id,min_kw,max_kw,fuel_cost_per_kwh,start_cost,co2_kg_per_kwh
+G1,101,373,2.83,699,0.76
+G2,129,365,3.03,707,0.71
+
+The battery stores at most 1200 kWh, charges or discharges at most 300 kWh in an hour, keeps 0.92 of what it charges (a kWh charged adds 0.92 kWh stored), starts with 600 kWh and must end the last hour with at least 600 kWh. Rules: every hour, solar used (at most the solar available; the rest is curtailed) + diesel output + battery discharge - battery charge + unmet demand = demand. A generator that is on in an hour runs between its min and max kW; one that is off produces nothing. A generator switched on in an hour (off the hour before, or the first hour) pays its start cost. Stored energy = stored the hour before (or the initial) + charge x efficiency - discharge. Reserve: in every hour, the max kW of the generators that are on, plus the battery's discharge limit or the energy stored before the hour if that is smaller, is at least the demand x 1.1. Goal: the lowest cost = fuel + start costs + CO2 kg x 0.08 EGP + 50.0 EGP per kWh of unmet demand. Report the hourly schedule (generation, battery charge, discharge and level, generator on/off), total cost and CO2, solar used and curtailed, unmet demand, and how the cost changes with fuel price, demand and solar.
+
+Everything you need is here: please propose the model without further questions, then solve it.

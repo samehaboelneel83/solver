@@ -89,3 +89,14 @@ written as MPS`, and that one entrant's error failed the whole run instead of dr
 alternatives run failed the same way. The Assistant correctly diagnosed this as a platform limitation and
 suggested linearising the goal. **To fix after the evaluation:** an entrant that cannot take a model must
 drop out of the race, never fail the run.
+
+## #1 Military hospital resource allocation
+
+| Case | Built first time | Minutes | Goal | Reference | Checker | Status / gap | Alternatives | Report |
+|---|---|---|---|---|---|---|---|---|
+| S (1 hospital × 4 departments, typed) | yes, 2 corrections | 3.2 | 83 | 83 | **0 violations** | optimal / 0 | not offered | 6 of 6 |
+
+**S — right.** The first fully correct case: built first time, the true optimum of 83 patients, every rule
+held by the independent checker, binding limits shown, and every expected report item in the answer.
+Alternatives were not offered: staff, beds and patients are whole numbers without an upper bound in the
+model, and the platform tells plans apart only by yes/no or bounded whole-number decisions.

@@ -1,0 +1,3 @@
+id,min_kw,max_kw,fuel_cost_per_kwh,start_cost,co2_kg_per_kwh
+G1,101,373,2.83,699,0.76
+G2,129,365,3.03,707,0.71

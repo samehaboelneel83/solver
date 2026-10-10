@@ -21,6 +21,8 @@ def main(module: str, sizes: list[str]) -> None:
                 if "goal" in ref:
                     break
             rows = "decision,key1,value\n" + "".join(f"pick,{c},{1 if c in ref['chosen'] else 0}\n" for c in d["C"])
+        elif module == "p07_grid":
+            rows = p.solve(p.make(size), 120)["export"]
         else:
             raise SystemExit(f"no self-test for {module}")
         out = p.check(p.OUT / size, rows)

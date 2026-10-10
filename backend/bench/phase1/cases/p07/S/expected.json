@@ -1,0 +1,41 @@
+{
+  "problem": "p07",
+  "size": "S",
+  "kind": "exact",
+  "goal": 26803.944784,
+  "known_feasible": 26803.944784,
+  "bound": 26803.944784,
+  "sense": "minimize",
+  "reference_unmet": 0.0,
+  "report": [
+    [
+      "hourly schedule",
+      "H0\\d\\d"
+    ],
+    [
+      "generator on/off",
+      "\\b(on|off|commit)"
+    ],
+    [
+      "total cost",
+      "26,?804"
+    ],
+    [
+      "CO2 / emissions",
+      "CO2|emission"
+    ],
+    [
+      "solar used / curtailed",
+      "curtail|solar used|renewable"
+    ],
+    [
+      "unmet demand",
+      "unmet|not served|shed"
+    ],
+    [
+      "sensitivity to fuel, demand, solar",
+      "fuel price|sensitiv|if (fuel|demand|solar)"
+    ]
+  ],
+  "files": []
+}
