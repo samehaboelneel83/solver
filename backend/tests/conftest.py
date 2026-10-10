@@ -152,6 +152,12 @@ os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 # live owner's URL; left in place, the upgrade below would migrate the live
 # database and leave the test one empty.
 os.environ.pop("MIGRATION_DATABASE_URL", None)
+# The machine's own solve limits (compose reads them from .env for the live workers) are not the suite's: with
+# SOLVE_SHORT_SHARE=0.25 set there, a run asked for 8 threads was given 2, a portfolio never raced, and the
+# host's capacity did not equal the one a test spelled out (10 October 2026). Tests that mean a limit set it.
+for _name in ("SOLVE_HOST_WORKERS", "SOLVE_HOST_MEMORY_MB", "SOLVE_WORKER_CPUS", "SOLVE_WORKER_MEMORY", "SOLVE_WORKERS",
+              "SOLVE_SHORT_SHARE", "SOLVE_SHORT_SECONDS", "SOLVE_CHECK_SHARE", "SOLVE_LICENSE_SEATS", "SOLVE_MEMORY_MB"):
+    os.environ.pop(_name, None)
 # ClickHouse too: the suite writes `analytics_test`, never the live
 # `analytics` (app.analytics, app.clickhouse_schema).
 os.environ["CLICKHOUSE_DB"] = os.environ.get("TEST_CLICKHOUSE_DB", "analytics_test")

@@ -9,7 +9,10 @@ WEB_URL="${SMOKE_WEB_URL:-http://localhost:3010}"
 
 echo "==> Local reachability"
 curl -fsS "$API_URL/api/health" | tee /tmp/solver-health.json
-curl -fsS -o /dev/null -w "frontend HTTP %{http_code}\n" "$WEB_URL/"
+# The page goes down a pipe, not to curl's own "-o /dev/null": under check.sh on Windows (MSYS_NO_PATHCONV=1)
+# a native curl takes that as a file on the drive and fails with exit 23.
+web_code="$(curl -fsS -w '%{http_code}' "$WEB_URL/" | tail -c 3)"
+printf 'frontend HTTP %s\n' "$web_code"
 
 if [[ "${EGRESS_BLOCKED:-0}" != "1" ]]; then
   echo "EGRESS_BLOCKED not set; skipping outbound probe (set EGRESS_BLOCKED=1 on an isolated host)."

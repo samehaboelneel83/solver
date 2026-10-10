@@ -84,7 +84,11 @@ def self_check() -> int:
         ).scalar_one()
         suite.from_run(db, run, "check.sh seed", "check")
         db.commit()
-        rows, status = run_night(db, night=date_cls.today(), max_seconds=5.0)
+        rows, _ = run_night(db, night=date_cls.today(), max_seconds=5.0)
+        # Its own case only: the database also holds what the tests left, one of them a case made to fail
+        # (tests/test_suites.py expects a cell that is off), which failed this check on every run.
+        rows = [row for row in rows if row["problem_id"] == problem]
+        status = 0 if rows and all(row["passed"] for row in rows) else 1
         print(f"suite self-check: {len(rows)} cases, exit {status}")
         for row in rows:
             print(f"  case {row['case_id']}: {'pass' if row['passed'] else 'FAIL'} {row['reasons']}")
