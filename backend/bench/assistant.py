@@ -7,7 +7,8 @@ model reaches. The case is sent to the running platform's Assistant as the admin
 mode; a plan it proposes is approved; a reply that neither proposes nor builds is answered "continue", at most
 `--nudges` times. What is measured, per case:
 
-    built        the plan was built
+    built        the plan was built (a plan whose trial says "NO answer exists" is not approved: it is sent
+                 back as a person would, which counts as a "continue")
     first time   built with no "continue" and no stop ("the same problem came back ...")
     corrections  steps the platform sent back for the Assistant to put right
     goal         the built problem's solved goal value, against the case's
@@ -93,7 +94,7 @@ def run_case(name: str, base: str, headers: dict[str, str], nudges: int, stamp: 
     text = (CASES_DIR / f"{name}.txt").read_text(encoding="utf-8").replace("{workspace}", f"bench {stamp} {name}")
     conversation = uuid.uuid4().hex
     record: dict[str, Any] = {"case": name, "conversation": conversation, "built": False, "nudged": 0, "stopped": 0,
-                              "corrections": 0, "turns": 0, "goal": None, "status": "", "why": []}
+                              "corrections": 0, "warned": 0, "turns": 0, "goal": None, "status": "", "why": []}
     started = time.monotonic()
     body: dict[str, Any] = {"mode": "model", "text": text}
     scenario = None
@@ -114,6 +115,16 @@ def run_case(name: str, base: str, headers: dict[str, str], nudges: int, stamp: 
         if built is not None:
             record["built"], scenario = True, built.get("scenario_id")
             break
+        plan = next((e for e in events if e.get("type") == "plan"), None)
+        if plan is not None and "NO answer exists" in str(plan.get("readback") or plan.get("summary") or ""):
+            # A person reads the plan card: a trial with no answer is not approved, it is sent back in their words.
+            record["warned"] += 1
+            if record["nudged"] >= nudges:
+                break
+            record["nudged"] += 1
+            body = {"mode": "model", "text": "The trial on the plan says no answer exists, but this problem has one. "
+                                             "Check the rules it names against what I described and fix the model."}
+            continue
         if "plan" in kinds or "confirm" in kinds:
             body = {"mode": "model", "confirm": {"allow": True}}
             continue

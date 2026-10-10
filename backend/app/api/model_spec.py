@@ -368,8 +368,10 @@ def _trial(db: Session, domain_id: int, ir: dict[str, Any]) -> dict[str, Any]:
 
 
 #: Solves a trial may spend finding which rules cannot hold together, and the seconds each gets.
-CONFLICT_PROBES = 16
-CONFLICT_PROBE_SECONDS = 3.0
+CONFLICT_PROBES = 40
+CONFLICT_PROBE_SECONDS = 2.0
+#: A proven-smallest conflict names its records when it is at most this many rows.
+CONFLICT_ROWS = 6
 
 
 def _trial_conflict(backend: str, compiled: Any, ir: dict[str, Any]) -> dict[str, Any]:
@@ -398,7 +400,15 @@ def _trial_conflict(backend: str, compiled: Any, ir: dict[str, Any]) -> dict[str
     if not rules or len(rules) == len({c.id for c in compiled.constraints}) > 6:
         return {}
     notes = {c.get("id"): c.get("note") for c in ir.get("constraints") or [] if isinstance(c, dict)}
-    return {"conflict": [{"rule": r, **({"note": str(notes[r])[:200]} if notes.get(r) else {})} for r in rules]}
+    # Which records, when the conflict is proven smallest and short: "c_balance at OJ1L, W01" says the balance is
+    # also written for the first week, where no week comes before (the Nile Juice check's second wrong model).
+    rows: dict[str, list[str]] = {}
+    if found.minimal and len(found.items) <= CONFLICT_ROWS:
+        for item in found.items:
+            if item.get("instance"):
+                rows.setdefault(item["constraint_id"], []).append(", ".join(map(str, item["instance"])))
+    return {"conflict": [{"rule": r, **({"note": str(notes[r])[:200]} if notes.get(r) else {}),
+                          **({"at": rows[r]} if rows.get(r) else {})} for r in rules]}
 
 
 @router.post("/problems/from-spec")

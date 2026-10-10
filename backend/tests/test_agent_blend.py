@@ -1508,6 +1508,8 @@ def test_check_spec_runs_a_trial_solve_and_says_it(tenants, db):
     assert {r["rule"] for r in trial["conflict"]} == {"c_cap", "c_dem"}
     back = core.trial_sent_back(trial)
     assert back.startswith("The plan was NOT shown") and "c_cap" in back and "c_dem" in back
+    # One month's two rows are the whole conflict, so the month is named.
+    assert all(len(r["at"]) == 1 for r in trial["conflict"]) and " at " in back
     assert "these rules cannot hold together: " in core.trial_for_person(trial)
     ir["constraints"].pop(1)
     trial = client.post("/api/v1/problems/from-spec", json=spec, headers=tenants["b"]).json()["trial"]

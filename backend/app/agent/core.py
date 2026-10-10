@@ -1735,12 +1735,17 @@ def trial_said(trial: Any) -> str:
                    "before proposing; say the trial result in the plan.")
 
 
+#: How many times a plan whose trial has no answer goes back to the Assistant before the person sees it.
+TRIAL_SEND_BACKS = 2
+
+
 def conflict_said(trial: Any) -> str:
     """The rules an infeasible trial found in conflict, by name with their notes."""
     rules = trial.get("conflict") if isinstance(trial, dict) else None
     if not rules:
         return ""
-    return "; ".join(f"{r['rule']}" + (f" ({r['note']})" if r.get("note") else "") for r in rules)
+    return "; ".join(f"{r['rule']}" + (f" at {' and at '.join(r['at'])}" if r.get("at") else "")
+                     + (f" ({r['note']})" if r.get("note") else "") for r in rules)
 
 
 def trial_sent_back(trial: Any) -> str:
@@ -1752,15 +1757,16 @@ def trial_sent_back(trial: Any) -> str:
         return ("The plan was NOT shown to the user: solved once on its real data, it has NO answer (infeasible). "
                 "The problem the person described almost certainly has one, so a rule is written wrong -- a term on "
                 "the wrong side (something that adds room, like overtime or extra capacity, written where it uses "
-                "room up), a sign, a balance read the wrong way, a limit that should be a floor. "
+                "room up), a sign, a balance read the wrong way, a limit that should be a floor, or a rule written "
+                "for every record that must leave out the first or the last one (a balance from the week before also "
+                "written for the first week, where no week comes before, clashes with the opening rule). "
                 + (f"These rules cannot hold together: {rules}. " if rules else "")
                 + "Read each of them against the person's words, term by term and side by side, fix what is wrong "
-                "and call propose_plan again. Only if every rule says exactly what the person said, propose the same "
-                "plan again and it will be shown with this warning.")
+                "and call propose_plan again. A plan that still has no answer is shown to the person with this warning.")
     if status == "unbounded":
         return ("The plan was NOT shown to the user: solved once on its real data, its goal can grow without limit "
                 "(unbounded), so a bound or a rule the person described is missing or reads the wrong way. Find it, "
-                "fix it and call propose_plan again; proposing the same plan again shows it with this warning.")
+                "fix it and call propose_plan again; a plan still without a limit is shown with this warning.")
     return ""
 
 
@@ -3113,9 +3119,9 @@ class Agent:
                     + " ".join(faults))
         res = self.call("POST", "/api/v1/problems/from-spec", None, {**_sendable(spec), "dry_run": True, "trial": True})
         if res.get("ok"):
-            # A plan with no answer goes back once before the person sees it; proposed again, it is shown.
+            # A plan with no answer goes back before the person sees it, twice at most; then it is shown.
             back = trial_sent_back((res.get("body") or {}).get("trial"))
-            if back and self.trials_sent_back < 1:
+            if back and self.trials_sent_back < TRIAL_SEND_BACKS:
                 self.trials_sent_back += 1
                 return back
             return "PLAN_OK " + json.dumps(res.get("body"), default=str)
