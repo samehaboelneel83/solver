@@ -8,7 +8,7 @@
 # runnable by hand at any time.
 #
 #   1. `scripts/check.sh` -- lint, types, both test suites, the build --
-#      on a clean detached worktree of `master`, so work in progress in the
+#      on a clean detached worktree of `main`, so work in progress in the
 #      main checkout neither breaks nor excuses the night.
 #   2. `scripts/backup.sh dump` -- nightly Postgres dump to SOLVER_BACKUP_DIR
 #      (queue R39); WAL archives continuously into the same tree.
@@ -65,7 +65,13 @@ exec 2>>"$OUT/$NIGHT-job.log"
 WORKTREE="$(to_host_path "$(dirname "$ROOT")/solver-nightly")"
 
 git -C "$REPO" worktree remove --force "$WORKTREE" >/dev/null 2>&1 || true
-git -C "$REPO" worktree add --detach --force "$WORKTREE" master >/dev/null
+# The branch is `main` (it was `master` until October 2026; the name left here made every night fail with
+# "checks exit 127" on an empty worktree, unnoticed). No worktree, no night: say so in LATEST and stop.
+BRANCH="${SOLVER_NIGHTLY_BRANCH:-main}"
+if ! git -C "$REPO" worktree add --detach --force "$WORKTREE" "$BRANCH" >/dev/null; then
+  echo "$NIGHT  FAIL -- no worktree of $BRANCH could be made (see $NIGHT-job.log); nothing ran" | tee "$OUT/LATEST"
+  exit 1
+fi
 COMMIT="$(git -C "$WORKTREE" rev-parse --short HEAD)"
 trap 'git -C "$REPO" worktree remove --force "$WORKTREE" >/dev/null 2>&1' EXIT
 
