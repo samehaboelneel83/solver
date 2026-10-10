@@ -15,9 +15,11 @@ against an independent reference and an independent checker of every hard rule. 
 **L — wrong again, a different way.** Built first time in 12 minutes, solved by SCIP in 2.3 s (4,500
 decisions, 9,330 rows), "proven optimal" at 465,436, 5% below the true 491,268. It ships on 42 closed routes.
 The plan said "is_open is 1 if yes, 0 otherwise" and its rule `ship <= 119 x is_open` was right, but all 4,500
-route rows were stored with is_open = 1: the Assistant loaded every row with a fixed value and no filter,
-although the file marks 677 routes closed. The plan card describes the intent, not the stored data, so a
-careful reader could not have seen this one. The approved-warehouse rule was loaded correctly this time.
+route rows were stored with is_open = 1. **Corrected after a closer look: this was the platform, not the
+Assistant.** The Assistant loaded the rows with `"where": [{"column": "open", "value": "yes"}]`; the file
+loader applied `where` only to queries and silently ignored it when loading, so every route was stored as
+open. Fixed in `2019474`. The plan card describes the intent, not the stored data, so a careful reader
+could not have seen this one. The approved-warehouse rule was loaded correctly this time.
 
 **Alternatives were never offered for #2.** The run page's "Solve, with N alternative plans" button appears
 only when the model has yes/no decisions or whole numbers with an upper bound. Shipments are unbounded whole
@@ -209,3 +211,19 @@ a yes/no "priority" field used as a number). Then six attempts in a row were ref
 conflicts with existing data" — a database integrity error passed through without naming the record or
 rule, so the Assistant had nothing to act on. **Fix list:** that refusal must say which record conflicts with
 what. The multi-period, inventory and multi-objective parts were never reached.
+
+## Fixes made after the small cases (`2019474`, deployed)
+
+| # | Fix | Found in |
+|---|---|---|
+| 1 | A reply reporting a solved result with no run behind it is not shown | #9 cloud S |
+| 2 | A file load honours its `where` filter | #2 supply chain L |
+| 3 | A race or portfolio entrant that raises drops out; the others' answers stand | #6 timetable S |
+| 4 | A database conflict names the table, the rule and the database's message | #10 disaster S |
+| 5 | A yes/no cell read into a number is 1/0 | #2 supply chain M |
+| 6 | "Can never help" follows room given to other decisions to its end | #8 security S |
+| 7 | "Propose the model without further questions" is a go-ahead | #9 cloud S |
+
+Not yet fixed: a layout rule for corridors "at least W wide all the way" (#3), the run's answer map
+without the placed items (#3), the "cannot be solved" notice above a solved run (#3), and alternatives for
+unbounded whole-number decisions (#1, #2).
