@@ -59,3 +59,18 @@ Other observations:
 - Timings were recorded (compile 0.004 s, solve 1.4 s, verify 0.0004 s); 24 decisions, 14 rows.
 - The alternatives step did not run: the run page's "More run options" appears only in Expert mode, which
   the harness did not set. Fixed in the harness for the following cases.
+
+## #4 Multi-product factory production planning
+
+| Case | Built first time | Minutes | Goal (profit) | Reference | Checker | Status / gap | Verified by platform | Alternatives | Report |
+|---|---|---|---|---|---|---|---|---|---|
+| S (4 products × 2 machines × 2 shifts, typed) | yes, 3 corrections | 4 to build | 9,441 | 963 | **7 violations** | optimal / 0 | accepted | not tried (harness) | 1 of 7 |
+
+**S — "proven optimal" at ten times the true best profit.** The plan makes products on machines that cannot
+make them, uses about four times the labour hours each shift has, and makes P01 259 units against a
+maximum demand of 109. Profit counted by the checker on the exported plan is 7,500, not the 9,441 the
+platform reported, so the goal itself was also built differently from the problem's words. The
+platform's verification accepted it. The model solved in 0.07 s (32 decisions, 28 rows).
+
+The harness missed the run's link in the panel and waited out its 20 minutes; run 180 was collected by
+hand. The harness now finds the case's run through the API.

@@ -47,6 +47,9 @@ const panel = page.locator('[aria-label="Assistant"]').first();
 const panelText = async () => (await panel.innerText().catch(() => "")).trim();
 
 const result = { case: caseDir, workspace, approved: 0, continues: 0, built: false, run: null, minutes: null };
+// Runs made after this point are this case's (one case at a time): found through the API, not the panel's links.
+const newestRun = async () => { const [, t] = await api("/api/v1/runs?limit=1"); const items = JSON.parse(t).items || []; return items.length ? items[0].id : 0; };
+const startRun = await newestRun();
 try {
   await page.goto(BASE + "/");
   await page.getByRole("button", { name: /Assistant \(Ctrl J\)/ }).click();
@@ -87,6 +90,8 @@ try {
     if (idleSince === null) { idleSince = Date.now(); continue; }
     if (Date.now() - idleSince < 12000) continue;
     const runs = [...text.matchAll(/\/runs\/(\d+)/g)].map((m) => Number(m[1]));
+    const latest = await newestRun();
+    if (latest > startRun) runs.push(latest);
     const links = await page.locator('[aria-label="Assistant"] a[href*="/runs/"]').evaluateAll((as) => as.map((a) => a.getAttribute("href")));
     for (const h of links) { const m = /\/runs\/(\d+)/.exec(h || ""); if (m) runs.push(Number(m[1])); }
     if (result.approved > 0 && (runs.length || /Built/.test(text))) { result.run = runs.length ? Math.max(...runs) : null; break; }
