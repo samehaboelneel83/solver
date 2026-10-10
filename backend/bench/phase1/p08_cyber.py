@@ -152,9 +152,8 @@ def check(folder: Path, export_csv: str) -> list[str]:
         if r.get("key1") in ctl and not r.get("key2"):
             by.setdefault(r["decision"], {})[r["key1"]] = float(r["value"])
     picks = [cells for cells in by.values() if all(v in (0.0, 1.0) for v in cells.values())]
-    if not picks:
-        return [f"no yes/no decision over controls in the export (decisions: {', '.join(by)})"]
-    chosen = {c for c, v in max(picks, key=len).items() if v > 0.5}
+    # The export lists only cells that are not 0: no row for any control means none was chosen.
+    chosen = {c for c, v in max(picks, key=len).items() if v > 0.5} if picks else set()
     msg = (folder / "message.txt").read_text(encoding="utf-8")
     import re
 

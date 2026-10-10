@@ -100,3 +100,20 @@ drop out of the race, never fail the run.
 held by the independent checker, binding limits shown, and every expected report item in the answer.
 Alternatives were not offered: staff, beds and patients are whole numbers without an upper bound in the
 model, and the platform tells plans apart only by yes/no or bounded whole-number decisions.
+
+## #8 Cybersecurity defence budget
+
+| Case | Built first time | Minutes | Goal (risk reduced) | Reference | Checker | Status / gap | Alternatives | Report |
+|---|---|---|---|---|---|---|---|---|
+| S (8 controls × 4 assets, typed) | yes, 4 corrections | 6.3 | 1,070,000 | 620,380 | **2 violations; true value 0** | optimal / 0 | 3 offered, all identical goal | 5 of 6 |
+
+**S — full protection with nothing bought.** The owner's "important test" was overlapping protection. The
+model wrote protection as *at least* what each chosen control gives (`prot >= 68 x pick`), so the solver
+set every asset's protection to 100 and chose no control at all: "proven optimal" at 1,070,000, the sum of
+every asset's value. In truth nothing is protected, and two critical assets miss their minimum. The
+three "alternative plans" all had the same goal and differed in one decision.
+
+The shape check fired on an earlier draft (an unused decision), which used its one send-back. On the final
+model it stayed silent: `pick` never helps, but the dependency rules (`pick[CTL004] <= pick[CTL006]`) make
+some `pick` cells look as if they loosen a rule. **Fix list:** the check must follow such a chain — a cell
+helps only if the room it gives is used by a cell that helps.
