@@ -31,7 +31,7 @@ from typing import Any
 
 CASES_DIR = Path(__file__).parent / "assistant_cases"
 #: case name -> the goal value the right model reaches (proven, checked against an independent solve).
-EXPECT: dict[str, float] = {"nile_juice": 116235.0}
+EXPECT: dict[str, float] = {"nile_juice": 116235.0, "delta_pharma": 189900.0}
 STOPS = ("came back", "so I stopped", "I could not write")
 
 

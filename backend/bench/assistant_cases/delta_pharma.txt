@@ -1,0 +1,32 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Which warehouses to open".
+
+We distribute medicines by the pallet and must decide which warehouses to rent for next month and which warehouse supplies each city.
+
+Candidate warehouses (monthly fixed cost in EGP if we open it, capacity in pallets a month):
+id,name,fixed_cost,capacity
+CAI,Cairo,62000,520
+ALX,Alexandria,48000,400
+TNT,Tanta,30000,260
+AST,Assiut,36000,300
+
+Cities (demand in pallets a month, all of it must be delivered):
+id,name,demand
+GIZ,Giza,150
+ALC,Alexandria city,120
+MNS,Mansoura,80
+TNC,Tanta city,60
+SUZ,Suez,55
+MNY,Minya,70
+SHG,Sohag,50
+ASW,Aswan,45
+
+Shipping cost in EGP per pallet, from each warehouse to each city:
+warehouse,GIZ,ALC,MNS,TNC,SUZ,MNY,SHG,ASW
+CAI,40,210,130,100,140,250,470,870
+ALX,220,35,180,120,350,460,680,1080
+TNT,100,125,60,30,230,340,560,960
+AST,370,590,500,470,480,130,100,500
+
+Rules: every city receives exactly its demand, and a city may be supplied from more than one warehouse. A warehouse can ship only if we open it, and never more than its capacity in total. At least two warehouses must be open. Pallets shipped can be fractions. Goal: the lowest total of the fixed costs of the open warehouses plus all shipping costs.
+
+Everything you need is above: please propose the model without further questions, then solve it.
