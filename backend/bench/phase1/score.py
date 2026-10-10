@@ -40,7 +40,14 @@ def main(module: str, case: Path, out: Path) -> dict:
         want = expected.get("goal")
         if want is not None and row["goal"] is not None:
             row["right_goal"] = abs(float(row["goal"]) - float(want)) <= 1e-6 * max(1.0, abs(float(want)))
-        problem = importlib.import_module(f"bench.phase1.{module}")
+        elif row["goal"] is not None and expected.get("known_feasible") is not None:
+            # Bounded reference: at least as good as the known plan, and not past the proven bound.
+            g, known, bound = float(row["goal"]), float(expected["known_feasible"]), expected.get("bound")
+            tol = 1e-6 * max(1.0, abs(known))
+            better = g <= known + tol if expected.get("sense") == "minimize" else g >= known - tol
+            inside = bound is None or (g >= float(bound) - tol if expected.get("sense") == "minimize" else g <= float(bound) + tol)
+            row["right_goal"] = better and inside
+        problem = importlib.import_module(module if "." in module else f"bench.phase1.{module}")
         given = out / getattr(problem, "CHECK_FILE", "export.csv")  # a layout is checked on its answer map
         found = problem.check(case, given.read_text(encoding="utf-8")) if given.exists() else [f"no {given.name}"]
         row["violations"] = [v for v in found if not v.startswith("COST")]
