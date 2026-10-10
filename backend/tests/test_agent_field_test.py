@@ -683,8 +683,8 @@ def test_the_read_back_shows_what_will_be_built_not_what_was_meant(tenants, monk
     spec = _roster_spec("readback")
     spec["seed"] = agent_files.expand(spec["seed"], _roster_files())
     text = readback.readback(spec)
-    assert "- pay_factor[shift]: 1 cells given, every other cell 1" in text
-    assert "- asked_off[nurse, day]: 8 cells given, every other cell 0" in text
+    assert "- pay_factor[shift]: 1 cells given (value 1.3), every other cell 1" in text
+    assert "- asked_off[nurse, day]: 8 cells given (value 1 in all 8), every other cell 0" in text
     assert "link next_day (day → day): 6 links: Sun → Mon" in text
     assert "d2 ∈ day that d links to by next_day (d → d2)" in text
     assert "s1 ∈ shift where id = \"night\"" in text

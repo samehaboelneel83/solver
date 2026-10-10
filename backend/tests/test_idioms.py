@@ -111,3 +111,16 @@ def test_an_idiom_written_wrong_is_refused_with_what_to_write():
                                                                          "chosen": {"var": "y", "index": []}}}]}}
     with pytest.raises(idioms.IdiomRefused, match="declares no upper bound"):
         idioms.expand(spec)
+
+
+def test_the_plan_card_shows_what_each_parameter_holds_as_loaded():
+    """Phase 1, supply chain L: every route was stored as open; the card said only "4500 cells given"."""
+    from app.agent.readback import readback
+
+    seed = {"parameters": [{"name": "is_open", "index": ["w", "c"], "default_value": 0},
+                           {"name": "cost", "index": ["w", "c"], "default_value": 0}],
+            "parameter_values": [{"parameter": "is_open", "entities": [["w", f"W{i}"], ["c", "C1"]], "value": 1} for i in range(6)]
+            + [{"parameter": "cost", "entities": [["w", f"W{i}"], ["c", "C1"]], "value": 10 + i} for i in range(6)]}
+    text = readback({"seed": seed, "ir": {}})
+    assert "- is_open[w, c]: 6 cells given (value 1 in all 6), every other cell 0" in text
+    assert "- cost[w, c]: 6 cells given (values from 10 to 15), every other cell 0" in text

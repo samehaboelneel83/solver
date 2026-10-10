@@ -87,6 +87,23 @@ def term(t: Any) -> str:
     return json.dumps(t, ensure_ascii=False)[:120]
 
 
+def _values_said(seed: dict[str, Any], name: Any) -> str:
+    """What the stored cells of a parameter hold, as loaded (phase 1 evaluation, 10 October 2026: 4,500 routes were
+    all stored as open though the file closed 677, and the card said only "4500 cells given")."""
+    values: dict[Any, int] = {}
+    for v in seed.get("parameter_values") or []:
+        if isinstance(v, dict) and v.get("parameter") == name and isinstance(v.get("value"), (int, float)):
+            values[v["value"]] = values.get(v["value"], 0) + 1
+    if not values:
+        return ""
+    if len(values) == 1:
+        (only, n), = values.items()
+        return f" (value {_num(only)} in all {n})" if n > 1 else f" (value {_num(only)})"
+    if len(values) <= 4:
+        return " (" + ", ".join(f"{_num(k)} in {n}" for k, n in sorted(values.items(), key=lambda kv: -kv[1])) + ")"
+    return f" (values from {_num(min(values))} to {_num(max(values))})"
+
+
 def readback(spec: dict[str, Any]) -> str:
     seed = spec.get("seed") if isinstance(spec.get("seed"), dict) else {}
     ir = spec.get("ir") if isinstance(spec.get("ir"), dict) else {}
@@ -120,8 +137,8 @@ def readback(spec: dict[str, Any]) -> str:
                               if isinstance(v, dict) and v.get("parameter") == name), p.get("default_value"))
             lines.append(f"- {name}: ONE number for the whole problem = {_num(set_value)}")
         else:
-            lines.append(f"- {name}[{', '.join(index)}]: {cells.get(name, 0)} cells given, every other cell "
-                         f"{_num(p.get('default_value', 0))}")
+            lines.append(f"- {name}[{', '.join(index)}]: {cells.get(name, 0)} cells given{_values_said(seed, name)}, "
+                         f"every other cell {_num(p.get('default_value', 0))}")
     for rt in seed.get("relationship_types") or []:
         if isinstance(rt, dict):
             sample = [f"{r['from'][1]} → {r['to'][1]}" for r in seed.get("relationships") or []
