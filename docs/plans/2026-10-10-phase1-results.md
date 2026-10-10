@@ -175,3 +175,15 @@ the results did not stop this reply. The model it built also has no rule for apa
 
 **Fix list:** (1) a reply that reports a result must name a run that exists, or it is not shown; (2) the
 go-ahead check must accept "please propose the model without further questions".
+
+## #10 Integrated disaster response
+
+| Case | Built first time | Minutes | Goal | Reference | Status |
+|---|---|---|---|---|---|
+| S (3 warehouses × 6 locations × 3 days, typed) | **no** — 2 "continue"s, nothing built | 20 | — | 113,733 | — |
+
+**S — not built, on an error that says nothing.** The first refusals were fair (a truck capacity it made up;
+a yes/no "priority" field used as a number). Then six attempts in a row were refused with only "the change
+conflicts with existing data" — a database integrity error passed through without naming the record or
+rule, so the Assistant had nothing to act on. **Fix list:** that refusal must say which record conflicts with
+what. The multi-period, inventory and multi-objective parts were never reached.
