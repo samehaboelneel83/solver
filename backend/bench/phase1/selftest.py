@@ -21,6 +21,9 @@ def main(module: str, sizes: list[str]) -> None:
                 if "goal" in ref:
                     break
             rows = "decision,key1,value\n" + "".join(f"pick,{c},{1 if c in ref['chosen'] else 0}\n" for c in d["C"])
+        elif module == "p09_cloud":
+            plan = [line.split(",") for line in (p.OUT / size / "reference_plan.csv").read_text().splitlines()[1:]]
+            rows = "decision,key1,key2,value\n" + "".join(f"place,{w},{s},1\n" for w, s in plan)
         elif module == "p07_grid":
             rows = p.solve(p.make(size), 120)["export"]
         else:

@@ -1,0 +1,7 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Workload placement". Place 300 workloads on 20 servers at the least running cost.
+
+The data are in the attached files: servers.csv, workloads.csv (allowed regions separated by spaces), pairs.csv.
+
+Rules: every workload runs on exactly one server, in one of its allowed regions (its latency requirement). On each server the workloads' CPU, memory and storage together fit the server's. A server running any workload is on and costs its running cost per hour plus its power kW x 1.5 EGP per kWh; a server with no workload is shut down and costs nothing. Two workloads in pairs.csv marked apart must run in different zones (failure domains); two marked together must run on the same server. Goal: the lowest cost per hour. Report the placement of every workload, the servers on and off, CPU, memory, storage and energy use, a check that every rule holds, and the saving against today, when all 20 servers are on at 629.27 EGP per hour.
+
+Everything you need is here: please propose the model without further questions, then solve it.

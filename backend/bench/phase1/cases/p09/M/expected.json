@@ -1,0 +1,46 @@
+{
+  "problem": "p09",
+  "size": "M",
+  "kind": "exact",
+  "goal": 306.755,
+  "known_feasible": 306.755,
+  "bound": 306.75,
+  "sense": "minimize",
+  "baseline": 629.27,
+  "report": [
+    [
+      "placement",
+      "WL\\d{5}.{0,40}SRV\\d{3}"
+    ],
+    [
+      "servers on and off",
+      "\\b(on|off|shut|active)\\b"
+    ],
+    [
+      "utilization",
+      "utili[sz]|cpu|memory"
+    ],
+    [
+      "energy",
+      "energy|kW"
+    ],
+    [
+      "rules hold / SLA",
+      "every rule|SLA|violation|satisf"
+    ],
+    [
+      "saving against today",
+      "sav(e|ing)|629"
+    ]
+  ],
+  "files": [
+    "servers.csv",
+    "workloads.csv",
+    "pairs.csv"
+  ],
+  "rows": {
+    "workloads": 300,
+    "servers": 20,
+    "pairs": 37
+  }
+}

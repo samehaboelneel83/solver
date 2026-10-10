@@ -1,0 +1,5 @@
+id,region,zone,cpu,memory_gb,storage_gb,running_cost_per_hour,power_kw
+SRV001,CAI,CAI-Z1,29,145,1084,35,1.03
+SRV002,ALX,ALX-Z1,29,145,1084,40,0.91
+SRV003,SUZ,SUZ-Z1,29,145,1084,42,1.01
+SRV004,CAI,CAI-Z2,14,70,542,21,0.51
