@@ -531,7 +531,11 @@ export function unexpressedRules(ir: Record<string, unknown> | undefined): strin
         rule.no_overlap === undefined &&
         rule.cumulative === undefined &&
         rule.connected === undefined &&
-        rule.route === undefined
+        rule.route === undefined &&
+        // Nor a placement or a network-design rule (phase 1, camp S, 10 October 2026: "cannot be solved"
+        // was shown above the solved layout run).
+        rule.place === undefined &&
+        rule.join === undefined
     )
     .map((rule) => String(rule.id ?? "?"));
 }

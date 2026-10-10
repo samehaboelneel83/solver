@@ -272,6 +272,20 @@ describe("unexpressedRules and scheduling", () => {
   });
 });
 
+describe("unexpressedRules and placement or network rules", () => {
+  it("does not call a place or a join rule unexpressed (phase 1, camp S)", () => {
+    expect(
+      unexpressedRules({
+        constraints: [
+          { id: "c_layout", place: { items: { index: "s", set: "slot" } }, severity: "hard" },
+          { id: "c_network", join: { links: { index: "l", set: "link" } }, severity: "hard" },
+          { id: "c_old", note: "named only" },
+        ],
+      })
+    ).toEqual(["c_old"]);
+  });
+});
+
 describe("unexpressedRules and a connected rule", () => {
   it("does not call a connected rule unexpressed, so its model can be solved", () => {
     expect(
