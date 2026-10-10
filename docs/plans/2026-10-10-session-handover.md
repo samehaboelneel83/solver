@@ -136,7 +136,7 @@ was right in 3 of 6.
 |---|---|---|---|
 | Delta Pharma | 2 | 2 (2 and 1.6 minutes) | 0 |
 | Ward roster | 1 | 1 (3 minutes) | 0 |
-| Nile Juice | 1 | 0 | 1 — **a fault of the check, not the Assistant**: the Assistant proposed a plan, the check did not see the plan event and typed "continue" three times, each of which declined it. Unexplained; read `_turn` in `bench/assistant.py` against that conversation (`dbc495c7…`) before trusting the next run. |
+| Nile Juice | 1 | 0 | 1 — **a server error, now fixed** (`81ac6da`): the model listed its relationships as objects (`{"name": "next", ...}`) and an older plan check crashed on them (`TypeError: unhashable type: 'dict'`) four turns running. The platform now lists them by name, and a failed turn is logged with its traceback. |
 | Feed mill | 1 | 0 | 1 — 29 minutes. Its plans had no answer twice and were sent back; the Assistant then argued the calcium limits cannot be met (the reference shows they can) and twice ran to the length limit. The send-back did not get it to find its wrong rule. |
 
 No run built a wrong model, so the shape checks have not yet been seen firing in a live run.
@@ -145,7 +145,7 @@ No run built a wrong model, so the shape checks have not yet been seen firing in
 
 | Item | State | Next step |
 |---|---|---|
-| Evaluation after the shape checks (4 problems × 2 runs, 15-minute cap) | 5 of 8 runs done at 16:00 (section 5); still running | Read `/tmp/assistant-eval2.log` and `/tmp/assistant-eval2.md` in the backend container. A container restart loses them. |
+| Evaluation after the shape checks (4 problems × 2 runs, 15-minute cap) | 6 of 8 runs done at 16:10; the second feed-mill run also failed (13 corrections, 7 minutes) | Read `/tmp/assistant-eval2.log` and `/tmp/assistant-eval2.md` in the backend container. A container restart loses them. |
 | Whether the shape checks make the Assistant fix the model | Unproven: they were verified on stored wrong models, not yet seen in a live run | The evaluation above is the first evidence |
 | Feed mill reliability | Passed once in the browser, failed both check runs (one took 42 minutes) | Read those conversations for what was sent back; repair what repeats |
 | Nightly | Fixed, but no whole night has run on the fix | Read `backend/bench/nightly_results/LATEST` after 03:00 |
