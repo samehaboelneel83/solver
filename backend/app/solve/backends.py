@@ -761,8 +761,39 @@ LAYOUT = Backend(
     planner_choice="The placement solver will lay the items out on the drawing's grid, without listing positions.",
 )
 
+def _qubo_anneal(compiled: Compiled, *, time_limit: float, workers: int, should_stop: ShouldStop | None = None,
+                 seed: int | None = None, gap_rel: float = 0.0, on_progress=None, hint: dict | None = None,
+                 solver_params: dict | None = None) -> Solution:
+    from app.solve import qubo
+    from app.solve.compile import Unsupported
+
+    try:
+        return qubo.anneal(compiled, time_limit=time_limit, seed=seed, should_stop=should_stop,
+                           on_progress=on_progress)
+    except qubo.NotQubo as exc:
+        raise Unsupported(f"qubo-anneal takes a model written as a QUBO, and {exc}") from exc
+
+
+#: The model as a QUBO (`app.solve.qubo`), annealed here: what a quantum or digital annealer would be given,
+#: solved by simulated annealing. Yes/no and bounded whole-number decisions, linear rules, a linear or quadratic
+#: goal. By name only: it proves nothing, and the exact solvers are faster on the same models.
+QUBO_ANNEAL = Backend(
+    name="qubo-anneal",
+    classes=frozenset({"IP", "MIQP", "trivial"}),
+    provides=frozenset({"linear", "integral", "quadratic", "nonconvex", "soft-constraints", "fractional-data",
+                        "scaled-fractional-data"}),
+    rank=12,
+    solve=_qubo_anneal,
+    proves="local",
+    automatic=False,
+    note="the model as a QUBO (rules as squared penalties, whole numbers as bits), simulated annealing over many "
+         "replicas -- what an annealer is given; an answer, never proven best",
+    planner_choice="An annealer's form of the model will take this; its answer keeps every rule but is not proven the best.",
+)
+
+
 BUILT_IN: tuple[Backend, ...] = (CP_SAT, GLOP, HIGHS, MILP, SCIP, PDLP, IPOPT, CMA_ES, PSO, GA, SA, TABU, DE, ACO, BENDERS, COLGEN,
-                                 NETWORKX, LAYOUT)
+                                 NETWORKX, LAYOUT, QUBO_ANNEAL)
 
 
 def _with_adapters() -> tuple[Backend, ...]:

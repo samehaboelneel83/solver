@@ -80,7 +80,7 @@ def test_every_backend_proves_the_global_optimum_but_pdlp_ipopt_and_the_searches
     assert {backend.name: backend.proves for backend in REGISTRY} == {
         **{backend.name: "global" for backend in REGISTRY}, "pdlp": "approximate", "ipopt": "local",
         "cma-es": "local", "pso": "local", "ga": "local", "sa": "local", "tabu": "local", "de": "local",
-        "aco": "local",
+        "aco": "local", "qubo-anneal": "local",
     }
 
 

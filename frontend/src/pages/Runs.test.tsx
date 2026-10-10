@@ -12,7 +12,10 @@ vi.mock("../api/client", async () => {
   return { ...actual, apiFetch: vi.fn() };
 });
 
+vi.mock("../api/download", () => ({ downloadFrom: vi.fn().mockResolvedValue(undefined) }));
+
 const { apiFetch } = await import("../api/client");
+const { downloadFrom } = await import("../api/download");
 const mockFetch = apiFetch as unknown as ReturnType<typeof vi.fn>;
 
 const PROBLEMS = { items: [{ id: 1, name: "weekly_rota", domain_id: 1 }], total: 1 };
@@ -639,6 +642,14 @@ describe("Runs", () => {
     fireEvent.click(await screen.findByRole("button", { name: /show the trade-off between its three goals/i }));
     await waitFor(() => expect(write).toHaveBeenCalled());
     expect(JSON.parse(write.mock.calls[0][1].body)).toEqual(expect.objectContaining({ pareto_steps: 10 }));
+  });
+
+  it("downloads the scenario's model as a QUBO for an annealer", async () => {
+    stub();
+    renderPage();
+    fireEvent.click(await screen.findByText("More run options"));
+    fireEvent.click(screen.getByRole("button", { name: "QUBO as .qubo (qbsolv)" }));
+    expect(downloadFrom).toHaveBeenCalledWith("/api/v1/scenarios/7/qubo?format=qubo");
   });
 
   it("reports what a robust answer protects and what it costs", async () => {
