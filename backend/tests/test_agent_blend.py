@@ -1504,9 +1504,15 @@ def test_check_spec_runs_a_trial_solve_and_says_it(tenants, db):
     assert trial["status"] == "infeasible", trial  # Feb, Apr, May demand above capacity
     said = core.trial_said(trial)
     assert "NO answer on this data" in said
+    # The rules in conflict are named (the Nile Juice check), and the plan goes back before the person sees it.
+    assert {r["rule"] for r in trial["conflict"]} == {"c_cap", "c_dem"}
+    back = core.trial_sent_back(trial)
+    assert back.startswith("The plan was NOT shown") and "c_cap" in back and "c_dem" in back
+    assert "these rules cannot hold together: " in core.trial_for_person(trial)
     ir["constraints"].pop(1)
     trial = client.post("/api/v1/problems/from-spec", json=spec, headers=tenants["b"]).json()["trial"]
     assert trial["status"] == "optimal" and core.trial_said(trial).count("every decision is 0") == 1
+    assert core.trial_sent_back(trial) == "" and "conflict" not in trial
     assert "TRIAL on your data (solved once, nothing kept): optimal, goal 0; make used in 0 of 6 -- it chooses or " \
            "makes nothing" in core.trial_for_person(trial)
     # Nothing was kept.

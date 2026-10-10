@@ -1,0 +1,36 @@
+Please build this in a new workspace called "{workspace}". Call the problem "8-week bottling plan".
+
+We bottle juice on one filling line and need a production plan for the next 8 weeks (W01..W08), in thousands of bottles.
+
+Products (hours of line time per 1000 bottles, changeover hours each week we run it, changeover cost EGP, holding cost EGP per 1000 bottles kept to the next week, opening stock in 1000s):
+id,name,hours_per_1000,changeover_hours,setup_cost,holding_cost,opening_stock
+OJ1L,Orange 1 L,1.1,3.0,4200,55,12
+MG1L,Mango 1 L,1.2,3.5,4600,60,6
+GV1L,Guava 1 L,1.15,3.0,3900,52,0
+BR1L,Mixed berry 1 L,1.35,4.0,5200,70,4
+OJ25,Orange 250 ml,0.45,2.0,2800,22,20
+MG25,Mango 250 ml,0.5,2.5,3000,24,8
+
+Weeks (normal line hours; overtime up to 16 hours a week at 900 EGP per hour; W03 is a holiday week with 64 normal hours, overtime still allowed):
+id,position,capacity_hours,overtime_max_hours,overtime_cost_per_hour
+W01,1,80,16,900
+W02,2,80,16,900
+W03,3,64,16,900
+W04,4,80,16,900
+W05,5,80,16,900
+W06,6,80,16,900
+W07,7,80,16,900
+W08,8,80,16,900
+
+Demand in 1000 bottles (must be met every week, no backorders):
+product,W01,W02,W03,W04,W05,W06,W07,W08
+OJ1L,12,14,14,16,15,16,18,18
+MG1L,11,10,11,11,14,13,11,13
+GV1L,5,7,6,7,8,8,7,7
+BR1L,5,5,4,5,5,4,5,5
+OJ25,28,29,35,32,39,30,41,35
+MG25,21,21,23,22,23,28,30,29
+
+Rules: stock at the end of a week = stock at the end of the previous week (opening stock for W01) + what we bottle that week - demand. The opening stock is on hand at the start of W01 and counts toward W01 demand. We can only bottle a product in a week if we set the line up for it that week (we pay its changeover cost and lose its changeover hours); several products can run in the same week, each with its own changeover. Line hours used (bottling time plus changeovers) cannot exceed the normal hours plus the overtime we buy. Amounts are continuous (fractions of a thousand bottles are fine). Goal: the lowest total of changeover costs, holding costs and overtime cost.
+
+Everything you need is above: please propose the model without further questions, then solve it.

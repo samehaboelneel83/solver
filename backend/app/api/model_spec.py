@@ -358,10 +358,47 @@ def _trial(db: Session, domain_id: int, ir: dict[str, Any]) -> dict[str, Any]:
             amount = float(value)
             chosen.setdefault(str(key[0]), []).append(
                 cell if abs(amount - 1) < 1e-9 else f"{cell} = {round(amount, 6):g}")
+    conflict: dict[str, Any] = {}
+    if result.status == "infeasible":
+        conflict = _trial_conflict(backend.name, compiled, ir)
     return {"status": result.status, "objective": result.objective, "solver": backend.name,
-            "seconds": TRIAL_SECONDS,
+            "seconds": TRIAL_SECONDS, **conflict,
             "used": {k: {"non_zero": v[0], "cells": v[1],
                          **({"chosen": chosen.get(k, [])} if v[0] <= TRIAL_LISTED else {})} for k, v in used.items()}}
+
+
+#: Solves a trial may spend finding which rules cannot hold together, and the seconds each gets.
+CONFLICT_PROBES = 16
+CONFLICT_PROBE_SECONDS = 3.0
+
+
+def _trial_conflict(backend: str, compiled: Any, ir: dict[str, Any]) -> dict[str, Any]:
+    """Which rules of an infeasible trial cannot hold together, with their notes (the Nile Juice check, 10 October
+    2026: overtime written on the wrong side of the capacity rule gave a plan with no answer, and "infeasible"
+    alone sent the Assistant to tell the person their demand could not be met). A few short probes; nothing when
+    they do not settle it."""
+    from types import SimpleNamespace
+
+    from app.solve import diagnose, sandbox
+
+    def probe(model: Any, *, time_limit: float, workers: int) -> Any:
+        try:
+            answer, _ = sandbox.run("app.solve.sandbox:solve_in_child",
+                                    {"backend": backend, "compiled": model, "time_limit": time_limit, "seed": 0,
+                                     "workers": 1, "gap_rel": 0.0}, time_limit=time_limit)
+        except Exception:  # noqa: BLE001 -- a probe that fails decides nothing
+            answer = None
+        return answer if answer is not None else SimpleNamespace(status="unknown")
+
+    try:
+        found = diagnose.explain(compiled, probe, probe_seconds=CONFLICT_PROBE_SECONDS, budget=CONFLICT_PROBES)
+    except Exception:  # noqa: BLE001 -- the trial informs; it never fails a plan
+        return {}
+    rules = [r for r in found.rules if not str(r).startswith("__")]
+    if not rules or len(rules) == len({c.id for c in compiled.constraints}) > 6:
+        return {}
+    notes = {c.get("id"): c.get("note") for c in ir.get("constraints") or [] if isinstance(c, dict)}
+    return {"conflict": [{"rule": r, **({"note": str(notes[r])[:200]} if notes.get(r) else {})} for r in rules]}
 
 
 @router.post("/problems/from-spec")
