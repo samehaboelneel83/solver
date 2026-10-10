@@ -138,7 +138,7 @@ function Viewer({ dataset }: { dataset: GisDataset }) {
         <span className="text-slate-400">/</span>
         <h1 className="text-lg font-semibold text-slate-900">{dataset.name}</h1>
         <span className="text-xs text-slate-500">
-          {(dataset.stats.features ?? 0).toLocaleString()} features · {dataset.layers.length} layers ·{" "}
+          {(dataset.stats.features ?? 0).toLocaleString("en-US")} features · {dataset.layers.length} layers ·{" "}
           {dataset.placement.kind === "epsg" ? dataset.placement.name ?? `EPSG:${dataset.placement.code}` : "local coordinates"}
         </span>
         <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
@@ -177,7 +177,7 @@ function Viewer({ dataset }: { dataset: GisDataset }) {
               <p className="absolute left-2 top-2 rounded bg-white/90 px-2 py-1 text-xs text-slate-700 shadow-sm">Loading features…</p>
             ) : feats.data?.truncated ? (
               <p className="absolute left-2 top-2 rounded bg-amber-50/95 px-2 py-1 text-xs text-amber-900 shadow-sm">
-                Only the first {feats.data.features.length.toLocaleString()} features are shown.
+                Only the first {feats.data.features.length.toLocaleString("en-US")} features are shown.
               </p>
             ) : null} />
         </div>
@@ -299,7 +299,7 @@ function Viewer({ dataset }: { dataset: GisDataset }) {
                       </button>
                     ) : (
                       <div className="rounded border border-amber-300 bg-amber-50 p-2 text-amber-900">
-                        Delete {dataset.name} and its {(dataset.stats.features ?? 0).toLocaleString()} features?
+                        Delete {dataset.name} and its {(dataset.stats.features ?? 0).toLocaleString("en-US")} features?
                         <div className="mt-1 flex gap-2">
                           <button type="button" className="rounded bg-red-600 px-2 py-1 text-white"
                             onClick={() => void deleteDataset(dataset.id).then(() => { void client.invalidateQueries({ queryKey: ["gis"] }); navigate(`/domains/${dataset.domain_id}/map-data`); })}>

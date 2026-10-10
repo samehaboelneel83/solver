@@ -19,7 +19,7 @@ export function RecordTotals({ type }: { type: EntityType }) {
     queryFn: () => apiFetch<Totals>(`/api/v1/entity-types/${type.id}/totals?${query}`),
     enabled: open,
   });
-  const show = (v: number | null | undefined) => (v == null ? "—" : v.toLocaleString(undefined, { maximumFractionDigits: 6 }));
+  const show = (v: number | null | undefined) => (v == null ? "—" : v.toLocaleString("en-US", { maximumFractionDigits: 6 }));
   return (
     <details className="mt-4 rounded-lg border border-slate-200 bg-white p-3 text-sm"
       onToggle={(event) => setOpen((event.target as HTMLDetailsElement).open)}>
@@ -41,10 +41,10 @@ export function RecordTotals({ type }: { type: EntityType }) {
         <thead><tr className="text-xs text-slate-500"><th className="pr-4">{by || "All"}</th><th className="pr-4">Records</th>
           {added.map((name) => <th key={name} className="pr-4">{name}</th>)}</tr></thead>
         <tbody>{totals.data.groups.map((g, n) => <tr key={n}>
-          <td className="pr-4">{by ? g.group ?? "(empty)" : "all"}</td><td className="pr-4">{g.rows.toLocaleString()}</td>
+          <td className="pr-4">{by ? g.group ?? "(empty)" : "all"}</td><td className="pr-4">{g.rows.toLocaleString("en-US")}</td>
           {added.map((name) => <td key={name} className="pr-4">{show(g.sums[name])}</td>)}</tr>)}
           {by && <tr className="border-t border-slate-200 font-medium"><td className="pr-4">Total</td>
-            <td className="pr-4">{totals.data.total.rows.toLocaleString()}</td>
+            <td className="pr-4">{totals.data.total.rows.toLocaleString("en-US")}</td>
             {added.map((name) => <td key={name} className="pr-4">{show(totals.data!.total[name])}</td>)}</tr>}
         </tbody></table>}
       {totals.data?.truncated && <p className="text-xs text-amber-800">The first 500 groups, largest first.</p>}

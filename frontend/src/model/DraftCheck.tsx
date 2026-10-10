@@ -12,9 +12,9 @@ function trialWords(trial: Trial): string {
   if (["not compiled", "skipped", "no solver", "failed", "no answer"].includes(trial.status)) {
     return `Not trial-solved (${trial.status}${trial.why ? `: ${trial.why}` : ""}).`;
   }
-  const goal = typeof trial.objective === "number" ? `, goal ${trial.objective.toLocaleString()}` : "";
+  const goal = typeof trial.objective === "number" ? `, goal ${trial.objective.toLocaleString("en-US")}` : "";
   const used = Object.entries(trial.used ?? {}).map(([name, u]) =>
-    `${name} used in ${u.non_zero.toLocaleString()} of ${u.cells.toLocaleString()}${u.chosen?.length ? ` (${u.chosen.join(", ")})` : ""}`);
+    `${name} used in ${u.non_zero.toLocaleString("en-US")} of ${u.cells.toLocaleString("en-US")}${u.chosen?.length ? ` (${u.chosen.join(", ")})` : ""}`);
   let words = `Trial on this domain's data (solved once for up to ${trial.seconds ?? 15} s, nothing kept): ${trial.status}${goal}`
     + (used.length ? `; ${used.join("; ")}` : "") + ".";
   if (trial.status === "infeasible") words += " No answer exists with these rules and this data.";

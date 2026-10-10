@@ -222,12 +222,12 @@ export function LayoutFromDrawing({ domainId, name, onMade }: {
           <div role="region" aria-label="Layout preview" className="rounded border border-blue-200 bg-blue-50 p-3 text-sm">
             <p>Grid {preview.grid_step_m} m; aisle {preview.aisle_m.modelled} m as modelled
               {preview.aisle_m.cells ? ` (${preview.aisle_m.cells} cells, ${preview.aisle_m.side} side)` : ""};{" "}
-              {preview.areas} areas, {preview.free_area_m2.toLocaleString()} m² free.</p>
+              {preview.areas} areas, {preview.free_area_m2.toLocaleString("en-US")} m² free.</p>
             {preview.grid_note && <p className="text-amber-800">{preview.grid_note}</p>}
             <p>{preview.candidates !== undefined
-              ? `${preview.candidates.toLocaleString()} candidate positions (${Object.entries(preview.candidates_by_kind ?? {}).map(([k, n]) => `${n.toLocaleString()} ${k}`).join(", ")}), built by each run.`
-              : `Slots: ${Object.entries(preview.slots_by_kind ?? {}).map(([k, n]) => `${n.toLocaleString()} ${k}`).join(", ")}.`}</p>
-            <p>At most {preview.upper_bound.items.toLocaleString()} items fit: {preview.upper_bound.how}.</p>
+              ? `${preview.candidates.toLocaleString("en-US")} candidate positions (${Object.entries(preview.candidates_by_kind ?? {}).map(([k, n]) => `${n.toLocaleString("en-US")} ${k}`).join(", ")}), built by each run.`
+              : `Slots: ${Object.entries(preview.slots_by_kind ?? {}).map(([k, n]) => `${n.toLocaleString("en-US")} ${k}`).join(", ")}.`}</p>
+            <p>At most {preview.upper_bound.items.toLocaleString("en-US")} items fit: {preview.upper_bound.how}.</p>
             {preview.access?.areas_without_access?.length ? <p className="text-amber-800">
               Areas with no access feature take no item: {preview.access.areas_without_access.join(", ")}.</p> : null}
             <p className="text-slate-700">Not modelled: {preview.not_modelled}</p>
@@ -243,7 +243,7 @@ export function LayoutFromDrawing({ domainId, name, onMade }: {
             {build.isSuccess && build.variables && build.data.trial && (
               <p role="status" className="mt-2">Trial solve: {build.data.trial.status}
                 {build.data.trial.objective !== undefined && build.data.trial.objective !== null
-                  ? `, ${build.data.trial.objective.toLocaleString()} items` : ""}. Nothing was kept.</p>
+                  ? `, ${build.data.trial.objective.toLocaleString("en-US")} items` : ""}. Nothing was kept.</p>
             )}
             {build.isError && <p role="alert" className="mt-2 text-red-700">{formatApiError(build.error)}</p>}
           </div>

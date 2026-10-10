@@ -86,7 +86,7 @@ export default function MapData() {
                     <div className="min-w-0 flex-1">
                       <Link to={`/domains/${domainId}/map-data/${d.id}`} className="font-semibold text-slate-900 hover:underline">{d.name}</Link>
                       <p className="mt-0.5 text-xs text-slate-500">
-                        {d.source.filename} · {d.layers} layers · {(d.stats.features ?? 0).toLocaleString()} features ·{" "}
+                        {d.source.filename} · {d.layers} layers · {(d.stats.features ?? 0).toLocaleString("en-US")} features ·{" "}
                         {d.placement.kind === "epsg" ? d.placement.name ?? `EPSG:${d.placement.code}` : "local coordinates"} ·
                         {" "}imported {relativeTime(d.created_at)}
                       </p>

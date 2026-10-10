@@ -65,7 +65,7 @@ it("takes GIS files, not only drawings, and says when a file names its coordinat
     expect(input.getAttribute("accept")).toContain(ending);
   }
   fireEvent.change(input, { target: { files: [new File(["{}"], "mina-camp.geojson", { type: "application/geo+json" })] } });
-  expect(await screen.findByText((text) => text.includes("mina-camp.geojson · GeoJSON · " + (1).toLocaleString() + " features"))).toBeInTheDocument();
+  expect(await screen.findByText((text) => text.includes("mina-camp.geojson · GeoJSON · " + (1).toLocaleString("en-US") + " features"))).toBeInTheDocument();
   expect(screen.getByText(/The file names its coordinate system \(EPSG:4326\)/)).toBeInTheDocument();
   await waitFor(() => expect(screen.getByDisplayValue("mina-camp")).toBeInTheDocument());
 });

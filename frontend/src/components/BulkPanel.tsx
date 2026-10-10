@@ -214,7 +214,7 @@ export default function BulkPanel({
             disabled={busy || twice.length > 0 || keyMissing || valueMissing || unread.length > 0}
             className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-60"
           >
-            {busy ? (dryRun ? "Checking…" : preview && preview.rows > 0 ? `Writing ${preview.rows.toLocaleString()} rows…` : "Writing…") : "Upload"}
+            {busy ? (dryRun ? "Checking…" : preview && preview.rows > 0 ? `Writing ${preview.rows.toLocaleString("en-US")} rows…` : "Writing…") : "Upload"}
           </button>
           {busy && !dryRun && (preview?.rows ?? 0) >= 1000 && (
             // A large file takes a while; without this the page looked as if nothing happened (benchmark, October 2026).
@@ -239,7 +239,7 @@ export default function BulkPanel({
                   <td className="px-2 py-1 text-xs text-slate-600">
                     {c.sample.join(", ")}
                     {c.filled != null && c.filled < preview.rows && (
-                      <span className="text-slate-400"> · {c.filled === 0 ? "empty" : `${c.filled.toLocaleString()} of ${preview.rows.toLocaleString()} rows filled`}</span>
+                      <span className="text-slate-400"> · {c.filled === 0 ? "empty" : `${c.filled.toLocaleString("en-US")} of ${preview.rows.toLocaleString("en-US")} rows filled`}</span>
                     )}
                   </td>
                   <td className="px-2 py-1">

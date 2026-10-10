@@ -210,8 +210,8 @@ export default function MapImport() {
           <section className="rounded-lg border border-slate-200 bg-white p-3" aria-label="Layers">
             <h2 className="text-sm font-semibold text-slate-900">1. Layers</h2>
             <p className="mt-0.5 text-xs text-slate-500">
-              {upload.filename} · {/^AC\d/.test(s.version) ? `DXF ${s.version}` : s.version} · {s.features.toLocaleString()} features ·
-              {" "}{Object.entries(s.kinds).map(([k, n]) => `${n.toLocaleString()} ${KIND_WORDS[k] ?? k}`).join(", ")}
+              {upload.filename} · {/^AC\d/.test(s.version) ? `DXF ${s.version}` : s.version} · {s.features.toLocaleString("en-US")} features ·
+              {" "}{Object.entries(s.kinds).map(([k, n]) => `${n.toLocaleString("en-US")} ${KIND_WORDS[k] ?? k}`).join(", ")}
             </p>
             <div className="mt-2 flex gap-2 text-xs">
               <button type="button" className="text-blue-700 hover:underline" onClick={() => setLayers(new Set(s.layers.map((l) => l.name)))}>All</button>
@@ -256,7 +256,7 @@ export default function MapImport() {
                 <div className="pointer-events-none absolute left-2 top-2 max-w-[75%] space-y-1">
                   {preview ? (
                     <p className="rounded bg-white/90 px-2 py-1 text-xs text-slate-700 shadow-sm">
-                      {preview.total.toLocaleString()} features{preview.sampled ? ` (a sample of ${preview.features.features.length.toLocaleString()} shown)` : ""}
+                      {preview.total.toLocaleString("en-US")} features{preview.sampled ? ` (a sample of ${preview.features.features.length.toLocaleString("en-US")} shown)` : ""}
                       {preview.bbox ? ` around ${((preview.bbox[1] + preview.bbox[3]) / 2).toFixed(5)}, ${((preview.bbox[0] + preview.bbox[2]) / 2).toFixed(5)}` : ""}
                     </p>
                   ) : (

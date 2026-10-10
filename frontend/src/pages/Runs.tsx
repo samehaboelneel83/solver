@@ -178,7 +178,7 @@ export function metaheuristicText(record: MetaheuristicRecord): string {
   if (!record.used) return `not searched: ${record.why}`;
   const method = SEARCH_NAMES[record.method] ?? record.method;
   const others = (record.raced ?? []).filter((r) => r.solver !== record.method)
-    .map((r) => `${SEARCH_NAMES[r.solver] ?? r.solver} ${r.objective === null ? "found nothing" : r.objective.toLocaleString()}`);
+    .map((r) => `${SEARCH_NAMES[r.solver] ?? r.solver} ${r.objective === null ? "found nothing" : r.objective.toLocaleString("en-US")}`);
   const raced = (record.methods?.length ?? 0) > 1 ? ` (best of ${record.methods!.length} searches at once${others.length ? `; ${others.join(", ")}` : ""})` : "";
   return record.kept
     ? `${method} for ${record.seconds}s after ${record.after} ended with no answer${raced}`
@@ -1503,14 +1503,14 @@ function RunDetail({
                 ? `; the model ${params.strengthen_run.forms.won} alone, as this problem's recent races proved first`
                 : `; the model ${params.strengthen_run.forms.won} won the race between the two forms`) : "")
               + (typeof params.strengthen_run.bound_before === "number" && typeof params.strengthen_run.bound_after === "number"
-                ? `; bound ${params.strengthen_run.bound_before.toLocaleString(undefined, { maximumFractionDigits: 2 })} → ${params.strengthen_run.bound_after.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : "")} />}
+                ? `; bound ${params.strengthen_run.bound_before.toLocaleString("en-US", { maximumFractionDigits: 2 })} → ${params.strengthen_run.bound_after.toLocaleString("en-US", { maximumFractionDigits: 2 })}` : "")} />}
           {params.fixed_charge_start_run && <Fact label="Fixed charges" value={params.fixed_charge_start_run.why
             ? `no start (${params.fixed_charge_start_run.why})`
-            : `slope scaling over ${params.fixed_charge_start_run.charges ?? "?"} on/off decisions with a cost: ${params.fixed_charge_start_run.open ?? "?"} on, goal ${params.fixed_charge_start_run.objective?.toLocaleString() ?? "?"}`
+            : `slope scaling over ${params.fixed_charge_start_run.charges ?? "?"} on/off decisions with a cost: ${params.fixed_charge_start_run.open ?? "?"} on, goal ${params.fixed_charge_start_run.objective?.toLocaleString("en-US") ?? "?"}`
               + `${params.fixed_charge_start_run.used ? " (the start)" : " (another start was better)"}`} />}
           {params.join_cuts_run && <Fact label="Cuts added" value={`${params.join_cuts_run.cuts ?? 0} where the relaxation broke them, in ${params.join_cuts_run.rounds ?? 0} rounds`
             + (typeof params.join_cuts_run.bound_before === "number" && typeof params.join_cuts_run.bound_after === "number"
-              ? `; the relaxation's bound ${params.join_cuts_run.bound_before.toLocaleString()} → ${params.join_cuts_run.bound_after.toLocaleString()}` : "")} />}
+              ? `; the relaxation's bound ${params.join_cuts_run.bound_before.toLocaleString("en-US")} → ${params.join_cuts_run.bound_after.toLocaleString("en-US")}` : "")} />}
           {params.join_start_run && <Fact label="Started from" value={params.join_start_run.used && params.join_start_run.how
             ? `a ${params.join_start_run.how}${params.join_start_run.built !== undefined ? `, ${params.join_start_run.built} links built` : ""}${params.join_start_run.dropped ? `, ${params.join_start_run.dropped} dropped as not worth their cost` : ""}${params.join_start_run.used_places !== undefined ? `, ${params.join_start_run.used_places} places used` : ""}${params.join_start_run.moves ? ` after ${params.join_start_run.moves} improvements` : ""}${params.join_start_run.overloaded ? `; ${params.join_start_run.overloaded} over capacity, mended by the solver` : ""}`
             : `no network start${params.join_start_run.why ? ` (${params.join_start_run.why})` : ""}`} />}

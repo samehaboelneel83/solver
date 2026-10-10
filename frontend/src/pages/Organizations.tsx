@@ -29,11 +29,11 @@ function OwnQuota() {
   if (!quota.data) return null;
   return <section aria-labelledby="own-quota" className="rounded-xl border border-slate-200 bg-white p-4">
     <h2 id="own-quota" className="text-lg font-semibold">This organization's limits</h2>
-    <p className="text-sm text-slate-600">Tier {quota.data.tier ?? "none"}; this month {quota.data.this_month.runs.toLocaleString()} runs,{" "}
-      {Math.round(quota.data.this_month.cpu_seconds).toLocaleString()} CPU seconds. The platform's operator sets these.</p>
+    <p className="text-sm text-slate-600">Tier {quota.data.tier ?? "none"}; this month {quota.data.this_month.runs.toLocaleString("en-US")} runs,{" "}
+      {Math.round(quota.data.this_month.cpu_seconds).toLocaleString("en-US")} CPU seconds. The platform's operator sets these.</p>
     <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
       {LIMITS.map(([key, label]) => <div key={key}><dt className="text-slate-500">{label}</dt>
-        <dd>{quota.data!.limits[key] == null ? "no limit" : Number(quota.data!.limits[key]).toLocaleString()}</dd></div>)}
+        <dd>{quota.data!.limits[key] == null ? "no limit" : Number(quota.data!.limits[key]).toLocaleString("en-US")}</dd></div>)}
     </dl>
   </section>;
 }

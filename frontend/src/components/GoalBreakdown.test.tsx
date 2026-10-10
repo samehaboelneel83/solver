@@ -11,8 +11,8 @@ it("shows each goal term's value, its share and the records it comes from (bench
   const table = screen.getByRole("table", { name: "Goal by term" });
   expect(table).toHaveTextContent("shipping cost");
   expect(table).toHaveTextContent("48.8%");
-  expect(table).toHaveTextContent("South depot " + (80).toLocaleString(undefined, { maximumSignificantDigits: 6 }));
-  expect(table).toHaveTextContent("3 others " + (5).toLocaleString(undefined, { maximumSignificantDigits: 6 }));
+  expect(table).toHaveTextContent("South depot " + (80).toLocaleString("en-US", { maximumSignificantDigits: 6 }));
+  expect(table).toHaveTextContent("3 others " + (5).toLocaleString("en-US", { maximumSignificantDigits: 6 }));
 });
 
 it("shows a weighted term's own value and what it counts in the goal (benchmark round 3)", () => {
@@ -21,9 +21,9 @@ it("shows a weighted term's own value and what it counts in the goal (benchmark 
     { id: "water_use", weight: -0.5, value: 20, contribution: -10, share: 0.1, records: [] },
   ] }} />);
   const row = screen.getByRole("row", { name: /water use/ });
-  expect(row).toHaveTextContent("water use × " + (-0.5).toLocaleString(undefined, { maximumSignificantDigits: 6 }));
-  expect(row.querySelectorAll("td")[1]).toHaveTextContent((20).toLocaleString());
-  expect(row.querySelectorAll("td")[2]).toHaveTextContent((-10).toLocaleString());
+  expect(row).toHaveTextContent("water use × " + (-0.5).toLocaleString("en-US", { maximumSignificantDigits: 6 }));
+  expect(row.querySelectorAll("td")[1]).toHaveTextContent((20).toLocaleString("en-US"));
+  expect(row.querySelectorAll("td")[2]).toHaveTextContent((-10).toLocaleString("en-US"));
 });
 
 it("says nothing for a single term from a single record", () => {
@@ -51,5 +51,5 @@ it("splits one goal term by decision (the production-planning trace)", () => {
       decisions: [{ var: "setup", value: 88500 }, { var: "stock", value: 16440 }, { var: "overtime", value: 11295 }] },
   ] }} />);
   expect(screen.getByLabelText("o cost by decision")).toHaveTextContent(
-    `setup ${(88500).toLocaleString()} · stock ${(16440).toLocaleString()} · overtime ${(11295).toLocaleString()}`);
+    `setup ${(88500).toLocaleString("en-US")} · stock ${(16440).toLocaleString("en-US")} · overtime ${(11295).toLocaleString("en-US")}`);
 });

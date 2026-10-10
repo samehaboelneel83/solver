@@ -267,9 +267,9 @@ const SETTLED = ["optimal", "feasible", "infeasible", "unbounded", "error", "can
 function RunAnswer({ runId, previous }: { runId: number; previous?: number }) {
   const run = useQuery({ queryKey: ["run", runId], queryFn: () => apiFetch<{ status: string; objective: number | null }>(`/api/v1/runs/${runId}`),
     refetchInterval: (q) => (q.state.data && SETTLED.includes(q.state.data.status) ? false : 3000) });
-  const before = previous !== undefined ? ` (was ${previous.toLocaleString()})` : "";
+  const before = previous !== undefined ? ` (was ${previous.toLocaleString("en-US")})` : "";
   if (!run.data || !SETTLED.includes(run.data.status)) return <span>solving…{before}</span>;
-  return <span>{run.data.status}{run.data.objective != null ? `, ${run.data.objective.toLocaleString()}` : ""}{before}</span>;
+  return <span>{run.data.status}{run.data.objective != null ? `, ${run.data.objective.toLocaleString("en-US")}` : ""}{before}</span>;
 }
 
 /** The runs a refresh queued, each beside its scenario's last answer; or what to do when it queued none. */

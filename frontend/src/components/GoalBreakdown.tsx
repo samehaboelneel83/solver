@@ -15,7 +15,7 @@ export type Breakdown = {
 };
 
 const words = (id: string) => id.replace(/_/g, " ");
-const show = (n: number) => n.toLocaleString(undefined, { maximumSignificantDigits: 6 });
+const show = (n: number) => n.toLocaleString("en-US", { maximumSignificantDigits: 6 });
 
 /**
  * Each goal term's value and share of the whole, and the records it comes from -- "transport 61 %,
