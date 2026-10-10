@@ -23,6 +23,22 @@ function blocks(source: string): ReactNode[] {
       i += 1;
       continue;
     }
+    const fold = line.trim().match(/^<details>\s*<summary>(.*)<\/summary>$/);
+    if (fold) {
+      // The platform's own fold (a stop's "Technical detail"): shown closed, not as its tags (the Delta Pharma
+      // trace in the browser, 10 October 2026).
+      const inner: string[] = [];
+      i += 1;
+      while (i < lines.length && lines[i].trim() !== "</details>") inner.push(lines[i++]);
+      i += 1;
+      out.push(
+        <details key={key} className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600">
+          <summary className="cursor-pointer select-none">{fold[1]}</summary>
+          <div className="mt-1 space-y-2">{blocks(inner.join("\n"))}</div>
+        </details>,
+      );
+      continue;
+    }
     if (line.trimStart().startsWith("```")) {
       const body: string[] = [];
       i += 1;

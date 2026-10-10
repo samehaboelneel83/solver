@@ -78,6 +78,15 @@ def _walk(node: Any, notes: list[str]) -> None:
                 notes.append(f'"{key}" was written as "add" with -1 times the part taken away (the language adds and '
                              'multiplies: a - b is {"add":[a,{"mul":[{"const":-1},b]}]})')
                 break
+        for key in ("mul", "add"):
+            # A product or a sum of one part is that part (the Delta Pharma trace: {"mul": [ship[w, c]]} under a
+            # sum, refused four times running as "mul has exactly two factors").
+            if len(node) == 1 and isinstance(node.get(key), list) and len(node[key]) == 1 \
+                    and isinstance(node[key][0], dict):
+                only = node.pop(key)[0]
+                node.update(only)
+                notes.append(f'"{key}" of one part was written as the part itself')
+                break
         number = (int, float)
         for key in ("left", "right", "expression"):
             if isinstance(node.get(key), number) and not isinstance(node[key], bool):

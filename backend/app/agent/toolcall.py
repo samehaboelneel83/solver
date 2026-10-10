@@ -67,11 +67,21 @@ def _brief(v):
     return text if len(text) <= 60 else text[:57] + "..."
 
 
+#: A backslash that starts no JSON escape (an escaped backslash before it is skipped as a pair).
+_INVALID_ESCAPE = re.compile(r'(?<!\\)((?:\\\\)*)\\(?!["\\/bfnrtu])')
+
+
 def strict_loads(s, notes=None):
     """json.loads that never silently drops a repeated key (see _no_dupes); `notes` collects the joins."""
     try:
         return json.loads(s, object_pairs_hook=lambda pairs: _no_dupes(pairs, notes))
     except json.JSONDecodeError as e:
+        if e.msg.startswith("Invalid \\escape"):
+            # A backslash JSON has no escape for, written as text: "Continuous $\ge$ 0" in a plan's summary (the
+            # Delta Pharma trace, 10 October 2026: three calls lost to it). It is the backslash itself.
+            kept = _INVALID_ESCAPE.sub(r"\1\\\\", s)
+            if kept != s:
+                return strict_loads(kept, notes)
         # Where it broke, so the model can see what it sent (it does not get its broken call back).
         near = s[max(0, e.pos - 60): e.pos + 30].replace("\n", " ")
         raise json.JSONDecodeError(f"{e.msg}; near: ...{near}...", e.doc, e.pos) from None

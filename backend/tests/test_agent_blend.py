@@ -1629,6 +1629,26 @@ def test_values_for_a_parameter_only_the_ir_declares_and_a_sums_default_zero_are
     assert "parameters" not in odd["seed"] and odd["ir"]["objective"]["expression"]["default"] == 5
 
 
+def test_a_product_of_one_part_and_a_stray_backslash_are_put_right():
+    """The Delta Pharma trace (in the browser, 10 October 2026): {"mul": [ship[w, c]]} under a sum was refused four
+    times as "mul has exactly two factors", after three calls were lost to "$\\ge$" in the plan's summary."""
+    from app.agent import toolcall
+    from app.agent.repair import repair
+
+    ship = {"var": "ship", "index": ["w", "c"]}
+    spec = {"seed": {}, "ir": {"version": 2, "sets": ["warehouse", "city"], "constraints": [
+        {"id": "c_demand", "forall": [{"index": "c", "set": "city"}], "relation": "=",
+         "left": {"sum": {"mul": [dict(ship)]}, "over": [{"index": "w", "set": "warehouse"}]},
+         "right": {"add": [{"attr": {"of": "c", "name": "demand"}}]}}]}}
+    notes = repair(spec)
+    rule = spec["ir"]["constraints"][0]
+    assert rule["left"]["sum"] == ship and rule["right"] == {"attr": {"of": "c", "name": "demand"}}
+    assert sum("of one part" in n for n in notes) == 2
+
+    raw = '{"summary": "ship: Continuous $\\ge$ 0, path C:\\\\data, a \\"quote\\"\\n", "spec": {}}'
+    assert toolcall.strict_loads(raw)["summary"] == 'ship: Continuous $\\ge$ 0, path C:\\data, a "quote"\n'
+
+
 def test_a_bracket_dropped_or_doubled_in_a_long_spec_is_mended():
     """The production-planning trace: `{"attr": {"of": "p", "name": "rate"}, {"var": ...` -- one brace short, in the
     middle of a 12 KB spec, six times. Any closer dropped or doubled anywhere gives valid JSON back."""
