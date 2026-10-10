@@ -141,6 +141,24 @@ merged into one object with two `id` keys (`o_operating` and `o_ambulance`) — 
 terms, which the repair cannot safely guess. Whether the model reads the road travel-time matrix or
 computes straight lines (the owner's "important test") was never reached.
 
+## #3 Optimal camp layout and accessibility
+
+| Case | Built first time | Minutes | Goal (beds) | Reference | Checker | Status / gap | Alternatives | Report |
+|---|---|---|---|---|---|---|---|---|
+| S (14 × 10 m site, 1 protected area, 1 entrance; DXF attached) | yes | 6.4 (solve 119 s) | 50 | constructed 23, area bound 57 | **34 of 50 beds have no 1.2 m-wide way to the entrance** | feasible / 26% | not offered | 6 of 6 |
+
+**S — spatial modelling works; the accessibility rule is weaker than asked.** The platform read the drawing,
+built 63 candidate slots on a 0.1 m grid and placed 50 beds (2.0 x 0.9 m, 16 turned) with the placement
+solver: inside the site, clear of the protected area, no overlaps — the independent geometry check confirms
+all of that. But the problem asked for open space "at least 1.2 m wide all the way" to an entrance. The
+platform's layout rule gives each bed a 1.2 m aisle beside it and joins the aisles, but lets the joins
+squeeze narrower: by the checker, only about 1 m² of the site is open at 1.2 m width, and 34 beds have no
+1.2 m path to the entrance. The secondary goal (shortest walk) was not modelled, as the Assistant said.
+Defects: the run's answer map came back empty (no bed shapes; the beds were rebuilt from the export,
+`p03_from_export.py`, drawn in `runs/p03-S/layout-from-export.svg`); and the run page shows "this scenario
+... cannot be solved" above the solved run. The owner's "important test" is answered: geometric variables and
+rules are supported, and a layout image would have looked fine while 34 beds fail the connectivity rule.
+
 ## Small cases so far
 
 | # | Problem | Built | Right answer | What happened |
@@ -151,11 +169,15 @@ computes straight lines (the owner's "important test") was never reached.
 | 1 | Hospital | yes | **yes** | the true optimum, every rule held, full report |
 | 8 | Cybersecurity | yes | **no** | full protection claimed with nothing bought |
 | 7 | Smart grid | no | — | stopped: a parameter read but never loaded |
+| 9 | Cloud | yes | (right numbers, **no solve**) | a result reported with no run behind it |
 | 5 | Ambulances | no | — | stopped: the same JSON slip three times |
+| 3 | Camp layout | yes | **no** | 50 beds, 34 without a 1.2 m way to the entrance |
+| 10 | Disaster response | no | — | stopped: an error that names nothing, six times |
 
-1 right answer in 7. Of the 5 that were built and solved, 3 were wrong and were reported as proven optimal;
-the platform's own verification accepted all three. Every wrong answer was found only by the independent
-checker.
+**1 right answer in 10.** 7 were built; of the 6 that were solved, 4 broke a rule of the problem while the
+platform reported them as optimal or feasible and its own verification accepted them, 1 crashed, 1 was
+right; one more was reported without being solved at all. 3 were never built. Every wrong answer was found
+only by the independent checker.
 
 ## #9 Cloud workload and server allocation
 
