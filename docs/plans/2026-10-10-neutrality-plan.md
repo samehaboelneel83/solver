@@ -35,4 +35,10 @@ unwarned wrong answer, over three runs each.
 2. A fix is made and tested on the tuning set, then judged on the hidden set.
 3. A defect seen only through a hidden case is described by its class (from the aggregate and the platform's own
    logs of refusal kinds), never by reading the case.
-4. The hidden set is run before any step's changes (baseline) and after each step.
+4. The hidden set is run before any step's changes (baseline) and after each step, one step at a time: never two
+   steps' changes in one measurement.
+5. A hidden case whose checker cannot read the platform's real export ("checker could not read the plan" in the
+   aggregate) is fixed by a separate agent, given only that case's module and export; it reports back pass or fail,
+   never the content. The checkers were self-tested on exports their authors wrote, not on the platform's.
+6. Nothing from the working tree reaches the live stack while a hidden run is in progress (`compose build` is safe,
+   `up -d` is not).
