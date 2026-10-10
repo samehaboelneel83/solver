@@ -1,5 +1,9 @@
 # Handover — the optimization-as-a-service platform
 
+> **Newer:** the work of 10 October 2026 (the Assistant's repairs and guards, the Assistant check, the green
+> full check, the nightly fix) is in [`docs/plans/2026-10-10-session-handover.md`](docs/plans/2026-10-10-session-handover.md).
+> The branch is now `main` and is pushed to GitHub; this file is as of 26 September.
+
 **As of 2026-09-26.** For whoever runs, builds on or evaluates this platform next. It lists
 **everything that has been planned**: what is delivered (built, tested, deployed and checked live,
 with the commit that did it), what is in progress, and what is not delivered and why.
