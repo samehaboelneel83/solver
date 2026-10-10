@@ -1,6 +1,6 @@
 """Does the Assistant build a described problem first time?
 
-    python -m bench.assistant [--case NAME] [--out PATH] [--nudges N]
+    python -m bench.assistant [--case NAME] [--runs N] [--out PATH] [--nudges N]
 
 Each case is one message a person would write (`bench/assistant_cases/<name>.txt`) and the goal value the right
 model reaches. The case is sent to the running platform's Assistant as the admin user, in "describe a problem"
@@ -145,8 +145,22 @@ def run_case(name: str, base: str, headers: dict[str, str], nudges: int, stamp: 
 
 def report_md(day: str, model: str, rows: list[dict[str, Any]]) -> str:
     first = sum(1 for r in rows if r["first_time"] and r["right"])
+    wrong = sum(1 for r in rows if r["built"] and not r["right"])
     lines = [f"# The Assistant, building described problems -- {day}", "",
-             f"Language model: {model}. {first} of {len(rows)} cases built first time with the right goal.", "",
+             f"Language model: {model}. {first} of {len(rows)} runs built first time with the right goal; "
+             f"{wrong} built a model that did not reach it.", ""]
+    names = list(dict.fromkeys(r["case"] for r in rows))
+    if len(rows) > len(names):
+        # The language model's answers vary from run to run, so a case is its share of runs, not one of them.
+        lines += ["| case | runs | first time, right goal | built wrong | not built | median seconds |", "|---|---|---|---|---|---|"]
+        for name in names:
+            mine = [r for r in rows if r["case"] == name]
+            seconds = sorted(r["seconds"] for r in mine)
+            lines.append(f"| {name} | {len(mine)} | {sum(1 for r in mine if r['first_time'] and r['right'])} "
+                         f"| {sum(1 for r in mine if r['built'] and not r['right'])} "
+                         f"| {sum(1 for r in mine if not r['built'])} | {seconds[len(seconds) // 2]} |")
+        lines.append("")
+    lines += [
              '| case | built | first time | right goal | goal | "continue" | stops | corrections | turns | seconds |',
              "|---|---|---|---|---|---|---|---|---|---|"]
     for r in rows:
@@ -163,6 +177,7 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(prog="python -m bench.assistant")
     parser.add_argument("--case", action="append", help="a case by name (default: all)")
+    parser.add_argument("--runs", type=int, default=1, help="how many times to run each case (default 1)")
     parser.add_argument("--nudges", type=int, default=3, help='how many times to answer "continue" (default 3)')
     parser.add_argument("--base", default="http://localhost:8000")
     parser.add_argument("--out", default=None, help="report path (default: bench/results/<day>-assistant.md)")
@@ -175,10 +190,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     stamp = time.strftime("%m%d-%H%M")
     rows = []
-    for name in names:
-        row = run_case(name, args.base, headers, args.nudges, stamp)
-        rows.append(row)
-        print(json.dumps({k: v for k, v in row.items() if k != "why"}), flush=True)
+    for attempt in range(1, max(1, args.runs) + 1):
+        for name in names:
+            row = run_case(name, args.base, headers, args.nudges, f"{stamp}-{attempt}")
+            rows.append(row)
+            print(json.dumps({k: v for k, v in row.items() if k != "why"}), flush=True)
     day = date.today().isoformat()
     out = Path(args.out) if args.out else Path(__file__).parent / "results" / f"{day}-assistant.md"
     out.parent.mkdir(parents=True, exist_ok=True)
