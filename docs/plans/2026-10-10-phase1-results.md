@@ -117,3 +117,15 @@ The shape check fired on an earlier draft (an unused decision), which used its o
 model it stayed silent: `pick` never helps, but the dependency rules (`pick[CTL004] <= pick[CTL006]`) make
 some `pick` cells look as if they loosen a rule. **Fix list:** the check must follow such a chain — a cell
 helps only if the room it gives is used by a cell that helps.
+
+## #7 Smart-grid energy scheduling
+
+| Case | Built first time | Minutes | Goal | Reference | Checker | Status | Report |
+|---|---|---|---|---|---|---|---|
+| S (24 hours, 2 generators, typed) | **no** — stopped, then 1 "continue", nothing built | 20 | — | 26,803.94 | — | — | — |
+
+**S — not built.** After 15 minutes the Assistant stopped with "there is no parameter called 'demand' in this
+problem's domain": its model read `demand` as a parameter while the data put demand on the hour records as a
+field, and three attempts did not reconcile them. The harness's one "continue" did not get it built either.
+The time-indexed parts (battery level carried hour to hour, start-up when a generator turns on) were never
+reached, so the owner's "important test" for #7 is still open.
