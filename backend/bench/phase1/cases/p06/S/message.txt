@@ -1,0 +1,50 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Exam timetable". Schedule 8 exams into 4 rooms over 2 days (2 slots a day).
+
+Exams (students, instructor, whether it needs a hall):
+id,students,instructor,needs_hall
+EX001,22,INS02,no
+EX002,57,INS01,no
+EX003,57,INS02,no
+EX004,70,INS01,yes
+EX005,107,INS02,yes
+EX006,28,INS01,no
+EX007,28,INS02,no
+EX008,29,INS01,no
+
+Rooms:
+id,capacity,hall
+R01,155,yes
+R02,37,no
+R03,66,no
+R04,36,no
+
+Slots (day and position in the day; order runs through the week):
+id,day,position_in_day,order
+D1S1,1,1,1
+D1S2,1,2,2
+D2S1,2,1,3
+D2S2,2,2,4
+
+Exams that share students (how many):
+exam_a,exam_b,students
+EX001,EX002,23
+EX001,EX003,1
+EX001,EX004,21
+EX001,EX008,5
+EX002,EX004,21
+EX002,EX008,8
+EX003,EX005,9
+EX003,EX006,16
+EX003,EX007,14
+EX004,EX008,11
+EX005,EX006,24
+EX005,EX007,24
+EX006,EX007,14
+
+Instructor unavailability:
+instructor,slot
+INS01,D1S2
+
+Rules (never broken): every exam is held once, in one room and one slot. Two exams that share students are never in the same slot. A room holds at most one exam per slot. An exam's students fit in its room's capacity. An exam with needs_hall = yes is held in a room with hall = yes. An exam is never in a slot its instructor is unavailable. Goal, as small as possible: 10 for every student who sits two exams in consecutive slots of the same day (the shared students of the two exams), plus 1 for every empty seat (room capacity minus the exam's students), plus 20 for each exam the busiest day has more than the quietest day. Report the timetable, the conflict count and a check that every rule holds, room utilization, students with consecutive exams, and alternative timetables ranked by this score.
+
+Everything you need is here: please propose the model without further questions, then solve it.

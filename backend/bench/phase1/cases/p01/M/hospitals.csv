@@ -1,0 +1,4 @@
+id,nurses,doctors,beds,reserve_nurses,reserve_beds
+H01,127,42,85,8,8
+H02,97,32,65,6,6
+H03,161,53,107,10,10

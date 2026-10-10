@@ -1,0 +1,36 @@
+{
+  "problem": "p01",
+  "size": "S",
+  "kind": "exact",
+  "goal": 83.0,
+  "known_feasible": 83.0,
+  "bound": 83.0,
+  "sense": "maximize",
+  "report": [
+    [
+      "allocation per department",
+      "(nurses?|doctors?|beds?)[^\\n]{0,80}\\d"
+    ],
+    [
+      "patients per department",
+      "(EMERGENCY|ICU|SURGERY|GENERAL)[^\\n]{0,60}\\d"
+    ],
+    [
+      "total patients",
+      "83"
+    ],
+    [
+      "resource utilization",
+      "utili[sz]|used|% of"
+    ],
+    [
+      "binding limits and unused resources",
+      "\\bbind|tight|unused|left over|spare|slack"
+    ],
+    [
+      "alternative allocations",
+      "alternative|other allocation"
+    ]
+  ],
+  "files": []
+}

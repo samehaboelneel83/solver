@@ -1,0 +1,39 @@
+{
+  "problem": "p01",
+  "size": "L",
+  "kind": "exact",
+  "goal": 1264.0,
+  "known_feasible": 1264.0,
+  "bound": 1264.0,
+  "sense": "maximize",
+  "report": [
+    [
+      "allocation per department",
+      "(nurses?|doctors?|beds?)[^\\n]{0,80}\\d"
+    ],
+    [
+      "patients per department",
+      "(EMERGENCY|ICU|SURGERY|GENERAL)[^\\n]{0,60}\\d"
+    ],
+    [
+      "total patients",
+      "1,?264"
+    ],
+    [
+      "resource utilization",
+      "utili[sz]|used|% of"
+    ],
+    [
+      "binding limits and unused resources",
+      "\\bbind|tight|unused|left over|spare|slack"
+    ],
+    [
+      "alternative allocations",
+      "alternative|other allocation"
+    ]
+  ],
+  "files": [
+    "hospitals.csv",
+    "departments.csv"
+  ]
+}

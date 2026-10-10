@@ -131,7 +131,14 @@ try {
       await page.getByText("More run options").click();
       await page.getByLabel(/Other plans/).fill("3");
       await page.getByLabel(/within \(% of the best\)/).fill("10");
-      await page.getByRole("button", { name: /^Solve/ }).first().click();
+      // Its own button, offered only when the model has yes/no or bounded whole-number decisions.
+      const altButton = page.getByRole("button", { name: /alternative plans/ });
+      if (!(await altButton.isVisible().catch(() => false))) {
+        result.alternatives_offered = false;
+        throw new Error("no 'Solve, with N alternative plans' button: the platform does not offer alternatives for this model");
+      }
+      result.alternatives_offered = true;
+      await altButton.click();
       log("asked for 3 other plans within 10%");
       let alt = null;
       for (let i = 0; i < 120; i += 1) {

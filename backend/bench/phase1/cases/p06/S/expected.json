@@ -1,0 +1,32 @@
+{
+  "problem": "p06",
+  "size": "S",
+  "kind": "exact",
+  "goal": 680.0,
+  "known_feasible": 680.0,
+  "bound": 680.0,
+  "sense": "minimize",
+  "report": [
+    [
+      "timetable (exam, room, slot)",
+      "EX\\d{3}.{0,40}R\\d\\d.{0,40}D\\dS\\d"
+    ],
+    [
+      "conflict count / rules hold",
+      "conflict|clash|every rule (holds|is met)|no student"
+    ],
+    [
+      "room utilization",
+      "utili[sz]|empty seats?|seats? (used|wasted)"
+    ],
+    [
+      "consecutive exams",
+      "consecutive|back-to-back"
+    ],
+    [
+      "alternative timetables",
+      "alternative|other timetable"
+    ]
+  ],
+  "files": []
+}

@@ -1,0 +1,7 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Resource allocation". 15 military hospitals must each allocate their nurses, doctors and beds to their four departments, with one supply budget for all.
+
+The data are in the attached files: hospitals.csv (staff, beds and reserves per hospital) and departments.csv.
+
+Rules: in each department the patients treated are at most its nurses times patients per nurse, at most its doctors times patients per doctor, and at most its demand; its beds are at least patients times beds per patient; it has at least its minimum nurses and minimum doctors. In each hospital, the nurses given to its departments are at most its nurses minus its reserve nurses, the doctors at most its doctors, and the beds at most its beds minus its reserve beds (the reserve is kept free for emergencies). Supplies cost the department's supply cost per patient, and all supplies together cost at most 2,246,155 EGP. Nurses, doctors, beds and patients are whole numbers. Goal: the most patients treated in total. Report the allocation of nurses, doctors, beds and supplies per department, patients per department and in total, resource utilization, which limits bind and what is left unused, and other allocations that treat as many patients.
+
+Everything you need is here: please propose the model without further questions, then solve it.

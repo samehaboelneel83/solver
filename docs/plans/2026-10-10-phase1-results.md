@@ -9,6 +9,20 @@ against an independent reference and an independent checker of every hard rule. 
 | Case | Built first time | Minutes | Goal | Reference | Checker | Status / gap | Verified by platform | Alternatives | Report |
 |---|---|---|---|---|---|---|---|---|---|
 | S (3 × 8, typed) | yes, 2 corrections | 3.9 | 14,709 | 16,249 | **2 violations** | optimal / 0 | accepted | not run (harness) | 5 of 6 |
+| M (5 × 30, 4 files) | **no** — stopped after 20 min | 20 | — | 90,677 | — | — | — | — | — |
+| L (15 × 300, 4 files) | yes, 4 corrections | 12.2 | 465,436 | 491,268 | **42 violations** | optimal / 0 | accepted | not offered | 5 of 6 |
+
+**L — wrong again, a different way.** Built first time in 12 minutes, solved by SCIP in 2.3 s (4,500
+decisions, 9,330 rows), "proven optimal" at 465,436, 5% below the true 491,268. It ships on 42 closed routes.
+The plan said "is_open is 1 if yes, 0 otherwise" and its rule `ship <= 119 x is_open` was right, but all 4,500
+route rows were stored with is_open = 1: the Assistant loaded every row with a fixed value and no filter,
+although the file marks 677 routes closed. The plan card describes the intent, not the stored data, so a
+careful reader could not have seen this one. The approved-warehouse rule was loaded correctly this time.
+
+**Alternatives were never offered for #2.** The run page's "Solve, with N alternative plans" button appears
+only when the model has yes/no decisions or whole numbers with an upper bound. Shipments are unbounded whole
+numbers, so the platform has no way to show other plans for a transportation problem. (The harness first
+pressed the plain Solve button; it now uses the right one and records when it is missing.)
 
 **S — a wrong answer that looked right.** "Proven optimal" at 14,709, 9% below the true least cost of 16,249,
 because it breaks a rule: customer C004 may be served only from W03, and the plan serves it from W01 (15)
@@ -16,6 +30,27 @@ and W02 (30). The Assistant's plan *said* the approved-routes link excluded thos
 did not. The platform verified the answer against the model as built, so it accepted it. Only the
 independent checker caught it. The plan card's trial line did list "W01 · C004 = 15", so a careful reader
 could have seen it. This is the gap phase 3's "account for every number" check is for.
+
+**M — not built: a yes/no column.** `routes.csv` marks each route `open` as `yes` or `no`, as any real file
+would. The Assistant loaded those words as values of a number parameter and was refused "a number is
+required" three times, then stopped. The file loader can keep only the rows where `open = yes` (a `where`
+filter), which would have been enough, but cannot turn yes/no into 1/0; the Assistant used neither and
+nothing told it about the filter. It also needed four turns to get the routes' keys right
+(`warehouse-customer`, then `route`, neither a column). One turn ran to the length limit, another took so
+long it was stopped. Twenty minutes, nothing built.
+
+**#2 on the eight-point checklist**
+
+| Checklist item | Result |
+|---|---|
+| Model construction | 2 of 3 built first time (S, L); M not built (yes/no column) |
+| Model inspection | Yes: the plan card's read-back lists every rule; the model is editable in the Model editor |
+| Feasibility | **0 of 3.** Both built models break hard rules (approved warehouses, closed routes) |
+| Optimality | Status, goal, bound and gap 0 reported each time — but optimal for the wrong model |
+| Independent verification | The platform verifies against the model as built, so it accepted both wrong plans; only the external checker caught them |
+| Alternatives | Not offered for this model type |
+| Performance | Recorded: compile 0.3 s, solve 2.3 s, verify 0.05 s at 4,500 decisions; the Assistant took 4–20 minutes |
+| Explainability | Binding rules ("c_stock tight") and the goal's breakdown shown; 5 of 6 report items in the answer |
 
 Other observations:
 - The total cost in the Assistant's final answer was not matched to the reference (it reported its own

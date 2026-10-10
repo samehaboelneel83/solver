@@ -1,0 +1,9 @@
+id,students,instructor,needs_hall
+EX001,22,INS02,no
+EX002,57,INS01,no
+EX003,57,INS02,no
+EX004,70,INS01,yes
+EX005,107,INS02,yes
+EX006,28,INS01,no
+EX007,28,INS02,no
+EX008,29,INS01,no

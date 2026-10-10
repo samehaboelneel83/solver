@@ -1,0 +1,7 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Exam timetable". Schedule 40 exams into 10 rooms over 5 days (3 slots a day).
+
+The data are in the attached files: exams.csv, rooms.csv, slots.csv, shared_students.csv (pairs of exams with students in common, and how many), unavailable.csv (slots an instructor cannot do).
+
+Rules (never broken): every exam is held once, in one room and one slot. Two exams that share students are never in the same slot. A room holds at most one exam per slot. An exam's students fit in its room's capacity. An exam with needs_hall = yes is held in a room with hall = yes. An exam is never in a slot its instructor is unavailable. Goal, as small as possible: 10 for every student who sits two exams in consecutive slots of the same day (the shared students of the two exams), plus 1 for every empty seat (room capacity minus the exam's students), plus 20 for each exam the busiest day has more than the quietest day. Report the timetable, the conflict count and a check that every rule holds, room utilization, students with consecutive exams, and alternative timetables ranked by this score.
+
+Everything you need is here: please propose the model without further questions, then solve it.
