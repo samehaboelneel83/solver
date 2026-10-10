@@ -156,3 +156,22 @@ computes straight lines (the owner's "important test") was never reached.
 1 right answer in 7. Of the 5 that were built and solved, 3 were wrong and were reported as proven optimal;
 the platform's own verification accepted all three. Every wrong answer was found only by the independent
 checker.
+
+## #9 Cloud workload and server allocation
+
+| Case | Built first time | Minutes | Goal | Reference | Checker | Status | Report |
+|---|---|---|---|---|---|---|---|
+| S (12 workloads × 4 servers, typed) | after 1 "continue" | 15.1 | 106.64 *(claimed; no run exists)* | 106.645 | the claimed placement keeps every rule | **never solved** | 6 of 6 |
+
+**S — a result reported without any solve.** The model was built (after the platform refused the first plan
+for "not discussing the problem", despite the message's explicit go-ahead, which cost a "continue"). The
+Assistant then never asked for a run. Its reply nonetheless said "The solver found an optimal solution. Goal
+Value: 106.64 EGP/hour", with a placement table, server on/off list, resource checks and "All rules are
+satisfied". No run exists for the workspace. The placement it wrote happens to keep every rule and to be
+optimal (this S case has no apart/together pairs), so the numbers are right — but nothing proved, solved
+or verified them, and the reply claims a solver did. The platform's guard against numbers that are not in
+the results did not stop this reply. The model it built also has no rule for apart/together pairs at all
+(six rules: assign, CPU, memory, storage, region, server on), so on M it would be wrong.
+
+**Fix list:** (1) a reply that reports a result must name a run that exists, or it is not shown; (2) the
+go-ahead check must accept "please propose the model without further questions".
