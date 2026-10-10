@@ -54,6 +54,17 @@ def objective_breakdown(ir: dict[str, Any], compiled: Compiled, assignments: dic
                 continue
             count(a, coeff * number(x) * number(y))
         cells = sorted(((k, v) for k, v in by_cell.items() if v != 0), key=lambda kv: (-abs(kv[1]), str(kv[0])))
+        # And by decision, over every cell: one goal term is often several costs -- changeovers, holding,
+        # overtime (the production-planning trace: with 54 cells, more than are kept, the Assistant split the
+        # total itself and reported holding as 0 where it was 16,440).
+        by_var: dict[str, Decimal] = {}
+        for (name, _index), v in by_cell.items():
+            by_var[name] = by_var.get(name, Decimal(0)) + v
+        for (a, b), coeff in square.items():
+            x, y = assignments.get(a), assignments.get(b)
+            if x is not None and y is not None and coeff * number(x) * number(y) != 0:
+                key = f"{a[0]} x {b[0]}"
+                by_var[key] = by_var.get(key, Decimal(0)) + coeff * number(x) * number(y)
         ranked = sorted(by_record.items(), key=lambda kv: -abs(kv[1]))
         rest = sum((v for _, v in ranked[top:]), Decimal(0))
         terms.append({
@@ -62,6 +73,8 @@ def objective_breakdown(ir: dict[str, Any], compiled: Compiled, assignments: dic
             **({"rest": {"records": len(ranked) - top, "value": float(rest)}} if len(ranked) > top else {}),
             "cells": [{"var": n, "index": [str(i) for i in ix], "value": float(v)} for (n, ix), v in cells[:CELLS]],
             "cell_count": len(cells),
+            "decisions": [{"var": n, "value": float(v)} for n, v in sorted(by_var.items(), key=lambda kv: -abs(kv[1]))
+                          if v != 0],
         })
     penalties = float(compiled.penalty_objective.evaluated_at(assignments)) if compiled.penalty_objective.coeffs else 0.0
     whole = sum(abs(t["contribution"]) for t in terms) + abs(penalties)

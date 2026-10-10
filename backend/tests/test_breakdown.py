@@ -100,3 +100,24 @@ def test_a_product_of_decisions_counts_in_its_term_and_goals_in_order_have_no_sh
     assert sum(t["contribution"] for t in made["terms"]) == 3 * 7 - 11
     lex = {**ir, "objective": {**ir["objective"], "mode": "lex", "terms": ir["objective"]["terms"][:1]}}
     assert all(t["share"] is None for t in objective_breakdown(lex, compile_model(lex, data), at)["terms"])
+
+
+def test_one_goal_term_is_split_by_decision_over_every_cell():
+    """The production-planning trace: one goal term of changeovers, holding and overtime, 54 cells -- more than are
+    kept -- and the Assistant split the total itself, wrongly. The parts by decision are exact, over every cell."""
+    I = [{"index": "i", "set": "item"}]
+    ir = {"version": 2, "sets": ["item"], "parameters": {},
+          "variables": {"open": {"index": ["item"], "domain": "binary"},
+                        "keep": {"index": ["item"], "domain": "continuous", "lower": 0, "upper": 10}},
+          "constraints": [],
+          "objective": {"sense": "minimize", "terms": [{"id": "o_cost", "weight": 1, "expression": {"add": [
+              {"sum": {"mul": [{"const": 2}, {"var": "open", "index": ["i"]}]}, "over": I},
+              {"sum": {"mul": [{"const": 3}, {"var": "keep", "index": ["i"]}]}, "over": I}]}}]}}
+    data = {"sets": {"item": [{"id": f"i{k}"} for k in range(30)]}, "parameters": {}, "parameter_defaults": {},
+            "relationships": {}}
+    compiled = compile_model(ir, data)
+    values = {k: 1 for k in compiled.variables}
+    made = objective_breakdown(ir, compiled, values)
+    (term,) = made["terms"]
+    assert term["cell_count"] == 60 and len(term["cells"]) < 60
+    assert term["decisions"] == [{"var": "keep", "value": 90.0}, {"var": "open", "value": 60.0}]

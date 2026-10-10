@@ -43,3 +43,13 @@ it("shows goals solved in order by their place, with no share of one sum (benchm
   expect(screen.getByRole("row", { name: /cost/ })).toHaveTextContent("2nd");
   expect(screen.getByRole("row", { name: /cost/ })).not.toHaveTextContent("×");
 });
+
+it("splits one goal term by decision (the production-planning trace)", () => {
+  render(<GoalBreakdown breakdown={{ sense: "minimize", mode: "weighted", terms: [
+    { id: "o_cost", weight: 1, value: 116235, contribution: 116235, share: 1,
+      records: [{ kind: "product", key: "MG1L", value: 21760 }, { kind: "product", key: "OJ1L", value: 19410 }],
+      decisions: [{ var: "setup", value: 88500 }, { var: "stock", value: 16440 }, { var: "overtime", value: 11295 }] },
+  ] }} />);
+  expect(screen.getByLabelText("o cost by decision")).toHaveTextContent(
+    `setup ${(88500).toLocaleString()} · stock ${(16440).toLocaleString()} · overtime ${(11295).toLocaleString()}`);
+});
