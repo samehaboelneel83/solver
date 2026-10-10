@@ -1,0 +1,36 @@
+{
+  "problem": "h03",
+  "size": "M",
+  "kind": "exact",
+  "goal": 80157.0,
+  "known_feasible": 80157.0,
+  "bound": 80157.0,
+  "sense": "minimize",
+  "report": [
+    [
+      "flow per link",
+      "(TW\\d+|HUB\\d\\d|L\\d{3})[^\\n]{0,60}\\d"
+    ],
+    [
+      "total cost",
+      "(80,?157)"
+    ],
+    [
+      "hub loads",
+      "HUB\\d\\d[^\\n]{0,80}(%|capacity|load|utili)"
+    ],
+    [
+      "core intake",
+      "CORE\\d"
+    ],
+    [
+      "full links",
+      "\\bfull|saturat|at capacity|bottleneck|congest|binding"
+    ]
+  ],
+  "files": [
+    "nodes.csv",
+    "links.csv"
+  ],
+  "seed": 3
+}

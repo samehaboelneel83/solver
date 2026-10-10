@@ -1,0 +1,44 @@
+{
+  "problem": "h01",
+  "size": "M",
+  "kind": "exact",
+  "goal": 90868731.54769,
+  "known_feasible": 90868731.54769,
+  "bound": 90868731.54769,
+  "sense": "maximize",
+  "report": [
+    [
+      "hectares per field and crop",
+      "F\\d\\d[^\\n]{0,60}(WHEAT|MAIZE|COTTON|CLOVER|TOMATO|POTATO|SUGARBEET|FABA)|(WHEAT|MAIZE|COTTON|CLOVER|TOMATO|POTATO|SUGARBEET|FABA)[^\\n]{0,60}F\\d\\d"
+    ],
+    [
+      "total profit",
+      "(90,?868,?731|90,?868,?732)"
+    ],
+    [
+      "production per crop",
+      "\\bton"
+    ],
+    [
+      "water per district",
+      "water[^\\n]{0,80}(D\\d|district)|(D\\d|district)[^\\n]{0,80}water"
+    ],
+    [
+      "labour per month",
+      "labou?r|hours"
+    ],
+    [
+      "binding limits",
+      "\\bbind|tight|bottleneck|limiting|shadow"
+    ]
+  ],
+  "files": [
+    "fields.csv",
+    "districts.csv",
+    "crops.csv",
+    "yields.csv",
+    "labour.csv",
+    "months.csv"
+  ],
+  "seed": 1
+}

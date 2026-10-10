@@ -1,0 +1,62 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Term timetable". Our college must give each of 8 courses next term a teacher and a weekly time slot (one of 4 slots; each course meets once a week in its slot).
+
+Courses:
+course,cohort,room_type,weekly_hours
+CRS01,Y1A,lecture,2
+CRS02,Y1B,lab,3
+CRS03,Y1A,lecture,4
+CRS04,Y1B,lecture,3
+CRS05,Y1A,lab,2
+CRS06,Y1B,lecture,3
+CRS07,Y1A,lab,2
+CRS08,Y1B,lecture,2
+
+Teachers:
+teacher,max_weekly_hours
+T01,7
+T02,8
+T03,8
+T04,8
+
+Who may teach what (preference 1 = dislikes, 5 = loves):
+teacher,course,preference
+T01,CRS01,2
+T01,CRS02,3
+T01,CRS05,2
+T01,CRS06,5
+T01,CRS07,4
+T01,CRS08,3
+T02,CRS04,2
+T02,CRS05,1
+T02,CRS06,1
+T02,CRS08,2
+T03,CRS01,4
+T03,CRS02,4
+T03,CRS03,2
+T03,CRS06,5
+T03,CRS07,3
+T03,CRS08,3
+T04,CRS03,2
+T04,CRS04,2
+T04,CRS07,1
+
+Slots:
+slot,late
+MON-AM,no
+MON-EVE,yes
+TUE-AM,no
+TUE-EVE,yes
+
+Teacher not available in a slot:
+teacher,slot
+T01,TUE-EVE
+T03,MON-EVE
+
+Rooms of each type available in every slot:
+room_type,rooms_per_slot
+lab,1
+lecture,2
+
+Rules (all hard): every course gets exactly one teacher, who must be qualified for it (listed in the qualifications), and exactly one slot. A teacher's courses add up to at most the teacher's maximum weekly hours (a course counts its weekly hours). A teacher teaches at most one course in a slot and nothing in a slot where the teacher is unavailable. Two courses of the same cohort are never in the same slot. In every slot, the courses needing a room type are at most the rooms of that type. Goal: the largest score = the sum of the preferences of the chosen teacher-course pairs minus 2 points for every course placed in a late slot. Report the teacher and the slot of every course, the total score, each teacher's weekly hours, the courses in late slots, and the rooms used per slot.
+
+Everything you need is here: please propose the model without further questions, then solve it.

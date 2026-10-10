@@ -1,0 +1,32 @@
+{
+  "problem": "h09",
+  "size": "S",
+  "kind": "exact",
+  "goal": 215360.0,
+  "known_feasible": 215360.0,
+  "bound": 215360.0,
+  "sense": "minimize",
+  "report": [
+    [
+      "type per flight",
+      "FL\\d{3}\\W+.{0,40}(ATR72|A220|A320|B737M|A321|B787)"
+    ],
+    [
+      "total cost",
+      "215,?360"
+    ],
+    [
+      "operating cost and lost revenue",
+      "lost revenue|spill|turned away"
+    ],
+    [
+      "passengers turned away",
+      "(passengers?|pax)[^\\n]{0,40}(turned away|spill|lost)|(turned away|spill)[^\\n]{0,40}\\d"
+    ],
+    [
+      "block hours per type",
+      "block[- ]hours?"
+    ]
+  ],
+  "files": []
+}

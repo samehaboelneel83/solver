@@ -1,0 +1,62 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Winter crop plan". Our farm company has 4 fields in 2 irrigation districts and must decide how many hectares of each crop to plant on each field this winter season (NOV, DEC, JAN).
+
+Fields:
+field,district,hectares
+F01,D1,72
+F02,D2,81
+F03,D2,28
+F04,D2,100
+
+Water quota per district for the season:
+district,water_quota_m3
+D1,337000
+D2,978000
+
+Crops (min_tons is our contract minimum, max_tons what the market takes):
+crop,legume,price_egp_per_ton,cost_egp_per_ha,water_m3_per_ha,min_tons,max_tons
+WHEAT,no,11000,26000,5500,114,548
+MAIZE,no,9000,30000,7000,0,674
+COTTON,no,30000,48000,8500,53,253
+CLOVER,yes,1600,16000,7500,0,2108
+
+Yields (only these field-crop pairs are possible):
+field,crop,tons_per_ha
+F01,WHEAT,6.1
+F01,MAIZE,8.1
+F01,COTTON,3.3
+F01,CLOVER,22.3
+F02,WHEAT,6.3
+F02,MAIZE,9.3
+F02,COTTON,3.0
+F02,CLOVER,28.1
+F03,COTTON,3.3
+F03,CLOVER,25.7
+F04,WHEAT,6.0
+F04,MAIZE,7.5
+F04,COTTON,2.5
+F04,CLOVER,23.1
+
+Labour hours per hectare per month:
+crop,month,hours_per_ha
+WHEAT,NOV,34
+WHEAT,DEC,5
+WHEAT,JAN,39
+MAIZE,NOV,26
+MAIZE,DEC,28
+MAIZE,JAN,26
+COTTON,NOV,28
+COTTON,DEC,36
+COTTON,JAN,23
+CLOVER,NOV,30
+CLOVER,DEC,35
+CLOVER,JAN,31
+
+Labour hours available per month:
+month,hours_available
+NOV,5400
+DEC,4700
+JAN,5400
+
+Rules (all hard): hectares are planted only on the field-crop pairs in the yields list, may be fractional, and the hectares planted on a field are at most its size (part of a field may stay fallow). Water: the hectares in a district times each crop's water need are at most the district's quota. Labour: in every month, hectares times the crop's hours per hectare for that month, over all fields, are at most the hours available. Production of each crop (hectares times the field's yield) is at least its min_tons and at most its max_tons. Soil rule: legume crops cover at least 15% of the farm's total hectares (all fields together). Goal: the largest total profit = for every field and crop, hectares x (yield x price - cost per hectare). Report the hectares per field and crop, the total profit, the production per crop, water used per district, labour used per month, and which limits are binding.
+
+Everything you need is here: please propose the model without further questions, then solve it.

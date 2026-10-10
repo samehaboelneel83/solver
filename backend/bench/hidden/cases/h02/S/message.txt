@@ -1,0 +1,34 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Capital programme". The investment committee must choose which of 10 candidate projects to fund over the next 3 years. Amounts are in thousand EGP; each project's NPV is already computed.
+
+Projects (outlay per year if funded):
+project,category,exclusive_group,npv_kegp,outlay_Y1_kegp,outlay_Y2_kegp,outlay_Y3_kegp
+P001,GROWTH,G1,520,0,2400,0
+P002,EFFICIENCY,,430,1650,1650,0
+P003,COMPLIANCE,,330,0,0,2400
+P004,DIGITAL,,370,0,700,0
+P005,GROWTH,,100,0,550,550
+P006,EFFICIENCY,G1,1580,2900,0,0
+P007,EFFICIENCY,,300,0,0,600
+P008,GROWTH,,890,2100,0,0
+P009,EFFICIENCY,G1,970,0,2200,0
+P010,GROWTH,,2080,0,1800,1800
+
+Capital budget per year:
+year,budget_kegp
+Y1,3100
+Y2,4200
+Y3,2500
+
+Dependencies (a project may be funded only if the project it requires is funded too):
+project,requires
+P010,P005
+P009,P001
+
+Minimum number of funded projects per category:
+category,min_projects
+COMPLIANCE,1
+DIGITAL,1
+
+Rules (all hard): a project is either funded in full (all its yearly outlays) or not at all. Budget: money not spent in a year carries over to the following years, but we cannot spend ahead of budget, so for every year the outlays of funded projects from the first year up to that year are at most the budgets from the first year up to that year. Projects sharing an exclusive_group are alternatives: at most one of each group (a blank group means no restriction). A project may be funded only if every project it requires is funded. Each category listed in the minimums has at least that many funded projects. Goal: the largest total NPV of the funded projects. Report the projects funded, the total NPV, spending versus budget in each year, the unspent money carried over, and the projects left out.
+
+Everything you need is here: please propose the model without further questions, then solve it.

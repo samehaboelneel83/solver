@@ -1,0 +1,7 @@
+type,aircraft,seats,cost_per_block_hour,range_km,max_block_hours_per_aircraft
+ATR72,10,70,2200,1500,11
+A220,10,120,3600,5000,12
+A320,8,174,4300,6100,13
+B737M,8,186,4500,6500,13
+A321,8,210,5200,5900,13
+B787,9,290,9800,13000,15

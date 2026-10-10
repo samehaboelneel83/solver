@@ -1,0 +1,34 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Berth plan". Our container terminal must plan which berth each of 6 expected vessels uses and when, on 2 berths.
+
+Vessels:
+vessel,arrival_period,length_m,priority_weight
+V01,6,196,2
+V02,4,166,3
+V03,3,126,3
+V04,8,243,3
+V05,4,245,3
+V06,2,212,3
+
+Berths:
+berth,length_m
+B1,400
+B2,400
+
+Handling time in periods per vessel and berth:
+vessel,berth,periods
+V01,B1,5
+V01,B2,7
+V02,B1,2
+V02,B2,3
+V03,B1,3
+V03,B2,4
+V04,B1,3
+V04,B2,4
+V05,B1,5
+V05,B2,7
+V06,B1,2
+V06,B2,3
+
+The planning horizon is periods 1 to 16 (each period is two hours). Rules (all hard): every vessel is berthed exactly once, at one berth, and stays there for the whole handling time given for that vessel at that berth (the handling time differs by berth because the berths have different cranes). A vessel can only use a berth at least as long as the vessel; a vessel-berth pair missing from the handling table is not allowed. A vessel cannot start before its arrival period. A vessel starting in period s with a handling time of h periods occupies the berth in periods s to s+h-1, and must finish by period 16. A berth serves at most one vessel in any period. The time in port of a vessel is s + h - arrival period (waiting plus handling). Goal, as small as possible: the sum over vessels of priority weight times time in port (in periods). Report the berth and start period of each vessel, each vessel's waiting time, the total weighted time in port, berth utilisation, and which vessels wait the longest.
+
+Everything you need is here: please propose the model without further questions, then solve it.

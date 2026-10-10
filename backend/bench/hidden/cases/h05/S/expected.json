@@ -1,0 +1,37 @@
+{
+  "problem": "h05",
+  "size": "S",
+  "kind": "exact",
+  "goal": 30000.0,
+  "known_feasible": 30000.0,
+  "bound": 30000.0,
+  "sense": "minimize",
+  "report": [
+    [
+      "start week per activity",
+      "A\\d\\d[^\\n]{0,60}W\\d\\d"
+    ],
+    [
+      "total cost",
+      "(30,?000)"
+    ],
+    [
+      "finish week",
+      "finish|complet"
+    ],
+    [
+      "extra crews",
+      "extra crew|hire"
+    ],
+    [
+      "lateness",
+      "\\blate|delay|penalt"
+    ],
+    [
+      "critical activities",
+      "critical"
+    ]
+  ],
+  "files": [],
+  "seed": 5
+}

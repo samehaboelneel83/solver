@@ -1,0 +1,32 @@
+{
+  "problem": "h10",
+  "size": "S",
+  "kind": "exact",
+  "goal": 77.0,
+  "known_feasible": 77.0,
+  "bound": 77.0,
+  "sense": "minimize",
+  "report": [
+    [
+      "berth and start per vessel",
+      "V\\d\\d\\W+.{0,40}B\\d"
+    ],
+    [
+      "total weighted time in port",
+      "\\b77\\b"
+    ],
+    [
+      "waiting time",
+      "wait"
+    ],
+    [
+      "berth utilisation",
+      "utili[sz]|occup|busy"
+    ],
+    [
+      "longest waits",
+      "longest|most (waiting|delay)"
+    ]
+  ],
+  "files": []
+}

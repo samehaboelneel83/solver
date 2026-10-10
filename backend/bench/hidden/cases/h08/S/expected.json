@@ -1,0 +1,33 @@
+{
+  "problem": "h08",
+  "size": "S",
+  "kind": "exact",
+  "goal": 1782.0,
+  "known_feasible": 1782.0,
+  "bound": 1782.0,
+  "sense": "maximize",
+  "report": [
+    [
+      "shelf and facings per product",
+      "SKU\\d{3}[^\\n]{0,60}SH\\d\\d|SH\\d\\d[^\\n]{0,60}SKU\\d{3}"
+    ],
+    [
+      "total weekly margin",
+      "(1,?782)"
+    ],
+    [
+      "units sold",
+      "units|sold|sales"
+    ],
+    [
+      "shelf width used",
+      "\\bcm\\b|width"
+    ],
+    [
+      "products left out",
+      "left out|not (listed|stocked|placed)|delist|excluded|dropped"
+    ]
+  ],
+  "files": [],
+  "seed": 8
+}

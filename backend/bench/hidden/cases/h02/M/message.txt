@@ -1,0 +1,7 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Capital programme". The investment committee must choose which of 60 candidate projects to fund over the next 5 years. Amounts are in thousand EGP; each project's NPV is already computed.
+
+The data are in the attached files: projects.csv (category, exclusive group, NPV and the outlay in each year), budgets.csv (capital budget per year), dependencies.csv (a project may be funded only if the project it requires is funded), category_minimums.csv (minimum number of funded projects per category).
+
+Rules (all hard): a project is either funded in full (all its yearly outlays) or not at all. Budget: money not spent in a year carries over to the following years, but we cannot spend ahead of budget, so for every year the outlays of funded projects from the first year up to that year are at most the budgets from the first year up to that year. Projects sharing an exclusive_group are alternatives: at most one of each group (a blank group means no restriction). A project may be funded only if every project it requires is funded. Each category listed in the minimums has at least that many funded projects. Goal: the largest total NPV of the funded projects. Report the projects funded, the total NPV, spending versus budget in each year, the unspent money carried over, and the projects left out.
+
+Everything you need is here: please propose the model without further questions, then solve it.

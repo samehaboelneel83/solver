@@ -1,0 +1,5 @@
+period,discount_factor,mill_minimum_m3,max_harvest_ha
+P1,1.0,8400,164
+P2,0.7835,8400,164
+P3,0.6139,8400,164
+P4,0.481,8400,164

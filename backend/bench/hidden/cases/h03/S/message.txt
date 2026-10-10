@@ -1,0 +1,39 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Backhaul routing". Our mobile network must carry the peak traffic of 6 cell towers through 2 aggregation hubs to 2 core sites over leased microwave and fibre links, at the lowest monthly lease cost.
+
+Nodes (towers with their peak traffic; hubs and core sites with their capacity):
+node,type,traffic_gbps,capacity_gbps
+TW01,tower,4,
+TW02,tower,8,
+TW03,tower,10,
+TW04,tower,10,
+TW05,tower,10,
+TW06,tower,10,
+HUB01,hub,,32
+HUB02,hub,,32
+CORE1,core,,35
+CORE2,core,,30
+
+Links (one direction only, from -> to):
+link,from,to,capacity_gbps,cost_per_gbps
+L001,HUB01,CORE1,24,24
+L002,HUB01,CORE2,24,34
+L003,HUB01,HUB02,17,43
+L004,HUB02,CORE1,27,25
+L005,HUB02,CORE2,29,33
+L006,HUB02,HUB01,16,43
+L007,TW01,HUB01,17,117
+L008,TW01,HUB02,6,140
+L009,TW02,HUB01,9,170
+L010,TW02,HUB02,6,74
+L011,TW03,HUB01,19,169
+L012,TW03,HUB02,15,44
+L013,TW04,HUB01,7,99
+L014,TW04,HUB02,19,39
+L015,TW05,HUB01,9,90
+L016,TW05,HUB02,16,231
+L017,TW06,HUB01,19,69
+L018,TW06,HUB02,6,143
+
+Rules (all hard): traffic moves only along the listed links and only in the from -> to direction; the Gbps on a link are at most its capacity and may be fractional. Every tower sends out exactly its own peak traffic plus whatever it relays for other towers (Gbps leaving a tower minus Gbps entering it = its traffic). A hub keeps nothing: Gbps entering a hub = Gbps leaving it, and the Gbps entering a hub are at most its capacity. All traffic must end at the core sites, and the Gbps entering a core site are at most its capacity. Goal: the lowest total monthly lease cost = for every link, Gbps carried x cost per Gbps. Report the Gbps on each link used, the total cost, the load of each hub against its capacity, the traffic arriving at each core site, and the links that are full.
+
+Everything you need is here: please propose the model without further questions, then solve it.

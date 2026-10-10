@@ -1,0 +1,7 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Shelf plan". For our new convenience-store format we must decide which of 40 products to stock on 6 shelves, on which shelf, and with how many facings.
+
+The data are in the attached files: products.csv (category, width of one facing, weekly units one facing sells on a shelf of visibility 1, weekly demand, margin per unit, whether it must be carried, most facings), shelves.csv (width and visibility factor; eye-level shelves sell more), categories.csv (the most products of each category we may list).
+
+Rules (all hard): a product is placed on at most one shelf, with a whole number of facings, at most its max_facings; a product with must_carry = yes gets at least one facing. On every shelf, the facings times the product widths add up to at most the shelf width. A product is listed if it has at least one facing, and each category has at most its maximum number of listed products. A product sells per week facings x units per facing x the shelf's visibility factor, and to avoid overstock this may not exceed its weekly demand. Goal: the largest weekly margin = for every product, units sold x margin per unit. Report the shelf and facings of every listed product, the total weekly margin, the units sold per product, the width used on each shelf, and the products left out.
+
+Everything you need is here: please propose the model without further questions, then solve it.

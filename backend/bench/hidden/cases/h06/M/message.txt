@@ -1,0 +1,7 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Pre-season clinics". Our football club is planning its pre-season training camp. Guest coaches offer 150 specialist clinics; we must choose which ones to book so the squad gets enough sessions on each of 40 skills.
+
+The data are in the attached files: clinics.csv (coach, fee and length in days of each clinic), clinic_skills.csv (the skills each clinic trains), skills.csv (sessions required per skill), camp.csv (days in the camp and the most clinics one coach may run).
+
+Rules (all hard): a clinic is booked whole or not at all, at most once. Every skill must be trained by at least its required number of booked clinics (a clinic counts once for every skill it trains). Clinics run one after another, so the days of all booked clinics add up to at most the camp days. A coach runs at most the maximum number of clinics per coach. Goal: the lowest total fee of the booked clinics. Report the clinics booked, the total fee, how many booked clinics train each skill against its requirement, the camp days used, and the clinics booked per coach.
+
+Everything you need is here: please propose the model without further questions, then solve it.

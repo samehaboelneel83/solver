@@ -1,0 +1,32 @@
+{
+  "problem": "h15",
+  "size": "S",
+  "kind": "exact",
+  "goal": 1360530.140146,
+  "known_feasible": 1360530.140146,
+  "bound": 1360530.140146,
+  "sense": "maximize",
+  "report": [
+    [
+      "tons per route",
+      "[A-Z_]+-R\\d[^\\n]{0,40}\\d"
+    ],
+    [
+      "tons sold per product",
+      "(ETHYLENE|PROPYLENE|POLYETHYLENE|POLYPROPYLENE)[^\\n]{0,60}\\d"
+    ],
+    [
+      "resource use",
+      "hours|available"
+    ],
+    [
+      "total profit",
+      "1,?360,?5\\d\\d"
+    ],
+    [
+      "limiting resources",
+      "\\bbind|limit|bottleneck|tight"
+    ]
+  ],
+  "files": []
+}

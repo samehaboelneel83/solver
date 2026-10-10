@@ -1,0 +1,13 @@
+establishment,district,mandatory,travel_cost
+E001,D2,no,550
+E002,D3,no,550
+E003,D3,no,350
+E004,D1,no,500
+E005,D2,yes,300
+E006,D2,yes,550
+E007,D2,no,250
+E008,D2,no,150
+E009,D3,no,200
+E010,D1,no,250
+E011,D2,no,550
+E012,D3,no,400

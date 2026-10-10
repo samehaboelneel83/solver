@@ -1,0 +1,48 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Site schedule". We are building a commercial block and must schedule its 7 activities week by week over a 15-week window (W01 to W15), deciding the start week of each activity.
+
+Activities:
+activity,duration_weeks,crews_per_week,uses_crane,earliest_start_week
+A01,3,4,no,W01
+A02,2,3,no,W01
+A03,3,2,yes,W01
+A04,3,2,no,W01
+A05,2,2,no,W01
+A06,1,1,yes,W01
+A07,2,2,yes,W01
+
+Precedence (an activity starts only after its predecessor has finished):
+activity,predecessor
+A02,A01
+A03,A01
+A04,A02
+A05,A02
+A05,A03
+A06,A02
+A06,A04
+A07,A03
+
+Own crews available per week:
+week,crews_available
+W01,4
+W02,4
+W03,4
+W04,4
+W05,4
+W06,3
+W07,4
+W08,4
+W09,4
+W10,4
+W11,4
+W12,4
+W13,4
+W14,3
+W15,4
+
+Project terms:
+target_finish_week,late_penalty_per_week,extra_crew_cost_per_week,max_extra_crews_per_week
+W10,60000,15000,2
+
+Rules (all hard): every activity starts once, in a whole week no earlier than its earliest start week, and then runs without a break for its duration (an activity of 3 weeks starting in W04 runs in W04, W05 and W06) and must end by W15. An activity may start only in a week after all its predecessors have ended (start week >= predecessor's start week + predecessor's duration). In every week, the crews needed by the activities running are at most our own crews available plus the extra crews we hire that week, and we can hire at most the maximum extra crews per week. There is one tower crane: at most one crane activity runs in any week. Goal: the lowest cost = extra crew cost per crew-week x extra crews hired over all weeks + late penalty x the number of weeks the last activity ends after the target finish week (0 if it ends on or before it). Report the start and end week of every activity, the project finish week, the extra crews hired per week, the total cost split into crews and lateness, and the critical activities.
+
+Everything you need is here: please propose the model without further questions, then solve it.

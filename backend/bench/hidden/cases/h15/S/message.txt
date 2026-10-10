@@ -1,0 +1,62 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Plant product mix". Our chemical plant must decide next month's production of 4 products, each made by one or two process routes.
+
+Products (price in USD per ton):
+product,price_per_ton,min_sales_tons,max_sales_tons
+ETHYLENE,1094,0,500
+PROPYLENE,742,0,0
+POLYETHYLENE,1856,300,1100
+POLYPROPYLENE,1740,0,2000
+
+Raw materials (cost in USD per ton):
+raw_material,cost_per_ton,available_tons
+NAPHTHA,458,3600
+ETHANE,309,5600
+NATURAL_GAS,457,6400
+
+Plant units:
+unit,hours_available
+CRACKER,660
+REACTOR,460
+
+Routes (variable cost in USD per ton made):
+route,product,variable_cost_per_ton
+ETHYLENE-R1,ETHYLENE,50
+ETHYLENE-R2,ETHYLENE,30
+PROPYLENE-R1,PROPYLENE,32
+POLYETHYLENE-R1,POLYETHYLENE,29
+POLYPROPYLENE-R1,POLYPROPYLENE,47
+POLYPROPYLENE-R2,POLYPROPYLENE,54
+
+Route inputs (per ton made):
+route,input,tons_per_ton
+ETHYLENE-R1,NATURAL_GAS,0.55
+ETHYLENE-R2,NATURAL_GAS,0.95
+ETHYLENE-R2,NAPHTHA,0.93
+PROPYLENE-R1,NATURAL_GAS,0.65
+POLYETHYLENE-R1,NATURAL_GAS,0.52
+POLYETHYLENE-R1,ETHANE,0.36
+POLYETHYLENE-R1,ETHYLENE,0.75
+POLYPROPYLENE-R1,NATURAL_GAS,0.82
+POLYPROPYLENE-R1,NAPHTHA,0.7
+POLYPROPYLENE-R1,PROPYLENE,0.4
+POLYPROPYLENE-R1,ETHYLENE,0.41
+POLYPROPYLENE-R2,ETHANE,0.89
+POLYPROPYLENE-R2,NATURAL_GAS,0.78
+POLYPROPYLENE-R2,PROPYLENE,0.5
+POLYPROPYLENE-R2,ETHYLENE,0.44
+
+Route hours (per ton made):
+route,unit,hours_per_ton
+ETHYLENE-R1,CRACKER,0.297
+ETHYLENE-R1,REACTOR,0.275
+ETHYLENE-R2,REACTOR,0.175
+PROPYLENE-R1,CRACKER,0.199
+POLYETHYLENE-R1,REACTOR,0.267
+POLYETHYLENE-R1,CRACKER,0.199
+POLYPROPYLENE-R1,REACTOR,0.127
+POLYPROPYLENE-R2,REACTOR,0.282
+POLYPROPYLENE-R2,CRACKER,0.119
+
+Each route makes one product; making one ton on a route consumes the listed inputs (tons of raw material or of another product per ton made) and the listed hours on the plant units. Some products are intermediates that other routes consume. Rules (all hard, quantities in tons, fractions allowed): the net output of a product (tons made on all its routes minus tons consumed as input by other routes) is what we sell, and it must be between the product's min_sales_tons (contracts) and max_sales_tons (the market); nothing can be stored or thrown away. Raw materials used are at most the tons available. Hours used on a unit are at most its hours available this month. Goal, as large as possible, in USD: the profit = sales (net output times price per ton) minus raw material cost (tons used times cost per ton) minus processing cost (tons made on a route times its variable cost per ton). Report the tons made on each route, the tons sold of each product, the raw material and unit hours used against what is available, the total profit, and which units or materials limit the profit.
+
+Everything you need is here: please propose the model without further questions, then solve it.

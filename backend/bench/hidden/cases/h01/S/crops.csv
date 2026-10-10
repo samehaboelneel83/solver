@@ -1,0 +1,5 @@
+crop,legume,price_egp_per_ton,cost_egp_per_ha,water_m3_per_ha,min_tons,max_tons
+WHEAT,no,11000,26000,5500,114,548
+MAIZE,no,9000,30000,7000,0,674
+COTTON,no,30000,48000,8500,53,253
+CLOVER,yes,1600,16000,7500,0,2108

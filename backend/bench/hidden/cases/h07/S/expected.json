@@ -1,0 +1,33 @@
+{
+  "problem": "h07",
+  "size": "S",
+  "kind": "exact",
+  "goal": 32902781.427349,
+  "known_feasible": 32902781.427349,
+  "bound": 32902781.427349,
+  "sense": "maximize",
+  "report": [
+    [
+      "hectares per stand and period",
+      "ST\\d\\d[^\\n]{0,60}P\\d+|P\\d+[^\\n]{0,60}ST\\d\\d"
+    ],
+    [
+      "net present value",
+      "(32,?902,?781)"
+    ],
+    [
+      "volume per period",
+      "m3|m\u00b3|cubic"
+    ],
+    [
+      "old growth kept",
+      "old[- ]growth"
+    ],
+    [
+      "limiting rules",
+      "\\bbind|tight|even[- ]flow|constrain|\\blimit(s|ing)?\\b"
+    ]
+  ],
+  "files": [],
+  "seed": 7
+}

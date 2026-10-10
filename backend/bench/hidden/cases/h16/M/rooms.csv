@@ -1,0 +1,6 @@
+room,capacity,has_av,hire_cost_per_slot
+NILE_HALL,400,yes,3000
+LUXOR,220,yes,1800
+ASWAN,150,no,900
+SIWA,120,yes,1100
+DAHAB,80,no,500

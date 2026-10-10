@@ -1,0 +1,9 @@
+session,speaker,expected_attendance,needs_av
+SES01,SPK01,64,no
+SES02,SPK02,61,no
+SES03,SPK03,80,no
+SES04,SPK04,45,no
+SES05,SPK05,72,yes
+SES06,SPK06,102,yes
+SES07,SPK04,131,no
+SES08,SPK05,45,no

@@ -1,0 +1,5 @@
+product,price_per_ton,min_sales_tons,max_sales_tons
+ETHYLENE,1094,0,500
+PROPYLENE,742,0,0
+POLYETHYLENE,1856,300,1100
+POLYPROPYLENE,1740,0,2000

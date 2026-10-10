@@ -1,0 +1,32 @@
+{
+  "problem": "h14",
+  "size": "S",
+  "kind": "exact",
+  "goal": 105.0,
+  "known_feasible": 105.0,
+  "bound": 105.0,
+  "sense": "maximize",
+  "report": [
+    [
+      "establishments and level",
+      "E\\d{3}\\W+.{0,40}(BASIC|FULL)"
+    ],
+    [
+      "hours per district",
+      "D\\d\\b[^\\n]{0,80}\\d"
+    ],
+    [
+      "total risk reduction",
+      "105"
+    ],
+    [
+      "travel spent",
+      "travel"
+    ],
+    [
+      "uninspected high-risk",
+      "uninspected|not inspected|left out"
+    ]
+  ],
+  "files": []
+}

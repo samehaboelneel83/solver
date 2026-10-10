@@ -1,0 +1,46 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Harvest schedule". Our forestry company must plan the clear-cut harvest of 5 forest stands over the next 4 five-year periods (P1 to P4).
+
+Stands:
+stand,species,hectares,age_years_now
+ST01,PINE,65,95
+ST02,PINE,81,78
+ST03,PINE,34,37
+ST04,BIRCH,126,27
+ST05,BIRCH,105,61
+
+Species:
+species,price_egp_per_m3,harvest_cost_egp_per_ha
+PINE,520,9000
+BIRCH,380,7000
+
+Yield if a stand is harvested in a period (m3 per hectare; a missing pair means the stand is too young then):
+stand,period,m3_per_ha
+ST01,P1,403
+ST01,P2,410
+ST01,P3,417
+ST01,P4,422
+ST02,P1,368
+ST02,P2,380
+ST02,P3,391
+ST02,P4,400
+ST03,P1,172
+ST03,P2,205
+ST03,P3,236
+ST03,P4,265
+ST04,P3,115
+ST04,P4,137
+ST05,P1,206
+ST05,P2,219
+ST05,P3,231
+ST05,P4,241
+
+Periods:
+period,discount_factor,mill_minimum_m3,max_harvest_ha
+P1,1.0,8400,164
+P2,0.7835,8400,164
+P3,0.6139,8400,164
+P4,0.481,8400,164
+
+Rules (all hard): hectares of a stand may be cut in any period listed for it in the yields, in fractional amounts, and over all periods at most the stand's hectares are cut (cut land is replanted and not cut again within the plan). In every period the volume cut (hectares x m3 per hectare) is at least the mill's minimum and the hectares cut are at most the period's maximum. Even flow: the volume of each period is between 85% and 115% of the previous period's volume. Old growth: of the stands aged 80 years or more today, at least 30% of their total hectares is never cut. Goal: the largest net present value = for every stand and period, discount factor x hectares cut x (m3 per hectare x price - harvest cost per hectare). Report the hectares cut per stand and period, the net present value, the volume and area per period, the old-growth area kept, and which rules limit the plan.
+
+Everything you need is here: please propose the model without further questions, then solve it.

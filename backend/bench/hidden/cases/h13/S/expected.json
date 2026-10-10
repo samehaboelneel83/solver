@@ -1,0 +1,36 @@
+{
+  "problem": "h13",
+  "size": "S",
+  "kind": "exact",
+  "goal": 146893.7,
+  "known_feasible": 146893.7,
+  "bound": 146893.7,
+  "sense": "minimize",
+  "report": [
+    [
+      "quantity per supplier and material",
+      "SUP\\d\\W+.{0,40}MAT\\d\\d|MAT\\d\\d\\W+.{0,40}SUP\\d"
+    ],
+    [
+      "suppliers used",
+      "suppliers? used|SUP\\d"
+    ],
+    [
+      "total cost",
+      "146,?8\\d\\d"
+    ],
+    [
+      "order costs",
+      "order cost"
+    ],
+    [
+      "buying above requirement for a discount",
+      "discount|price break"
+    ],
+    [
+      "storage used",
+      "storage|m3|volume"
+    ]
+  ],
+  "files": []
+}

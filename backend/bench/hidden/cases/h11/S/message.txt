@@ -1,0 +1,49 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Water network day plan". Our water utility must plan tomorrow's pumping: how much each source sends through which pipes in each period so the zones get their water at least cost, using the storage tanks as buffers.
+
+Sources:
+source,max_m3_per_period,production_cost_per_m3
+SRC1,596,1.73
+SRC2,654,1.22
+
+Tanks:
+tank,min_m3,max_m3,start_m3
+TANK1,232,1162,581
+
+Pipes:
+from,to,max_m3_per_period,pumping_kwh_per_m3
+SRC1,TANK1,1107,0.39
+SRC1,ZONE2,395,0.55
+SRC1,ZONE1,575,0.65
+SRC2,TANK1,820,0.44
+SRC2,ZONE2,400,0.74
+SRC2,ZONE1,568,0.78
+TANK1,ZONE1,1177,0.0
+TANK1,ZONE2,793,0.0
+
+Periods (tariff in EGP per kWh):
+period,order,tariff_per_kwh
+P01,1,0.5
+P02,2,0.5
+P03,3,0.9
+P04,4,0.9
+P05,5,0.9
+P06,6,1.6
+
+Zone demand (m3 per period):
+zone,period,m3
+ZONE1,P01,506
+ZONE1,P02,449
+ZONE1,P03,605
+ZONE1,P04,819
+ZONE1,P05,876
+ZONE1,P06,720
+ZONE2,P01,341
+ZONE2,P02,303
+ZONE2,P03,408
+ZONE2,P04,552
+ZONE2,P05,590
+ZONE2,P06,485
+
+The day is split into 6 periods of 4 hours, in the order given. Rules (all hard): water moves only along the listed pipes, in the listed direction, and a pipe carries at most its maximum m3 in a period. A source sends out at most its maximum m3 per period, in total over its pipes. Each zone must receive exactly its demand in every period (zones do not pass water on). A tank's level at the end of a period is its level at the end of the previous period (its start level for the first period) plus what flows in minus what flows out during the period; that level must stay between the tank's minimum and maximum at the end of every period, and at the end of the last period every tank must hold at least its start level. Goal, as small as possible, in EGP: production cost (m3 sent out by a source times its production cost per m3) plus pumping energy cost (m3 through a pipe times its pumping kWh per m3 times the period's tariff per kWh). Report the flow in each pipe in each period, the tank levels through the day, the total cost split into production and energy, how much each source produces, and how the plan shifts pumping away from the expensive periods.
+
+Everything you need is here: please propose the model without further questions, then solve it.

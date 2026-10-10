@@ -1,0 +1,42 @@
+{
+  "problem": "h05",
+  "size": "M",
+  "kind": "exact",
+  "goal": 300000.0,
+  "known_feasible": 300000.0,
+  "bound": 300000.0,
+  "sense": "minimize",
+  "report": [
+    [
+      "start week per activity",
+      "A\\d\\d[^\\n]{0,60}W\\d\\d"
+    ],
+    [
+      "total cost",
+      "(300,?000)"
+    ],
+    [
+      "finish week",
+      "finish|complet"
+    ],
+    [
+      "extra crews",
+      "extra crew|hire"
+    ],
+    [
+      "lateness",
+      "\\blate|delay|penalt"
+    ],
+    [
+      "critical activities",
+      "critical"
+    ]
+  ],
+  "files": [
+    "activities.csv",
+    "precedence.csv",
+    "weeks.csv",
+    "project.csv"
+  ],
+  "seed": 5
+}

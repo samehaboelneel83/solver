@@ -1,0 +1,49 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Inspection plan". Our regulatory authority must choose which of 12 establishments in 3 districts to inspect this month, and how thoroughly.
+
+Districts:
+district,inspector_hours,min_inspections
+D1,9,1
+D2,14,1
+D3,13,1
+
+Establishments (travel cost in EGP):
+establishment,district,mandatory,travel_cost
+E001,D2,no,550
+E002,D3,no,550
+E003,D3,no,350
+E004,D1,no,500
+E005,D2,yes,300
+E006,D2,yes,550
+E007,D2,no,250
+E008,D2,no,150
+E009,D3,no,200
+E010,D1,no,250
+E011,D2,no,550
+E012,D3,no,400
+
+Inspection options:
+establishment,level,hours,risk_reduction
+E001,BASIC,3,21
+E001,FULL,9,40
+E002,BASIC,5,20
+E003,BASIC,4,3
+E003,FULL,11,9
+E004,BASIC,4,19
+E004,FULL,9,36
+E005,BASIC,5,15
+E006,BASIC,4,8
+E006,FULL,10,21
+E007,BASIC,3,27
+E007,FULL,6,41
+E008,BASIC,3,22
+E009,BASIC,4,5
+E009,FULL,10,9
+E010,BASIC,4,10
+E011,BASIC,4,13
+E011,FULL,12,29
+E012,BASIC,3,13
+E012,FULL,9,19
+
+Rules (all hard): each establishment gets at most one inspection this month, at one of the levels listed for it in the options (an establishment without a FULL option cannot get a FULL inspection). An establishment marked mandatory = yes must be inspected (either level). The hours of the inspections in a district are at most the district's inspector hours, and each district must have at least its min_inspections inspections. Every inspection costs the establishment's travel cost, and all travel together is at most 2,000 EGP. FULL inspections need the specialist team, which can do at most 2 FULL inspections in total this month. Goal, as large as possible: the total risk reduction of the inspections chosen. Report the establishments inspected with their level, the inspections and hours per district against the hours available, the total risk reduction, the travel spent, and the highest-risk establishments left uninspected.
+
+Everything you need is here: please propose the model without further questions, then solve it.

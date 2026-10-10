@@ -1,0 +1,7 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Berth plan". Our container terminal must plan which berth each of 40 expected vessels uses and when, on 4 berths.
+
+The data are in the attached files: vessels.csv (arrival period, length and priority weight), berths.csv (length), handling_periods.csv (handling time in periods for each allowed vessel-berth pair).
+
+The planning horizon is periods 1 to 48 (each period is two hours). Rules (all hard): every vessel is berthed exactly once, at one berth, and stays there for the whole handling time given for that vessel at that berth (the handling time differs by berth because the berths have different cranes). A vessel can only use a berth at least as long as the vessel; a vessel-berth pair missing from the handling table is not allowed. A vessel cannot start before its arrival period. A vessel starting in period s with a handling time of h periods occupies the berth in periods s to s+h-1, and must finish by period 48. A berth serves at most one vessel in any period. The time in port of a vessel is s + h - arrival period (waiting plus handling). Goal, as small as possible: the sum over vessels of priority weight times time in port (in periods). Report the berth and start period of each vessel, each vessel's waiting time, the total weighted time in port, berth utilisation, and which vessels wait the longest.
+
+Everything you need is here: please propose the model without further questions, then solve it.

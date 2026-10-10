@@ -1,0 +1,36 @@
+{
+  "problem": "h14",
+  "size": "M",
+  "kind": "exact",
+  "goal": 5124.0,
+  "known_feasible": 5124.0,
+  "bound": 5124.0,
+  "sense": "maximize",
+  "report": [
+    [
+      "establishments and level",
+      "E\\d{3}\\W+.{0,40}(BASIC|FULL)"
+    ],
+    [
+      "hours per district",
+      "D\\d\\b[^\\n]{0,80}\\d"
+    ],
+    [
+      "total risk reduction",
+      "5,?124"
+    ],
+    [
+      "travel spent",
+      "travel"
+    ],
+    [
+      "uninspected high-risk",
+      "uninspected|not inspected|left out"
+    ]
+  ],
+  "files": [
+    "districts.csv",
+    "establishments.csv",
+    "inspection_options.csv"
+  ]
+}

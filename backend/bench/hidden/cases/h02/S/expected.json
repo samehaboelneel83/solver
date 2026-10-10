@@ -1,0 +1,33 @@
+{
+  "problem": "h02",
+  "size": "S",
+  "kind": "exact",
+  "goal": 3180.0,
+  "known_feasible": 3180.0,
+  "bound": 3180.0,
+  "sense": "maximize",
+  "report": [
+    [
+      "funded projects",
+      "P\\d{3}"
+    ],
+    [
+      "total NPV",
+      "(3,?180)"
+    ],
+    [
+      "spending versus budget per year",
+      "Y\\d[^\\n]{0,80}\\d"
+    ],
+    [
+      "carry-over",
+      "carr(y|ied)|unspent|left over|remaining budget|unused"
+    ],
+    [
+      "projects left out",
+      "not (funded|selected|chosen)|left out|rejected|excluded|unfunded"
+    ]
+  ],
+  "files": [],
+  "seed": 2
+}

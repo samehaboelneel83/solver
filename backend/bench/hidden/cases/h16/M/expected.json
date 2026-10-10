@@ -1,0 +1,38 @@
+{
+  "problem": "h16",
+  "size": "M",
+  "kind": "exact",
+  "goal": 59400.0,
+  "known_feasible": 59400.0,
+  "bound": 59400.0,
+  "sense": "minimize",
+  "report": [
+    [
+      "room and slot per session",
+      "SES\\d\\d\\W+.{0,40}(NILE_HALL|LUXOR|ASWAN|SIWA|DAHAB|T\\d\\d)"
+    ],
+    [
+      "programme by slot",
+      "T\\d\\d"
+    ],
+    [
+      "total cost",
+      "59,?400"
+    ],
+    [
+      "hire vs clash penalty",
+      "clash|penalt"
+    ],
+    [
+      "room fill",
+      "%|full|utili[sz]|occupan"
+    ]
+  ],
+  "files": [
+    "sessions.csv",
+    "rooms.csv",
+    "slots.csv",
+    "speaker_unavailable.csv",
+    "shared_interest.csv"
+  ]
+}

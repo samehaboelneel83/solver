@@ -1,0 +1,38 @@
+{
+  "problem": "h06",
+  "size": "M",
+  "kind": "exact",
+  "goal": 406200.0,
+  "known_feasible": 406200.0,
+  "bound": 406200.0,
+  "sense": "minimize",
+  "report": [
+    [
+      "clinics booked",
+      "CL\\d{3}"
+    ],
+    [
+      "total fee",
+      "(406,?199|406,?200)"
+    ],
+    [
+      "coverage per skill",
+      "(SK\\d\\d)[^\\n]{0,60}\\d"
+    ],
+    [
+      "camp days used",
+      "days"
+    ],
+    [
+      "clinics per coach",
+      "COACH\\d\\d"
+    ]
+  ],
+  "files": [
+    "clinics.csv",
+    "clinic_skills.csv",
+    "skills.csv",
+    "camp.csv"
+  ],
+  "seed": 6
+}

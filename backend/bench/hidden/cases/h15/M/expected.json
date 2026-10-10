@@ -1,0 +1,39 @@
+{
+  "problem": "h15",
+  "size": "M",
+  "kind": "exact",
+  "goal": 10907376.292985,
+  "known_feasible": 10907376.292985,
+  "bound": 10907376.292985,
+  "sense": "maximize",
+  "report": [
+    [
+      "tons per route",
+      "[A-Z_]+-R\\d[^\\n]{0,40}\\d"
+    ],
+    [
+      "tons sold per product",
+      "(ETHYLENE|PROPYLENE|BENZENE|METHANOL|CHLORINE|AMMONIA|POLYETHYLENE|POLYPROPYLENE|STYRENE|ACETIC_ACID|PVC|UREA|FORMALDEHYDE|MTBE|NITRIC_ACID|CUMENE|GLYCOL|ACRYLONITRILE|PHENOL|CAPROLACTAM)[^\\n]{0,60}\\d"
+    ],
+    [
+      "resource use",
+      "hours|available"
+    ],
+    [
+      "total profit",
+      "10,?907,?3\\d\\d"
+    ],
+    [
+      "limiting resources",
+      "\\bbind|limit|bottleneck|tight"
+    ]
+  ],
+  "files": [
+    "products.csv",
+    "raw_materials.csv",
+    "units.csv",
+    "routes.csv",
+    "route_inputs.csv",
+    "route_hours.csv"
+  ]
+}

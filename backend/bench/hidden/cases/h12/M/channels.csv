@@ -1,0 +1,11 @@
+channel,type,min_total_spend,max_total_spend,tier1_spend,tier1_reach_per_k,tier2_spend,tier2_reach_per_k,tier3_spend,tier3_reach_per_k
+TV,traditional,3500,33600,510,7.8,260,4.2,220,2.3
+SEARCH,digital,7000,38200,320,8.6,330,4.5,370,2.2
+RADIO,traditional,6400,37500,460,6.1,590,4.2,780,2.3
+SOCIAL,digital,7100,50400,230,8.0,230,5.1,780,2.4
+OUTDOOR,traditional,1900,52000,420,7.6,470,3.5,280,1.1
+VIDEO,digital,4600,50200,540,8.2,420,4.1,500,2.4
+PRINT,traditional,6700,39500,520,9.3,220,5.6,710,3.2
+DISPLAY,digital,3000,42100,580,7.6,380,3.6,560,1.4
+CINEMA,traditional,5700,50200,250,11.4,590,5.3,330,2.2
+INFLUENCER,digital,4200,31600,200,5.7,460,3.9,630,1.6

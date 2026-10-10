@@ -1,0 +1,8 @@
+activity,duration_weeks,crews_per_week,uses_crane,earliest_start_week
+A01,3,4,no,W01
+A02,2,3,no,W01
+A03,3,2,yes,W01
+A04,3,2,no,W01
+A05,2,2,no,W01
+A06,1,1,yes,W01
+A07,2,2,yes,W01

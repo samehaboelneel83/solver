@@ -1,0 +1,7 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Conference programme". We are organising a conference with 44 sessions and must place each one in one of 5 rooms and one of 10 time slots.
+
+The data are in the attached files: sessions.csv (speaker, expected attendance, AV need), rooms.csv (capacity, AV, hire cost per slot), slots.csv, speaker_unavailable.csv, shared_interest.csv (attendees who want both sessions of a pair).
+
+Rules (all hard): every session is held exactly once, in one room and one time slot. A room holds at most one session per slot. A session's expected attendance must fit the room's capacity, and a session that needs AV must be in a room that has AV. Sessions given by the same speaker must be in different slots, and no session may be in a slot its speaker is listed as unavailable for. Goal, as small as possible, in EGP: the hire cost of the rooms (the room's hire cost per slot for every session held in it) plus 20 EGP for every shared attendee of two sessions held in the same slot (the shared_interest list gives, for pairs of sessions, how many attendees want to attend both). Report the room and slot of each session, the programme by slot, the total cost split into room hire and clash penalty, the pairs of sessions that still clash, and how full each session's room is.
+
+Everything you need is here: please propose the model without further questions, then solve it.

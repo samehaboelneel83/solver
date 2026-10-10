@@ -1,0 +1,32 @@
+{
+  "problem": "h16",
+  "size": "S",
+  "kind": "exact",
+  "goal": 10920.0,
+  "known_feasible": 10920.0,
+  "bound": 10920.0,
+  "sense": "minimize",
+  "report": [
+    [
+      "room and slot per session",
+      "SES\\d\\d\\W+.{0,40}(NILE_HALL|ASWAN|DAHAB|T\\d\\d)"
+    ],
+    [
+      "programme by slot",
+      "T\\d\\d"
+    ],
+    [
+      "total cost",
+      "10,?920"
+    ],
+    [
+      "hire vs clash penalty",
+      "clash|penalt"
+    ],
+    [
+      "room fill",
+      "%|full|utili[sz]|occupan"
+    ]
+  ],
+  "files": []
+}

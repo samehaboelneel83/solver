@@ -1,0 +1,33 @@
+{
+  "problem": "h04",
+  "size": "S",
+  "kind": "exact",
+  "goal": 18.0,
+  "known_feasible": 18.0,
+  "bound": 18.0,
+  "sense": "maximize",
+  "report": [
+    [
+      "teacher and slot per course",
+      "CRS\\d\\d[^\\n]{0,80}(T\\d\\d|(MON|TUE|WED|THU|FRI)-(AM|EVE))"
+    ],
+    [
+      "total score",
+      "(18)"
+    ],
+    [
+      "teacher hours",
+      "T\\d\\d[^\\n]{0,60}(hours?|h\\b)|hours?[^\\n]{0,60}T\\d\\d"
+    ],
+    [
+      "late slots",
+      "\\blate\\b|EVE"
+    ],
+    [
+      "rooms per slot",
+      "\\broom|\\blab"
+    ]
+  ],
+  "files": [],
+  "seed": 4
+}

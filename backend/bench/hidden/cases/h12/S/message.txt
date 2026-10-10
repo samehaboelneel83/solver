@@ -1,0 +1,24 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Media plan". Marketing must split the campaign budget across 4 channels over 4 weeks to reach as many people as possible.
+
+Channels (spend in thousand EGP, reach in thousand people per thousand EGP):
+channel,type,min_total_spend,max_total_spend,tier1_spend,tier1_reach_per_k,tier2_spend,tier2_reach_per_k,tier3_spend,tier3_reach_per_k
+TV,traditional,0,3000,220,6.8,420,4.4,430,2.2
+SEARCH,digital,400,2000,430,6.8,450,3.1,410,1.4
+RADIO,traditional,100,2900,570,5.3,380,2.8,760,1.3
+SOCIAL,digital,200,2200,370,5.9,500,4.4,450,1.5
+
+Weeks:
+week,max_spend,seasonality
+W01,2410,0.95
+W02,2950,0.82
+W03,2710,1.03
+W04,2740,1.22
+
+Channel unavailable in a week:
+channel,week
+SOCIAL,W04
+TV,W04
+
+All money is in thousand EGP. The campaign has a total budget of 7,500 (thousand EGP); it does not have to be spent in full. Rules (all hard): the spend on a channel in a week may be any amount (fractions are fine) from 0 up to tier1_spend + tier2_spend + tier3_spend of that channel; a channel listed as unavailable in a week gets nothing that week. The total spend in a week is at most the week's max_spend. Each channel's total over all weeks is between its min_total_spend and its max_total_spend. Digital channels together get at least 40% of the total spend. Reach has diminishing returns within each channel and week: the first tier1_spend thousand EGP bring tier1_reach_per_k thousand people per thousand EGP, the next tier2_spend bring tier2_reach_per_k, and the next tier3_spend bring tier3_reach_per_k; this reach is then multiplied by the week's seasonality. Goal, as large as possible: the total reach (thousand people) over all channels and weeks. Report the spend per channel and week, the total spend per channel and its share, the total reach, the digital share, and which limits are binding.
+
+Everything you need is here: please propose the model without further questions, then solve it.

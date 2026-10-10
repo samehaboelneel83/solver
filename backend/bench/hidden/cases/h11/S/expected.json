@@ -1,0 +1,36 @@
+{
+  "problem": "h11",
+  "size": "S",
+  "kind": "exact",
+  "goal": 11941.317,
+  "known_feasible": 11941.317,
+  "bound": 11941.317,
+  "sense": "minimize",
+  "report": [
+    [
+      "pipe flows per period",
+      "(SRC|TANK)\\d\\W+.{0,40}(TANK|ZONE)\\d"
+    ],
+    [
+      "tank levels",
+      "level"
+    ],
+    [
+      "total cost",
+      "11,?9\\d\\d"
+    ],
+    [
+      "production vs energy cost",
+      "energy|pumping cost|electric"
+    ],
+    [
+      "source output",
+      "SRC\\d[^\\n]{0,60}\\d"
+    ],
+    [
+      "peak-period shifting",
+      "peak|expensive|tariff"
+    ]
+  ],
+  "files": []
+}

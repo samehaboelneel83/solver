@@ -1,0 +1,36 @@
+{
+  "problem": "h12",
+  "size": "M",
+  "kind": "exact",
+  "goal": 895640.01,
+  "known_feasible": 895640.01,
+  "bound": 895640.01,
+  "sense": "maximize",
+  "report": [
+    [
+      "spend per channel and week",
+      "W\\d\\d"
+    ],
+    [
+      "spend per channel",
+      "(TV|SEARCH|RADIO|SOCIAL|OUTDOOR|VIDEO|PRINT|DISPLAY|CINEMA|INFLUENCER)[^\\n]{0,60}\\d"
+    ],
+    [
+      "total reach",
+      "895,?6\\d\\d"
+    ],
+    [
+      "digital share",
+      "digital[^\\n]{0,60}%|%[^\\n]{0,60}digital"
+    ],
+    [
+      "binding limits",
+      "\\bbind|tight|at (its|the) (limit|max|cap)"
+    ]
+  ],
+  "files": [
+    "channels.csv",
+    "weeks.csv",
+    "unavailable.csv"
+  ]
+}

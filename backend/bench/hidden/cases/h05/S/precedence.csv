@@ -1,0 +1,9 @@
+activity,predecessor
+A02,A01
+A03,A01
+A04,A02
+A05,A02
+A05,A03
+A06,A02
+A06,A04
+A07,A03

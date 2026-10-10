@@ -1,0 +1,24 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Fleet assignment". We are an airline and must decide which aircraft type flies each of our 10 flights tomorrow; we have 3 aircraft types.
+
+Aircraft types:
+type,aircraft,seats,cost_per_block_hour,range_km,max_block_hours_per_aircraft
+ATR72,1,70,2200,1500,11
+A320,1,174,4300,6100,13
+B787,1,290,9800,13000,15
+
+Flights (average fare in USD):
+flight,distance_km,block_hours,passengers,average_fare
+FL100,766,1.5,198,2270
+FL101,1327,2.5,110,1800
+FL102,2486,4.0,113,1330
+FL103,1372,2.5,175,1540
+FL104,1601,2.5,297,2480
+FL105,2517,4.0,156,1160
+FL106,1451,2.5,155,2170
+FL107,2432,3.5,177,1010
+FL108,841,1.5,275,2430
+FL109,1849,3.0,176,1780
+
+Rules (all hard): every flight on tomorrow's schedule is flown by exactly one aircraft type, the whole flight on that type. A type can fly a flight only if the flight's distance is at most the type's range. The block hours of all flights given to a type are at most its number of aircraft times its maximum block hours per aircraft. Passengers above the seats of the type are turned away and their average fare is lost. Goal, as small as possible, in USD: the operating cost (block hours times the type's cost per block hour) plus the lost revenue (passengers turned away times the flight's average fare). Report the type assigned to each flight, the total cost split into operating cost and lost revenue, the passengers turned away, and the block hours used by each type against what it has available.
+
+Everything you need is here: please propose the model without further questions, then solve it.

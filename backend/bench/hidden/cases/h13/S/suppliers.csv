@@ -1,0 +1,4 @@
+supplier,order_cost,min_order_value,max_units
+SUP1,3100,39000,550
+SUP2,2500,49000,510
+SUP3,2100,18000,520

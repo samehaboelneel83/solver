@@ -1,0 +1,7 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Harvest schedule". Our forestry company must plan the clear-cut harvest of 80 forest stands over the next 10 five-year periods (P1 to P10).
+
+The data are in the attached files: stands.csv (species, hectares and age today), species.csv (timber price and harvesting cost), yields.csv (m3 per hectare if the stand is harvested in that period; a missing stand-period pair means it may not be harvested then), periods.csv (discount factor, the mill's minimum volume and the maximum area that may be cut per period).
+
+Rules (all hard): hectares of a stand may be cut in any period listed for it in the yields, in fractional amounts, and over all periods at most the stand's hectares are cut (cut land is replanted and not cut again within the plan). In every period the volume cut (hectares x m3 per hectare) is at least the mill's minimum and the hectares cut are at most the period's maximum. Even flow: the volume of each period is between 85% and 115% of the previous period's volume. Old growth: of the stands aged 80 years or more today, at least 30% of their total hectares is never cut. Goal: the largest net present value = for every stand and period, discount factor x hectares cut x (m3 per hectare x price - harvest cost per hectare). Report the hectares cut per stand and period, the net present value, the volume and area per period, the old-growth area kept, and which rules limit the plan.
+
+Everything you need is here: please propose the model without further questions, then solve it.

@@ -1,0 +1,33 @@
+{
+  "problem": "h06",
+  "size": "S",
+  "kind": "exact",
+  "goal": 58300.0,
+  "known_feasible": 58300.0,
+  "bound": 58300.0,
+  "sense": "minimize",
+  "report": [
+    [
+      "clinics booked",
+      "CL\\d{3}"
+    ],
+    [
+      "total fee",
+      "(58,?300)"
+    ],
+    [
+      "coverage per skill",
+      "(PASSING|FINISHING|PRESSING|SET_PIECES|GOALKEEPING|SPRINT)[^\\n]{0,60}\\d"
+    ],
+    [
+      "camp days used",
+      "days"
+    ],
+    [
+      "clinics per coach",
+      "COACH\\d\\d"
+    ]
+  ],
+  "files": [],
+  "seed": 6
+}

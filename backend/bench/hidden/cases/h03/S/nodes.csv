@@ -1,0 +1,11 @@
+node,type,traffic_gbps,capacity_gbps
+TW01,tower,4,
+TW02,tower,8,
+TW03,tower,10,
+TW04,tower,10,
+TW05,tower,10,
+TW06,tower,10,
+HUB01,hub,,32
+HUB02,hub,,32
+CORE1,core,,35
+CORE2,core,,30
