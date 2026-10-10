@@ -1,0 +1,7 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Security portfolio". We must choose which of 200 security controls to fund this year to protect 60 assets.
+
+The data are in the attached files: controls.csv, assets.csv, protection.csv.
+
+Rules: the controls chosen cost at most 8,279,000 EGP and need at most 87.2 staff in total. A control with a 'needs' entry can be chosen only if the control it needs is chosen too. Protection does NOT add up: an asset's protection is the largest protection any chosen control gives it (two controls protecting the same asset at 60 and 50 give it 60, not 110), and 0 if no chosen control protects it. Every critical asset reaches at least its min_protection. Risk reduced = sum over assets of value x protection / 100. Goal: the most risk reduced. Report the controls chosen and their cost, budget used, risk reduced, the protection of each critical asset, why each control was chosen or left out, and other portfolios for a smaller and a larger budget.
+
+Everything you need is here: please propose the model without further questions, then solve it.

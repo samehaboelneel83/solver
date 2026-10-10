@@ -1,0 +1,5 @@
+id,value,critical,min_protection
+AST01,120000,yes,48
+AST02,87000,yes,56
+AST03,365000,no,0
+AST04,498000,no,0

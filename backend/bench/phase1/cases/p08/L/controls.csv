@@ -1,0 +1,201 @@
+id,kind,cost,staff,needs
+CTL001,network monitoring,180000,1.6,
+CTL002,endpoint detection,191000,1.1,CTL149
+CTL003,intrusion prevention,172000,0.5,
+CTL004,backups,142000,0.8,CTL063
+CTL005,identity protection,188000,1.0,
+CTL006,incident response,57000,1.1,
+CTL007,email filtering,23000,1.0,CTL093
+CTL008,patch management,118000,1.3,
+CTL009,data loss prevention,171000,0.4,
+CTL010,segmentation,186000,1.4,
+CTL011,network monitoring,174000,1.7,
+CTL012,endpoint detection,162000,1.9,CTL115
+CTL013,intrusion prevention,142000,1.7,CTL157
+CTL014,backups,172000,1.2,
+CTL015,identity protection,125000,1.4,
+CTL016,incident response,190000,0.3,CTL150
+CTL017,email filtering,185000,1.5,
+CTL018,patch management,68000,0.2,CTL108
+CTL019,data loss prevention,162000,0.9,
+CTL020,segmentation,46000,2.0,CTL027
+CTL021,network monitoring,48000,1.4,
+CTL022,endpoint detection,127000,1.4,
+CTL023,intrusion prevention,187000,0.4,
+CTL024,backups,183000,1.4,
+CTL025,identity protection,116000,0.6,
+CTL026,incident response,28000,1.2,
+CTL027,email filtering,188000,1.9,CTL199
+CTL028,patch management,64000,1.4,
+CTL029,data loss prevention,154000,0.3,
+CTL030,segmentation,189000,1.6,CTL129
+CTL031,network monitoring,135000,0.4,
+CTL032,endpoint detection,152000,1.0,CTL020
+CTL033,intrusion prevention,195000,1.8,
+CTL034,backups,162000,1.4,
+CTL035,identity protection,61000,1.1,CTL126
+CTL036,incident response,57000,1.4,
+CTL037,email filtering,195000,1.8,CTL158
+CTL038,patch management,36000,0.6,
+CTL039,data loss prevention,123000,0.7,CTL129
+CTL040,segmentation,131000,1.2,
+CTL041,network monitoring,162000,0.6,CTL055
+CTL042,endpoint detection,27000,0.3,
+CTL043,intrusion prevention,39000,2.0,
+CTL044,backups,190000,1.8,
+CTL045,identity protection,33000,0.6,
+CTL046,incident response,135000,1.2,
+CTL047,email filtering,80000,1.5,
+CTL048,patch management,192000,0.9,
+CTL049,data loss prevention,78000,1.0,
+CTL050,segmentation,176000,0.7,
+CTL051,network monitoring,78000,0.3,
+CTL052,endpoint detection,173000,1.3,
+CTL053,intrusion prevention,21000,1.1,CTL158
+CTL054,backups,154000,1.9,
+CTL055,identity protection,171000,1.0,
+CTL056,incident response,35000,1.0,CTL120
+CTL057,email filtering,185000,0.7,CTL108
+CTL058,patch management,134000,0.8,CTL142
+CTL059,data loss prevention,158000,1.6,CTL179
+CTL060,segmentation,134000,0.6,
+CTL061,network monitoring,117000,0.8,
+CTL062,endpoint detection,194000,1.1,
+CTL063,intrusion prevention,189000,1.8,
+CTL064,backups,144000,1.0,
+CTL065,identity protection,106000,1.3,CTL090
+CTL066,incident response,173000,1.6,CTL114
+CTL067,email filtering,32000,0.4,
+CTL068,patch management,195000,0.2,
+CTL069,data loss prevention,199000,1.7,CTL027
+CTL070,segmentation,145000,1.2,
+CTL071,network monitoring,33000,0.9,
+CTL072,endpoint detection,136000,1.7,
+CTL073,intrusion prevention,53000,0.9,
+CTL074,backups,47000,0.8,
+CTL075,identity protection,34000,1.5,
+CTL076,incident response,130000,1.6,CTL112
+CTL077,email filtering,182000,1.0,CTL119
+CTL078,patch management,55000,1.6,
+CTL079,data loss prevention,47000,1.5,
+CTL080,segmentation,60000,0.2,CTL104
+CTL081,network monitoring,25000,0.7,
+CTL082,endpoint detection,154000,0.6,
+CTL083,intrusion prevention,43000,1.3,
+CTL084,backups,184000,0.5,CTL017
+CTL085,identity protection,77000,1.1,
+CTL086,incident response,150000,0.3,CTL061
+CTL087,email filtering,158000,1.5,
+CTL088,patch management,148000,0.2,
+CTL089,data loss prevention,121000,0.2,
+CTL090,segmentation,124000,2.0,
+CTL091,network monitoring,36000,0.9,
+CTL092,endpoint detection,45000,1.3,
+CTL093,intrusion prevention,189000,1.6,
+CTL094,backups,186000,0.7,
+CTL095,identity protection,102000,1.9,CTL125
+CTL096,incident response,71000,1.3,
+CTL097,email filtering,29000,1.7,
+CTL098,patch management,134000,1.2,
+CTL099,data loss prevention,141000,0.2,
+CTL100,segmentation,174000,0.9,CTL110
+CTL101,network monitoring,73000,1.5,
+CTL102,endpoint detection,121000,1.3,
+CTL103,intrusion prevention,135000,0.5,
+CTL104,backups,187000,1.0,
+CTL105,identity protection,182000,0.4,
+CTL106,incident response,195000,0.8,
+CTL107,email filtering,198000,0.4,
+CTL108,patch management,170000,2.0,
+CTL109,data loss prevention,69000,1.5,
+CTL110,segmentation,22000,0.2,
+CTL111,network monitoring,121000,1.2,
+CTL112,endpoint detection,118000,1.2,CTL120
+CTL113,intrusion prevention,34000,1.5,
+CTL114,backups,158000,0.2,
+CTL115,identity protection,143000,1.7,CTL148
+CTL116,incident response,119000,0.6,
+CTL117,email filtering,188000,0.9,
+CTL118,patch management,60000,1.5,
+CTL119,data loss prevention,177000,0.8,
+CTL120,segmentation,179000,1.4,
+CTL121,network monitoring,103000,1.3,CTL158
+CTL122,endpoint detection,69000,1.1,
+CTL123,intrusion prevention,106000,0.7,CTL144
+CTL124,backups,22000,1.3,
+CTL125,identity protection,34000,1.6,
+CTL126,incident response,34000,0.6,
+CTL127,email filtering,60000,1.1,
+CTL128,patch management,70000,1.6,
+CTL129,data loss prevention,174000,1.1,
+CTL130,segmentation,192000,1.6,
+CTL131,network monitoring,166000,2.0,CTL113
+CTL132,endpoint detection,38000,0.9,
+CTL133,intrusion prevention,50000,0.6,
+CTL134,backups,34000,1.7,
+CTL135,identity protection,146000,0.5,
+CTL136,incident response,32000,1.6,
+CTL137,email filtering,135000,0.5,CTL197
+CTL138,patch management,196000,0.7,
+CTL139,data loss prevention,56000,1.5,
+CTL140,segmentation,173000,1.6,CTL196
+CTL141,network monitoring,162000,0.7,
+CTL142,endpoint detection,77000,0.3,CTL012
+CTL143,intrusion prevention,111000,1.7,
+CTL144,backups,86000,1.2,
+CTL145,identity protection,82000,0.5,CTL178
+CTL146,incident response,164000,0.8,
+CTL147,email filtering,52000,1.4,
+CTL148,patch management,82000,1.9,CTL181
+CTL149,data loss prevention,115000,1.3,
+CTL150,segmentation,101000,0.7,CTL052
+CTL151,network monitoring,155000,1.7,
+CTL152,endpoint detection,83000,1.2,
+CTL153,intrusion prevention,187000,0.8,
+CTL154,backups,197000,0.9,
+CTL155,identity protection,44000,0.8,
+CTL156,incident response,68000,1.6,CTL139
+CTL157,email filtering,107000,1.5,
+CTL158,patch management,89000,1.2,CTL084
+CTL159,data loss prevention,161000,1.7,
+CTL160,segmentation,191000,1.4,
+CTL161,network monitoring,54000,1.6,
+CTL162,endpoint detection,61000,0.5,
+CTL163,intrusion prevention,20000,0.7,
+CTL164,backups,96000,0.5,
+CTL165,identity protection,63000,1.8,
+CTL166,incident response,29000,0.6,CTL140
+CTL167,email filtering,158000,0.4,CTL089
+CTL168,patch management,168000,1.2,
+CTL169,data loss prevention,33000,1.0,
+CTL170,segmentation,118000,1.2,CTL139
+CTL171,network monitoring,110000,0.8,
+CTL172,endpoint detection,120000,0.7,
+CTL173,intrusion prevention,165000,0.8,CTL005
+CTL174,backups,190000,1.4,
+CTL175,identity protection,101000,0.6,CTL034
+CTL176,incident response,28000,1.2,
+CTL177,email filtering,88000,1.6,
+CTL178,patch management,63000,1.8,
+CTL179,data loss prevention,22000,0.3,
+CTL180,segmentation,198000,0.4,CTL055
+CTL181,network monitoring,68000,0.9,
+CTL182,endpoint detection,92000,1.2,
+CTL183,intrusion prevention,196000,1.2,
+CTL184,backups,112000,1.7,
+CTL185,identity protection,177000,1.7,
+CTL186,incident response,82000,0.9,
+CTL187,email filtering,75000,0.4,
+CTL188,patch management,199000,0.4,CTL101
+CTL189,data loss prevention,133000,0.8,
+CTL190,segmentation,165000,0.3,
+CTL191,network monitoring,119000,1.3,
+CTL192,endpoint detection,111000,0.5,
+CTL193,intrusion prevention,117000,0.9,CTL057
+CTL194,backups,122000,1.3,
+CTL195,identity protection,197000,1.0,
+CTL196,incident response,174000,1.4,
+CTL197,email filtering,79000,1.3,
+CTL198,patch management,137000,1.7,
+CTL199,data loss prevention,168000,0.7,
+CTL200,segmentation,94000,1.9,CTL092

@@ -74,3 +74,18 @@ platform's verification accepted it. The model solved in 0.07 s (32 decisions, 2
 
 The harness missed the run's link in the panel and waited out its 20 minutes; run 180 was collected by
 hand. The harness now finds the case's run through the API.
+
+## #6 University examination timetabling
+
+| Case | Built first time | Minutes | Goal | Reference | Checker | Status | Alternatives | Report |
+|---|---|---|---|---|---|---|---|---|
+| S (8 exams × 4 rooms × 4 slots, typed) | yes, 10 corrections | 14.4 | — | 680 | no plan | **error** (both runs) | offered; that run failed too | 3 of 5 |
+
+**S — the solve crashed: a platform defect.** The model (136 decisions, 374 rows) counts students with
+consecutive exams by multiplying yes/no decisions, so its goal is quadratic. CP-SAT was chosen, then the
+step that races the model as written against its strengthened form (`service.py` -> `race.run_race`) ran an
+entrant that writes the model as a linear MPS file; it raised `ValueError: only a linear model can be
+written as MPS`, and that one entrant's error failed the whole run instead of dropping the entrant. The
+alternatives run failed the same way. The Assistant correctly diagnosed this as a platform limitation and
+suggested linearising the goal. **To fix after the evaluation:** an entrant that cannot take a model must
+drop out of the race, never fail the run.

@@ -1,0 +1,9 @@
+id,kind,cost,staff,needs
+CTL001,network monitoring,153000,0.6,
+CTL002,endpoint detection,172000,0.9,
+CTL003,intrusion prevention,39000,1.0,
+CTL004,backups,48000,1.3,CTL006
+CTL005,identity protection,102000,1.5,
+CTL006,incident response,120000,0.2,CTL008
+CTL007,email filtering,157000,0.7,CTL003
+CTL008,patch management,86000,1.3,

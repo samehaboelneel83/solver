@@ -1,0 +1,37 @@
+{
+  "problem": "p08",
+  "size": "S",
+  "kind": "exact",
+  "goal": 620380.0,
+  "known_feasible": 620380.0,
+  "bound": 620380.0,
+  "sense": "maximize",
+  "report": [
+    [
+      "controls chosen and cost",
+      "CTL\\d{3}"
+    ],
+    [
+      "budget used",
+      "budget"
+    ],
+    [
+      "risk reduced",
+      "620,?380"
+    ],
+    [
+      "critical asset coverage",
+      "critical"
+    ],
+    [
+      "why chosen or excluded",
+      "because|excluded|left out|not chosen"
+    ],
+    [
+      "other budgets",
+      "smaller budget|larger budget|other portfolio|alternative"
+    ]
+  ],
+  "files": [],
+  "naive_additive_note": "adding protections would overstate risk reduced"
+}

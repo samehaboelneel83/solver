@@ -1,0 +1,41 @@
+id,kind,cost,staff,needs
+CTL001,network monitoring,43000,0.2,
+CTL002,endpoint detection,89000,1.6,
+CTL003,intrusion prevention,109000,1.4,
+CTL004,backups,127000,1.0,
+CTL005,identity protection,141000,0.9,
+CTL006,incident response,112000,1.5,
+CTL007,email filtering,28000,1.8,CTL036
+CTL008,patch management,145000,0.5,
+CTL009,data loss prevention,188000,0.7,
+CTL010,segmentation,137000,0.8,CTL038
+CTL011,network monitoring,174000,1.9,
+CTL012,endpoint detection,175000,0.3,
+CTL013,intrusion prevention,128000,1.0,
+CTL014,backups,126000,0.7,
+CTL015,identity protection,44000,1.7,
+CTL016,incident response,115000,1.8,
+CTL017,email filtering,160000,1.8,
+CTL018,patch management,158000,1.0,
+CTL019,data loss prevention,165000,0.4,
+CTL020,segmentation,57000,1.3,
+CTL021,network monitoring,165000,1.3,
+CTL022,endpoint detection,38000,0.7,
+CTL023,intrusion prevention,86000,0.4,
+CTL024,backups,35000,0.8,CTL022
+CTL025,identity protection,86000,0.3,
+CTL026,incident response,105000,2.0,
+CTL027,email filtering,26000,0.2,CTL006
+CTL028,patch management,87000,0.9,
+CTL029,data loss prevention,191000,1.3,CTL009
+CTL030,segmentation,52000,0.5,
+CTL031,network monitoring,162000,0.9,CTL005
+CTL032,endpoint detection,82000,1.9,
+CTL033,intrusion prevention,35000,1.3,
+CTL034,backups,140000,2.0,
+CTL035,identity protection,199000,1.9,CTL005
+CTL036,incident response,147000,1.7,
+CTL037,email filtering,145000,0.2,CTL006
+CTL038,patch management,153000,0.4,
+CTL039,data loss prevention,58000,0.7,
+CTL040,segmentation,74000,0.9,
