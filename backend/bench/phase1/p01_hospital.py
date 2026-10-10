@@ -127,9 +127,16 @@ def check(folder: Path, export_csv: str) -> list[str]:
     found = {}
     # Each of the four per-department decisions, by which limit it fits: the model names its own decisions.
     by: dict[str, dict[str, float]] = {}
+    # A department may be named by its kind ("EMERGENCY") when only one hospital has that kind.
+    kinds: dict[str, list[str]] = {}
+    for k, r in depts.items():
+        kinds.setdefault(r["kind"], []).append(k)
+    alias = {kind: ids[0] for kind, ids in kinds.items() if len(ids) == 1}
     for r in rows:
-        if r.get("key1") in depts and not r.get("key2"):
-            by.setdefault(r["decision"], {})[r["key1"]] = float(r["value"])
+        key = r.get("key1")
+        key = key if key in depts else alias.get(key)
+        if key and not r.get("key2"):
+            by.setdefault(r["decision"], {})[key] = float(r["value"])
     for name, cells in by.items():
         low = name.lower()
         for role, words in (("nurses", ("nurse",)), ("doctors", ("doctor", "physician")), ("beds", ("bed",)),

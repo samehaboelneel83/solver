@@ -25,7 +25,10 @@ def main(module: str, case: Path, out: Path) -> dict:
                  "continues": result.get("continues"), "minutes": result.get("minutes"),
                  "corrected": len(re.findall(r"corrected automatically", panel)) and int(
                      sum(int(n) for n in re.findall(r"(\d+) corrected automatically", panel)))}
-    row["first_time"] = row["built"] and not result.get("continues")
+    row["first_time"] = row["built"] and not result.get("continues") and not result.get("declined")
+    # Cards that warned the person (CHECK THIS, or a trial with no answer): a wrong answer after a warning is
+    # not a silent one.
+    row["warned_on_card"] = int(result.get("warnings") or 0) or len(re.findall(r"CHECK THIS|NO answer exists", panel))
     run = json.loads((out / "run.json").read_text(encoding="utf-8")) if (out / "run.json").exists() else None
     if run:
         params = run.get("params") or {}

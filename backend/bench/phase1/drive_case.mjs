@@ -80,6 +80,21 @@ try {
     if (await approve.isVisible().catch(() => false) && await approve.isEnabled().catch(() => false)) {
       await snap("plan");
       writeFileSync(`${outDir}/plan-${result.approved + 1}.txt`, await panelText());
+      // A person reads the plan card: a warning on the latest card ("CHECK THIS", or a trial with no answer) is
+      // answered, not approved -- at most twice; then the plan is approved as it stands, and the run is scored.
+      const card = (await page.locator('section[aria-label="Proposed model"]').last().innerText().catch(() => "")) || "";
+      const warned = /CHECK THIS|NO answer exists/.test(card);
+      result.warnings = (result.warnings || 0) + (warned ? 1 : 0);
+      if (warned && (result.declined || 0) < 2) {
+        result.declined = (result.declined || 0) + 1;
+        const lines = card.split("\n").filter((l) => /CHECK THIS|NO answer exists/.test(l)).join(" ");
+        await page.getByLabel("Message to the assistant").fill(
+          `The plan card warns: ${lines.slice(0, 600)} That is not what I described. Please fix the model and propose it again.`);
+        await page.getByRole("button", { name: "Send" }).click();
+        idleSince = null;
+        log(`declined a plan the card warns about (${result.declined})`);
+        continue;
+      }
       await approve.click();
       result.approved += 1;
       idleSince = null;

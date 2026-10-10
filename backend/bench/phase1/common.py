@@ -62,5 +62,6 @@ def decision_over(rows: list[dict[str, str]], *key_sets: set[str]) -> tuple[str,
         by.setdefault(r["decision"], {})[keys] = float(r["value"])
     if not by:
         return "", {}
-    name = max(by, key=lambda n: len(by[n]))
+    # The decision holding amounts before a yes/no one over the same records (a setup beside the quantities).
+    name = max(by, key=lambda n: (any(v not in (0.0, 1.0) for v in by[n].values()), len(by[n])))
     return name, by[name]
