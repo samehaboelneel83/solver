@@ -135,7 +135,62 @@ def fix_spec(s):
     if quoted is not None:
         return quoted
     closed = fix_closers(fixed)
-    return closed if closed is not None else (None if fixed == s else None)
+    if closed is not None and _error_at(closed) > len(closed):
+        return closed
+    return mend_brackets(fixed)
+
+
+def _error_at(text):
+    """Where `text` first fails to parse (its length + 1 when it parses)."""
+    try:
+        json.loads(text)
+        return len(text) + 1
+    except json.JSONDecodeError as e:
+        return e.pos
+
+
+def mend_brackets(s, limit=12):
+    """A bracket dropped or doubled in the middle of a long spec: `{"attr": {"of": "p", "name": "rate"}, {"var": ...`
+    (the production-planning trace, 10 October 2026: qwen3.5 lost six specs of 12-15 KB to one brace each, ten
+    minutes a try). At each place the parse fails, the smallest edits are tried -- a `}` or `]` put in at one of
+    the last few commas before it or at the place itself, or one of the last few closers taken out -- and the one
+    that lets the parse go furthest is kept; up to `limit` edits. None when that does not make valid JSON. The
+    result is valid JSON, not necessarily what was meant: the platform checks the spec and the person reads it."""
+    text = s or ""
+    for _ in range(limit):
+        at = _error_at(text)
+        if at > len(text):
+            return text if text != s else None
+        # The last few commas and closers before the failure: a dropped closer belongs before one of the commas,
+        # a doubled one is one of the closers.
+        commas, closers, i, in_str = [], [], 0, False
+        while i < at:
+            ch = text[i]
+            if in_str:
+                if ch == "\\":
+                    i += 1
+                elif ch == '"':
+                    in_str = False
+            elif ch == '"':
+                in_str = True
+            elif ch == ",":
+                commas.append(i)
+            elif ch in "}]":
+                closers.append(i)
+            i += 1
+        candidates = [text[:at] + closer + text[at:] for closer in "}]"]
+        for c in commas[-4:]:
+            candidates += [text[:c] + closer + text[c:] for closer in "}]"]
+        candidates += [text[:c] + text[c + 1:] for c in closers[-4:]]
+        best, best_at = None, at
+        for candidate in candidates:
+            reach = _error_at(candidate)
+            if reach > best_at:
+                best, best_at = candidate, reach
+        if best is None:
+            return None
+        text = best
+    return text if _error_at(text) > len(text) else None
 
 
 _AFTER_STRING = re.compile(r'\s*[,:}\]]')
@@ -230,8 +285,9 @@ def extract_tool_calls(text, known_tools=None, allow_repair=True):
                 fixed = fix_spec(raw) if allow_repair and _SPEC_CALL.search(raw) else None
                 if fixed is not None:
                     obj = strict_loads(fixed, joined)
-                    errors.append("note: your call's JSON had a slip (a rule's \"right\" key left out, or the "
-                                  "closing brackets out of order) and was put right; write it correctly next time")
+                    errors.append("note: your call's JSON had a slip (a rule's \"right\" key left out, or closing "
+                                  "brackets dropped, doubled or out of order) and was put right; check the spec says what you "
+                                  "meant, and write it correctly next time")
                 elif _extra_closers(raw) is not None:
                     # One closing bracket too many after a whole call (live what-if test, October 2026: the
                     # what_if call was lost to "Extra data"): the call is the object before them.

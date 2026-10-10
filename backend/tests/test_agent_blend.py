@@ -1566,3 +1566,63 @@ def test_runs_with_the_same_answer_show_one_facts_card():
     agent = core.Agent(core.Settings(), core.ApiIndex(app.openapi()), lambda *a, **k: {}, core.Context("x"))
     agent.facts = {1: {"run_id": 1, "goal": 5}, 2: {"run_id": 2, "goal": 7}, 3: {"run_id": 3, "goal": 7}}
     assert agent._facts_shown() == [{"run_id": 1, "goal": 5}, {"run_id": 3, "goal": 7}]
+
+
+# -- where a spec arrives (the production-planning trace, 10 October 2026) --------------------------------------
+
+
+def test_a_spec_is_read_wherever_the_model_put_it():
+    from app.agent.repair import spec_of
+
+    ir = {"version": 2, "sets": [], "variables": {"x": {"index": [], "domain": "binary"}}, "constraints": [],
+          "objective": {"sense": "minimize", "terms": []}}
+    as_object, notes = spec_of({"summary": "s", "spec": {"ir": ir, "seed": {}}})
+    assert as_object["ir"] == ir and notes == []
+    import json
+
+    as_string, notes = spec_of({"spec": json.dumps({"ir": ir, "domain_name": "D"})})
+    assert as_string["ir"] == ir and as_string["domain_name"] == "D" and "JSON string" in notes[0]
+    broken, notes = spec_of({"spec": json.dumps({"ir": ir})[:-1]})
+    assert broken["ir"] == ir and "put right" in notes[0]
+    beside, notes = spec_of({"summary": "s", "ir": ir, "seed": {"entity_types": []}, "domain_name": "D"})
+    assert beside["ir"] == ir and beside["domain_name"] == "D" and "beside the summary" in notes[0]
+    nested, notes = spec_of({"spec": {"seed": {"ir": ir, "entity_types": []}}})
+    assert nested["ir"] == ir and "ir" not in nested["seed"] and "inside seed" in notes[0]
+    named, notes = spec_of({"spec": {"model": ir}})
+    assert named["ir"] == ir and "model" not in named
+    assert spec_of({"summary": "only words"})[0] == {}
+
+
+def test_a_bracket_dropped_or_doubled_in_a_long_spec_is_mended():
+    """The production-planning trace: `{"attr": {"of": "p", "name": "rate"}, {"var": ...` -- one brace short, in the
+    middle of a 12 KB spec, six times. Any closer dropped or doubled anywhere gives valid JSON back."""
+    import json
+    import random
+
+    from app.agent.toolcall import fix_spec
+
+    rule = {"id": "c_line", "forall": [{"index": "w", "set": "week"}],
+            "left": {"sum": {"add": [{"mul": [{"attr": {"of": "p", "name": "rate"}}, {"var": "make", "index": ["p", "w"]}]},
+                                     {"mul": [{"attr": {"of": "p", "name": "change"}}, {"var": "setup", "index": ["p", "w"]}]}]},
+                     "over": [{"index": "p", "set": "product"}]},
+            "relation": "<=", "right": {"add": [{"attr": {"of": "w", "name": "hours"}}, {"var": "overtime", "index": ["w"]}]}}
+    text = json.dumps({"ir": {"constraints": [rule] * 6}, "seed": {"entities": [{"type": "week", "key": f"W{i}"} for i in range(30)]}})
+    dropped = text.replace('"name": "rate"}}', '"name": "rate"}', 1)
+    mended = json.loads(fix_spec(dropped))
+    assert len(mended["ir"]["constraints"]) == 6 and mended["seed"] == json.loads(text)["seed"]
+    rnd = random.Random(3)
+    closers = [i for i, ch in enumerate(text) if ch in "}]"]
+    for k in range(30):
+        i = rnd.choice(closers)
+        broken = text[:i] + text[i + 1:] if k % 2 else text[:i] + text[i] + text[i:]
+        mended = fix_spec(broken)
+        assert mended is not None, (k, i)
+        json.loads(mended)
+
+
+def test_numbers_in_a_pasted_csv_row_are_each_known():
+    """The production-planning trace: a demand table pasted as CSV rows was refused as 'not given by the user'."""
+    from app.agent.core import numbers_in
+
+    found = numbers_in("product,W01,W02\nOJ1L,12,14,14,16\nid,rate\nOJ1L,1.1,3.0,4200,55,12\nbudget 1,500 at 35%")
+    assert {12, 14, 16, 1.1, 3.0, 4200, 55, 1500, 0.35} <= found

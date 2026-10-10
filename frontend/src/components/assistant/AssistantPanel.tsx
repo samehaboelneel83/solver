@@ -270,7 +270,7 @@ export default function AssistantPanel({ open, onClose, context }: { open: boole
         const at = conv.items.map((i) => i.kind).lastIndexOf("user");
         return { ...conv, items: at >= 0 ? conv.items.slice(0, at + 1) : conv.items };
       });
-      let seen = 0;
+      let seen: number;
       setBusy(first.running);
       if (first.running) {
         setWorkStartedAt(Date.now());
@@ -836,7 +836,7 @@ function ItemView({ item, live, onDecide, onHandover }: {
       );
     case "steps":
       return <Steps steps={item.steps} notes={item.notes} />;
-    case "error":
+    case "error": {
       const interrupted = /^(network error|failed to fetch|load failed|the platform API could not be reached\.)$/i.test(item.text.trim());
       return (
         <p role="alert" className="flex gap-2 rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-800">
@@ -846,6 +846,7 @@ function ItemView({ item, live, onDecide, onHandover }: {
             : item.text}
         </p>
       );
+    }
     case "confirm":
       return (
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm">

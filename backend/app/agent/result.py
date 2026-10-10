@@ -173,9 +173,12 @@ def summary(rec: dict[str, Any]) -> str:
                        f"cell's amount, which DECISION gives): " + "; ".join(
                 f"{c['var']}[{', '.join(c['index'])}] {_num(c['value'])}" for c in cells))
         by_var: dict[str, float] = {}
-        for c in cells:
-            by_var[c["var"]] = by_var.get(c["var"], 0.0) + float(c.get("value") or 0)
-        if len(by_var) > 1 and t.get("cell_count", len(cells)) <= len(cells):
+        if t.get("decisions"):
+            by_var = {d["var"]: float(d["value"]) for d in t["decisions"]}  # over every cell (breakdown.py)
+        elif t.get("cell_count", len(cells)) <= len(cells):
+            for c in cells:
+                by_var[c["var"]] = by_var.get(c["var"], 0.0) + float(c.get("value") or 0)
+        if len(by_var) > 1:
             # One goal made of several costs (the production-plan test: one term for making, holding and lateness;
             # the reply split it as 4,650 + 2,100 where the parts were 3,000 and 3,750).
             out.append(f"{t['id']} by decision (exact; quote these parts, never split the total yourself): "
@@ -789,6 +792,11 @@ def facts(rec: dict[str, Any]) -> dict[str, Any]:
         out["parts"] = [{"id": t["id"], "value": plain(t.get("value"))} for t in params["objective_terms"]]
     elif len(made_of.get("terms") or []) > 1:
         out["parts"] = [{"id": t["id"], "value": plain(t.get("contribution", t.get("value")))} for t in made_of["terms"]]
+    elif len(made_of.get("terms") or []) == 1 and len(made_of["terms"][0].get("decisions") or []) > 1:
+        # One goal term made of several costs: its parts by decision (exact, over every cell).
+        weight = float(made_of["terms"][0].get("weight") or 1)
+        out["parts"] = [{"id": d["var"], "value": plain(weight * float(d["value"]))}
+                        for d in made_of["terms"][0]["decisions"]]
     decisions = []
     for var, (index, rows) in decision_rows(rec).items():
         if len(decisions) >= FACT_DECISIONS:

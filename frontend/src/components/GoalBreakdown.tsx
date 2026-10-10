@@ -8,6 +8,8 @@ export type Breakdown = {
     share: number | null;
     records: { kind: string; key: string; value: number }[];
     rest?: { records: number; value: number };
+    /** The term by decision, over every cell (one term is often several costs). */
+    decisions?: { var: string; value: number }[];
   }[];
   soft_rules?: number;
 };
@@ -35,7 +37,13 @@ export default function GoalBreakdown({ breakdown, labels = {} }: { breakdown: B
         <tbody>
           {terms.map((t, i) => (
             <tr key={t.id} className="border-t border-slate-100 align-top">
-              <td className="py-1 pr-2 font-medium">{words(t.id)}{!ordered && t.weight !== 1 && <span className="text-xs text-slate-500"> × {show(t.weight)}</span>}</td>
+              <td className="py-1 pr-2 font-medium">{words(t.id)}{!ordered && t.weight !== 1 && <span className="text-xs text-slate-500"> × {show(t.weight)}</span>}
+                {(t.decisions?.length ?? 0) > 1 && (
+                  <div className="text-xs font-normal text-slate-600" aria-label={`${words(t.id)} by decision`}>
+                    {t.decisions!.map((d) => `${words(d.var)} ${show(d.value * t.weight)}`).join(" · ")}
+                  </div>
+                )}
+              </td>
               <td className="pr-2 font-mono">{show(t.value)}</td>
               {ordered ? <td className="pr-2">{`${i + 1}${["st", "nd", "rd"][i] ?? "th"}`}</td> : (
                 <>

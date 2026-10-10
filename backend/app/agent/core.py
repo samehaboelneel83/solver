@@ -529,19 +529,34 @@ def bind_literal_keys(ir: dict) -> list[str]:
 DATA_TOOLS = {"read_file", "query_file", "run_python", "call_api", "describe_workspace", "read_result", "use_source",
               "refresh_sources"}
 _NUMBER = re.compile(r"(?<![A-Za-z_])-?\d[\d,]*(?:\.\d+)?%?")
+#: A decimal inside a comma-separated row ("1.1,3.0,4200"): _NUMBER reads "1.1" and then "3.0,4200" whole.
+_DECIMALS_IN_ROW = re.compile(r"(?<=,)-?\d+(?:\.\d+)?%?(?=,|\s|$)|(?<![\w.])-?\d+\.\d+(?=,)")
 
 
 def numbers_in(text: str) -> set[float]:
-    """Every number written in a text (1,500 and 1.5 and 35%: the last also as 0.35)."""
+    """Every number written in a text (1,500 and 1.5 and 35%: the last also as 0.35). A run of numbers joined by
+    commas -- a CSV row pasted into a message, "OJ1L,12,14,14,16" -- is each of its numbers too, not only one
+    thousands-separated number (the production-planning trace: a pasted demand table was refused as "not given
+    by the user")."""
     found: set[float] = set()
-    for raw in _NUMBER.findall(text or ""):
+
+    def add(raw: str) -> None:
         try:
             value = float(raw.rstrip("%").replace(",", ""))
         except ValueError:
-            continue
+            return
         found.add(round(value, 6))
         if raw.endswith("%"):
             found.add(round(value / 100, 6))
+
+    for raw in _NUMBER.findall(text or ""):
+        add(raw)
+        if "," in raw:
+            for part in raw.split(","):
+                if part.strip("-"):
+                    add(part)
+    for raw in _DECIMALS_IN_ROW.findall(text or ""):
+        add(raw)
     return found
 
 
@@ -2242,7 +2257,7 @@ class Agent:
             if name == "check_spec":
                 if name not in self.tool_names:
                     return f"{name} is not available in this mode"
-                return self._check_spec(args.get("spec"))
+                return self._check_spec(args)
             if name == "run_python":
                 return self._run_python(str(args.get("code") or ""), args.get("timeout_s"))
             if name == "query_file":
@@ -2810,9 +2825,9 @@ class Agent:
                        if line.startswith(("Totals over", "Totals of field")) or "room left" in line)
         return out
 
-    def _check_spec(self, spec: Any) -> str:
+    def _check_spec(self, args: Any) -> str:
         try:
-            expanded = self._spec({"spec": spec})
+            expanded = self._spec(args if isinstance(args, dict) else {"spec": args})
         except agent_files.FileRefused as e:
             return f"Not valid yet: {e}"
         faults = self._order_faults(expanded)
@@ -2863,7 +2878,8 @@ class Agent:
     # -- the plan: checked before the person sees it, built exactly as approved --
     def _spec(self, args: dict, expand: bool = True) -> dict:
         """The spec as the model wrote it; expanded, its file references become rows."""
-        spec = args.get("spec") if isinstance(args.get("spec"), dict) else {}
+        spec, notes = agent_repair.spec_of(args)
+        self.joined.extend(notes)
         spec = {k: v for k, v in spec.items() if k != "dry_run"}
         self.joined.extend(agent_repair.misplaced(spec))
         self.joined.extend(agent_repair.joined_keys(spec))
@@ -3331,7 +3347,7 @@ class Agent:
             self.refusals[key] = self.refusals.get(key, 0) + 1
             if self.refusals[key] < MAX_SAME_ERROR:
                 continue
-            spec = _args(c).get("spec") if isinstance(_args(c).get("spec"), dict) else {}
+            spec = agent_repair.spec_of(_args(c))[0]
             fragment = ""
             loc = re.search(r'"loc":\s*(\[[^\]]*\])', result)
             if loc:
@@ -3411,9 +3427,9 @@ class Agent:
                         if fixed is None:
                             raise
                         args = toolcall.strict_loads(fixed, self.joined)
-                        self.joined.append("your call's JSON had a slip (a rule's \"right\" key left out, or the "
-                                           "closing brackets out of order) and was put right; write it correctly "
-                                           "next time")
+                        self.joined.append("your call's JSON had a slip (a rule's \"right\" key left out, or closing "
+                                           "brackets dropped, doubled or out of order) and was put right; check the "
+                                           "spec says what you meant, and write it correctly next time")
                     if not isinstance(args, dict):
                         raise ValueError("arguments must be a JSON object")
                     if name not in self.tool_names:
