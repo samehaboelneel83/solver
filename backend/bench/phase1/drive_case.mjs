@@ -118,6 +118,8 @@ try {
     const run = JSON.parse(runJson);
     const [, csv] = await api(`/api/v1/runs/${result.run}/export?format=csv`);
     writeFileSync(`${outDir}/export.csv`, csv);
+    const [, map] = await api(`/api/v1/runs/${result.run}/answer-map`);
+    writeFileSync(`${outDir}/answer-map.json`, map);
     const [, problem] = await api(`/api/v1/scenarios/${run.scenario_id}`);
     const scen = JSON.parse(problem);
     // The workspace from the "Open the problem" link the Assistant shows once it has built.

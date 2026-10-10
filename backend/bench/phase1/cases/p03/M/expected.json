@@ -1,0 +1,38 @@
+{
+  "problem": "p03",
+  "size": "M",
+  "kind": "bounded",
+  "goal": null,
+  "known_feasible": 285,
+  "bound": 411,
+  "sense": "maximize",
+  "report": [
+    [
+      "layout drawn / map",
+      "map|layout|drawing"
+    ],
+    [
+      "bed positions",
+      "\\d+(\\.\\d+)?\\s*,\\s*\\d+(\\.\\d+)?|position|coordinate"
+    ],
+    [
+      "orientation",
+      "orient|rotat|turned"
+    ],
+    [
+      "accessibility check",
+      "entrance|access|corridor"
+    ],
+    [
+      "bed count",
+      "\\d+ beds"
+    ],
+    [
+      "trade-off with corridor width",
+      "corridor width|trade-?off|wider"
+    ]
+  ],
+  "files": [
+    "site.dxf"
+  ]
+}

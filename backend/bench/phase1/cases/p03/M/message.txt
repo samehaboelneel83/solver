@@ -1,0 +1,5 @@
+Please build this in a new workspace called "{workspace}". Call the problem "Camp layout". Design a camp on the site in the attached drawing site.dxf (metres): layer SITE is the 40 m x 25 m site boundary, layer PROTECTED holds 3 protected areas that nothing may occupy, and layer ENTRANCE holds 2 entrance(s) on the boundary.
+
+Rules: beds are 2.0 m x 0.9 m and may be turned either way. Every bed lies inside the site, never overlaps a protected area or another bed, and touches a corridor: open space at least 1.2 m wide that connects, at least 1.2 m wide all the way, to an entrance. Goal: as many beds as possible; among layouts with as many beds, the shortest walk from the beds to an entrance. Report a 2D layout showing entrances, beds, protected areas and corridors, every bed's position, size and orientation, a check that every bed reaches an entrance, the bed count, and the trade-off between bed count and corridor width.
+
+Everything you need is here: please propose the model without further questions, then solve it.
