@@ -1,0 +1,36 @@
+{
+  "problem": "p05",
+  "size": "S",
+  "kind": "exact",
+  "goal": 1792842.0,
+  "known_feasible": 1792842.0,
+  "bound": 1792842.0,
+  "sense": "minimize",
+  "report": [
+    [
+      "stations opened",
+      "ST\\d{3}"
+    ],
+    [
+      "ambulances per station",
+      "ambulance"
+    ],
+    [
+      "response times",
+      "minute|response"
+    ],
+    [
+      "coverage %",
+      "\\d+(\\.\\d+)? ?%|coverage"
+    ],
+    [
+      "uncovered zones / gaps",
+      "uncovered|not covered|gap"
+    ],
+    [
+      "costs",
+      "cost"
+    ]
+  ],
+  "files": []
+}
