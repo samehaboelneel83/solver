@@ -65,6 +65,10 @@ exec 2>>"$OUT/$NIGHT-job.log"
 WORKTREE="$(to_host_path "$(dirname "$ROOT")/solver-nightly")"
 
 git -C "$REPO" worktree remove --force "$WORKTREE" >/dev/null 2>&1 || true
+# What a night that died left there is no worktree any more, and its folder stops the next one being made
+# (29 September 2026: empty folders the containers had made, there ever since).
+git -C "$REPO" worktree prune >/dev/null 2>&1 || true
+rm -rf "$WORKTREE"
 # The branch is `main` (it was `master` until October 2026; the name left here made every night fail with
 # "checks exit 127" on an empty worktree, unnoticed). No worktree, no night: say so in LATEST and stop.
 BRANCH="${SOLVER_NIGHTLY_BRANCH:-main}"
