@@ -1618,3 +1618,11 @@ def test_a_bracket_dropped_or_doubled_in_a_long_spec_is_mended():
         mended = fix_spec(broken)
         assert mended is not None, (k, i)
         json.loads(mended)
+
+
+def test_numbers_in_a_pasted_csv_row_are_each_known():
+    """The production-planning trace: a demand table pasted as CSV rows was refused as 'not given by the user'."""
+    from app.agent.core import numbers_in
+
+    found = numbers_in("product,W01,W02\nOJ1L,12,14,14,16\nid,rate\nOJ1L,1.1,3.0,4200,55,12\nbudget 1,500 at 35%")
+    assert {12, 14, 16, 1.1, 3.0, 4200, 55, 1500, 0.35} <= found

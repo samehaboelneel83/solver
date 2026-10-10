@@ -529,19 +529,34 @@ def bind_literal_keys(ir: dict) -> list[str]:
 DATA_TOOLS = {"read_file", "query_file", "run_python", "call_api", "describe_workspace", "read_result", "use_source",
               "refresh_sources"}
 _NUMBER = re.compile(r"(?<![A-Za-z_])-?\d[\d,]*(?:\.\d+)?%?")
+#: A decimal inside a comma-separated row ("1.1,3.0,4200"): _NUMBER reads "1.1" and then "3.0,4200" whole.
+_DECIMALS_IN_ROW = re.compile(r"(?<=,)-?\d+(?:\.\d+)?%?(?=,|\s|$)|(?<![\w.])-?\d+\.\d+(?=,)")
 
 
 def numbers_in(text: str) -> set[float]:
-    """Every number written in a text (1,500 and 1.5 and 35%: the last also as 0.35)."""
+    """Every number written in a text (1,500 and 1.5 and 35%: the last also as 0.35). A run of numbers joined by
+    commas -- a CSV row pasted into a message, "OJ1L,12,14,14,16" -- is each of its numbers too, not only one
+    thousands-separated number (the production-planning trace: a pasted demand table was refused as "not given
+    by the user")."""
     found: set[float] = set()
-    for raw in _NUMBER.findall(text or ""):
+
+    def add(raw: str) -> None:
         try:
             value = float(raw.rstrip("%").replace(",", ""))
         except ValueError:
-            continue
+            return
         found.add(round(value, 6))
         if raw.endswith("%"):
             found.add(round(value / 100, 6))
+
+    for raw in _NUMBER.findall(text or ""):
+        add(raw)
+        if "," in raw:
+            for part in raw.split(","):
+                if part.strip("-"):
+                    add(part)
+    for raw in _DECIMALS_IN_ROW.findall(text or ""):
+        add(raw)
     return found
 
 
