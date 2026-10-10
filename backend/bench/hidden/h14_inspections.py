@@ -146,6 +146,14 @@ def check(folder: Path, export_csv: str) -> list[str]:
         a, b = r.get("key1") or "", (r.get("key2") or "").upper()
         if r.get("key3"):
             continue
+        if not r.get("key2"):  # one key naming the option by both parts ("E1_FULL", "E1 FULL", "E1-FULL", "E1|FULL")
+            parts = [p for p in re.split(r"\s*(?:_|-|\||\s)\s*", a.strip()) if p]
+            if len(parts) != 2:
+                continue
+            a, b = parts[0], parts[1].upper()
+            if a.upper() in levels and parts[1] in ests:
+                a, b = parts[1], parts[0].upper()
+            r = {**r, "key2": b}
         if a.upper() in levels and (r.get("key2") or "") in ests:
             a, b = r["key2"], a.upper()
         if a in ests and b in levels:

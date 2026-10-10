@@ -201,15 +201,39 @@ def check(folder: Path, export_csv: str) -> list[str]:
             return P[int(m.group(1)) - 1]
         return None
 
+    def arc(x: str):  # one key naming a pipe by its two ends ("A_B", "A->B", "A→B", "A|B")
+        parts = [p for p in re.split(r"\s*(?:->|→|\||_|-|\s)\s*", (x or "").strip()) if p]
+        return (parts[0], parts[1]) if len(parts) == 2 and parts[0] in nodes and parts[1] in nodes else None
+
+    rows = export_rows(export_csv)
     by: dict[str, dict[tuple, float]] = {}
-    for r in export_rows(export_csv):
-        a, b, t = r.get("key1") or "", r.get("key2") or "", per(r.get("key3") or "")
-        if r.get("key4") or t is None or a not in nodes or b not in nodes:
+    other = 0  # rows over (node, period): another decision of the plan, e.g. a level
+    for r in rows:
+        keys = [r.get(f"key{i}") or "" for i in range(1, 1 + sum(1 for k in r if k and k.startswith("key")))]
+        while keys and not keys[-1]:
+            keys.pop()
+        a = b = t = None
+        if len(keys) == 3 and keys[0] in nodes and keys[1] in nodes:
+            a, b, t = keys[0], keys[1], per(keys[2])
+        elif len(keys) == 2:
+            for x, y in ((keys[0], keys[1]), (keys[1], keys[0])):
+                if arc(x) and per(y) and y not in nodes:
+                    (a, b), t = arc(x), per(y)
+                    break
+            else:
+                if any(k in nodes for k in keys) and any(k not in nodes and per(k) for k in keys):
+                    other += 1
+                continue
+        if a is None or t is None:
             continue
         cell = by.setdefault(r["decision"], {})
         cell[(a, b, t)] = cell.get((a, b, t), 0.0) + float(r["value"])
     if not by:
-        return ["no decision over (from, to, period) in the export"]
+        # The export lists only nonzero values: when every row is another decision over (node, period), the plan
+        # moves no water at all, and the rules are checked on that.
+        if not rows or other != len(rows):
+            return ["no decision over (from, to, period) in the export"]
+        by[""] = {}
     name = max(by, key=lambda n: (any(v not in (0.0, 1.0) for v in by[n].values()), len(by[n])))
     f = by[name]
     bad: list[str] = []
