@@ -1591,6 +1591,11 @@ def test_a_spec_is_read_wherever_the_model_put_it():
     named, notes = spec_of({"spec": {"model": ir}})
     assert named["ir"] == ir and "model" not in named
     assert spec_of({"summary": "only words"})[0] == {}
+    # The Nile Juice trace's last refused call: "ir" beside a "spec" that held the names and the seed.
+    split, notes = spec_of({"summary": "s", "spec": {"domain_name": "D", "seed": {"entity_types": []}}, "ir": ir})
+    assert split["ir"] == ir and split["domain_name"] == "D" and split["seed"] == {"entity_types": []} and notes
+    kept, notes = spec_of({"spec": {"ir": ir, "domain_name": "D"}, "ir": {"version": 2}, "domain_name": "E"})
+    assert kept == {"ir": ir, "domain_name": "D"} and notes == []
 
 
 def test_a_bracket_dropped_or_doubled_in_a_long_spec_is_mended():

@@ -212,7 +212,7 @@ def spec_of(args: Any) -> tuple[dict[str, Any], list[str]]:
     """The spec of a check_spec / propose_plan call, wherever the model put it (the production-planning trace,
     10 October 2026: a local model's spec came back "has no ir" three times running): the `spec` argument as an
     object; or as a JSON string -- parsed, and repaired as tool calls are; or, with no `spec`, the spec's own keys
-    written beside the summary. A model the spec carries inside `seed`, or under `model`, is lifted to `ir`."""
+    written beside the summary; a part written beside a `spec` that lacks it joins it. A model the spec carries inside `seed`, or under `model`, is lifted to `ir`."""
     from app.agent import toolcall
 
     notes: list[str] = []
@@ -238,6 +238,13 @@ def spec_of(args: Any) -> tuple[dict[str, Any], list[str]]:
             notes.append("the spec's parts were written beside the summary, not inside \"spec\"; they were taken as the spec")
         else:
             spec = {}
+    else:
+        # A spec with some of its parts beside it (the same trace's last refused call: the names and the seed
+        # inside "spec", "ir" next to it). What the spec itself says stands.
+        beside = [k for k in SPEC_KEYS if k in args and k not in spec]
+        if beside:
+            spec = {**spec, **{k: args[k] for k in beside}}
+            notes.append(f"{', '.join(beside)} written beside \"spec\" was taken as part of it; put it inside next time")
     spec = dict(spec)
     if not isinstance(spec.get("ir"), dict):
         seed = spec.get("seed")
