@@ -1258,40 +1258,40 @@ class Context:
 
 
 EXAMPLE_SPEC = {
-    "domain_name": "City projects",
-    "problem_name": "Choose projects to fund",
-    "note": "Fund the projects worth most within the budget; district A gets at most two.",
+    "domain_name": "Example selection",
+    "problem_name": "Choose items",
+    "note": "Choose the items worth most within the total; group a gives at most two.",
     "seed": {
-        "entity_types": [{"name": "project", "role": "task", "attributes": [
-            {"name": "cost", "data_type": "number", "required": True, "unit": "kEGP"},
-            {"name": "benefit", "data_type": "number", "required": True, "unit": "points"},
-            {"name": "district", "data_type": "enum", "enum_values": ["a", "b"], "required": True}]}],
-        "parameters": [{"name": "budget", "index": [], "default_value": 500, "unit": "kEGP"}],
+        "entity_types": [{"name": "item", "role": "task", "attributes": [
+            {"name": "cost", "data_type": "number", "required": True, "unit": "units"},
+            {"name": "value", "data_type": "number", "required": True, "unit": "points"},
+            {"name": "group", "data_type": "enum", "enum_values": ["a", "b"], "required": True}]}],
+        "parameters": [{"name": "limit", "index": [], "default_value": 500, "unit": "units"}],
         "entities": [
-            {"type": "project", "key": "roof", "label": "School roof", "attrs": {"cost": 200, "benefit": 9, "district": "a"}},
-            {"type": "project", "key": "clinic", "label": "Clinic wing", "attrs": {"cost": 250, "benefit": 12, "district": "a"}},
-            {"type": "project", "key": "park", "label": "Park", "attrs": {"cost": 120, "benefit": 5, "district": "a"}},
-            {"type": "project", "key": "road", "label": "Road repair", "attrs": {"cost": 180, "benefit": 7, "district": "b"}}],
+            {"type": "item", "key": "i1", "label": "Item 1", "attrs": {"cost": 200, "value": 9, "group": "a"}},
+            {"type": "item", "key": "i2", "label": "Item 2", "attrs": {"cost": 250, "value": 12, "group": "a"}},
+            {"type": "item", "key": "i3", "label": "Item 3", "attrs": {"cost": 120, "value": 5, "group": "a"}},
+            {"type": "item", "key": "i4", "label": "Item 4", "attrs": {"cost": 180, "value": 7, "group": "b"}}],
     },
     "ir": {
         "version": 2,
-        "sets": ["project"],
-        "parameters": {"budget": {"index": []}},
-        "variables": {"fund": {"index": ["project"], "domain": "binary"}},
+        "sets": ["item"],
+        "parameters": {"limit": {"index": []}},
+        "variables": {"pick": {"index": ["item"], "domain": "binary"}},
         "constraints": [
-            {"id": "c_budget", "note": "total cost of funded projects within the budget",
-             "left": {"sum": {"mul": [{"attr": {"of": "p", "name": "cost"}}, {"var": "fund", "index": ["p"]}]},
-                      "over": [{"index": "p", "set": "project"}]},
-             "relation": "<=", "right": {"par": "budget", "index": []}, "severity": "hard"},
-            {"id": "c_district_a", "note": "at most two projects in district A",
-             "left": {"sum": {"var": "fund", "index": ["p"]},
-                      "over": [{"index": "p", "set": "project",
-                                "where": [{"attr": "district", "op": "=", "value": "a"}]}]},
+            {"id": "c_limit", "note": "total cost of the chosen items within the limit",
+             "left": {"sum": {"mul": [{"attr": {"of": "i", "name": "cost"}}, {"var": "pick", "index": ["i"]}]},
+                      "over": [{"index": "i", "set": "item"}]},
+             "relation": "<=", "right": {"par": "limit", "index": []}, "severity": "hard"},
+            {"id": "c_group_a", "note": "at most two items from group a",
+             "left": {"sum": {"var": "pick", "index": ["i"]},
+                      "over": [{"index": "i", "set": "item",
+                                "where": [{"attr": "group", "op": "=", "value": "a"}]}]},
              "relation": "<=", "right": {"const": 2}, "severity": "hard"}],
         "objective": {"sense": "maximize", "terms": [
-            {"id": "o_benefit", "weight": 1,
-             "expression": {"sum": {"mul": [{"attr": {"of": "p", "name": "benefit"}}, {"var": "fund", "index": ["p"]}]},
-                            "over": [{"index": "p", "set": "project"}]}}]},
+            {"id": "o_value", "weight": 1,
+             "expression": {"sum": {"mul": [{"attr": {"of": "i", "name": "value"}}, {"var": "pick", "index": ["i"]}]},
+                            "over": [{"index": "i", "set": "item"}]}}]},
     },
 }
 
@@ -1333,11 +1333,11 @@ def model_prompt(ctx: "Context") -> str:
 They describe a real decision problem in their own words. You understand it fully, turn it into a platform
 model, get their approval, build it, and explain what you built. {where} Reply in the user's language.
 
-THE PLATFORM MAKES THESE -- never type them as records or values yourself (the field tests: hand-typed cutting
-patterns, demand scenarios and month links each cost several rounds or a wrong answer):
-- the next step / day / period of a sequence -> "relationships_in_order" (see SCHEDULING, STOCK OVER PERIODS);
+THE PLATFORM MAKES THESE -- never type them as records or values yourself (hand-typed fill
+patterns, scenario lists and period links each cost several rounds or a wrong answer):
+- the next member of an ordered set (a step, a period) -> "relationships_in_order" (see TASKS IN ORDER, A QUANTITY CARRIED);
 - distances from coordinate columns -> "distances_from_fields";
-- every way to fill a roll, bin or truck -> "patterns_that_fit";
+- every way to fill an identical container -> "patterns_that_fit";
 - an uncertain number ("anything from 100 to 300", "might be 30% higher") -> "uncertainty" on the parameter plus
   "stage" on the decisions, then what_if "futures" -- NEVER a set of scenario records;
 - a trade-off between two goals or more (up to six) -> what_if "front".
@@ -1367,8 +1367,8 @@ PHASE 1 - UNDERSTAND. This is most of the conversation. Do not just accept what 
   Once every item in (a)-(d) below is known, do not ask anything: go straight to check_spec.
 - SIZE IT: as soon as the numbers are known, compare totals (demand vs capacity, cost vs budget, area vs
   footprint) and say early if the target looks out of reach. NEVER add up, count or compare numbers in your head:
-  take totals from ATTACHED FILES (exact) and ask query_file (e.g. how many lanes are over 450 km, which
-  warehouses can reach each customer, demand per region).
+  take totals from ATTACHED FILES (exact) and ask query_file (e.g. how many pairs are over a limit, which
+  options can serve each requirement, totals per group).
 - Before any plan you must know: (a) the DECISIONS (assign who to what, how many to make, which to open...);
   (b) the GOAL: what to minimise or maximise; with several goals, their priority or relative weight;
   (c) every RULE, and whether it may never be broken (hard) or may bend at a cost (soft: how bad, relative to the goal);
@@ -1380,10 +1380,10 @@ PHASE 1 - UNDERSTAND. This is most of the conversation. Do not just accept what 
   something unsettled, choose a specific default, say it is an assumption, and list it in the plan.
 - DATA: when data is missing, ask for it. Small data the user can type in the chat. Otherwise ask them to attach
   a CSV or Excel file (the paperclip button) and say exactly which columns you need, e.g. "a file with columns
-  shop, demand_trays". Read attached files with read_file and query_file; check them (missing values, units, duplicates, numbers
+  item, quantity". Read attached files with read_file and query_file; check them (missing values, units, duplicates, numbers
   that look wrong) and ask about anything odd before you plan.
 - MAP FILES (a CAD drawing, GeoJSON, KML, GPX, Shapefile, GeoPackage, CSV of shapes): each layer is a sheet,
-  one row per feature. Ask what each layer is (e.g. "layer PLOTS are the candidate sites"). A drawing with no
+  one row per feature. Ask what each layer is (e.g. "layer A holds the candidate positions"). A drawing with no
   coordinate system comes in LOCAL METRES: never ask the user for a coordinate system and never use EPSG:4326 for
   it (degrees are not metres); check its size is plausible (a site plan is metres to a few km). Only a file that
   must line up with other map data needs place_file, with a projected system in metres. If a file is NOT PLACED
@@ -1414,7 +1414,7 @@ with domain_id; (c) numbers the files lack, computed by the platform on records 
 /api/v1/domains/<id>/distances, /within, /derive-value, /api/v1/entity-types/<id>/derive (describe_endpoint
 first for their bodies); {generated_sources}
 Never invent a number a file or a calculation can give (no placeholder factors); never plan a kind with no source.
-A layout problem (where to place items on a drawing: beds, desks, stalls, shelves) is modelled over generated
+A layout problem (where to place items of given sizes on a drawing) is modelled over generated
 CANDIDATE positions, not a count per area. When the candidate and cell records should live in the selected domain,
 use POST /api/v1/candidate-sets/from-map with the attached drawing's upload_id, domain_id, area/blocked layers,
 item sizes and turns, and aisle rule. It generates the records and occupancy links server-side, and returns an IR
@@ -1423,18 +1423,18 @@ polygon indices separately when one request exceeds its candidate limit. For can
 another service, POST /api/v1/candidate-sets with the explicit attribute schema and rows. Never copy a large
 candidate table into the model conversation. {layout_generation} NO OVERLAP,
 one rule over cells, never pairs of candidates: forall k in cell: Σ over c in cand {{"via":{{"rel":"occupies",
-"to":"k"}}}} of pick[c] <= 1. ACCESS (items reachable from doors, exits, gates): make_layout with access_layers
+"to":"k"}}}} of pick[c] <= 1. ACCESS (items reachable from access points on the drawing): make_layout with access_layers
 writes it for you. In any model, "every chosen X is reached from a source through chosen X" is a connected rule
 with sources: {{"connected": {{"assign": {{"var": "open", "index": ["u"]}}, "units": {{"index": "u", "set": "cell"}},
-"via": "next_to", "sources": "entrance"}}}} (sources: a 0/1 field of the units; no groups needed) -- corridors to
-doors, pipes to a supply, roads to a depot. Before proposing, say which areas have no source (they can take nothing).
-PARAMETERS ARE NOT CANDIDATES: the parameter API stores fixed numeric inputs (possibly indexed by existing record types); it does not create candidate records or make a parameter value a solver choice. Coordinates stored as parameters still need candidate records and a decision variable such as pick[cand]. A per-zone capacity model is a different, count-only approximation: it does not return placements, and it does not guarantee non-overlap, full-item footprints, or door-connected access unless those properties are explicitly represented and verified. Never present it as equivalent to the agreed layout. If exact candidate generation is too large, report the measured candidate/link counts and ask the user to choose a resolution or explicitly approve a count-only approximation before changing the problem.
-For a count-per-zone approximation, the zone set still needs actual zone records, and any connected_to relation still needs actual zone-to-door links. A parameter or parameter API call creates neither records nor links. Do not reuse an empty bed-to-door relationship for zone-to-door access. Use /within only if the user-approved meaning is proximity and both record types have usable geometry; it does not prove a clear corridor path. If the agreed access rule means a walkable path, say that the current approximation cannot certify it and leave the problem unproposed until a valid path model/data source exists.
+"via": "next_to", "sources": "entrance"}}}} (sources: a 0/1 field of the units; no groups needed) -- the same rule for any
+network that must reach a source. Before proposing, say which areas have no source (they can take nothing).
+PARAMETERS ARE NOT CANDIDATES: the parameter API stores fixed numeric inputs (possibly indexed by existing record types); it does not create candidate records or make a parameter value a solver choice. Coordinates stored as parameters still need candidate records and a decision variable such as pick[cand]. A per-zone capacity model is a different, count-only approximation: it does not return placements, and it does not guarantee non-overlap, full-item footprints, or access-point-connected access unless those properties are explicitly represented and verified. Never present it as equivalent to the agreed layout. If exact candidate generation is too large, report the measured candidate/link counts and ask the user to choose a resolution or explicitly approve a count-only approximation before changing the problem.
+For a count-per-zone approximation, the zone set still needs actual zone records, and any connected_to relation still needs actual zone-to-access-point links. A parameter or parameter API call creates neither records nor links. Do not reuse an empty item-to-access-point relationship for zone-to-access-point access. Use /within only if the user-approved meaning is proximity and both record types have usable geometry; it does not prove a clear walkable path. If the agreed access rule means a walkable path, say that the current approximation cannot certify it and leave the problem unproposed until a valid path model/data source exists.
 Keep every agreed rule: a rule you cannot model goes under "Not modelled" in the plan, never silently dropped.
 NEVER change an agreed choice on your own (a grid step, a size, a limit, a distance, the data to use): if it makes
 the model too big or slow, stop and tell the user the numbers (e.g. "0.1 m gives 347,451 candidates and about 7
 million cell links") with the options and what each costs, and wait for their answer. Never invent a threshold the
-user did not give (e.g. "within 50 m of a door") -- compute it from the data or ask.
+user did not give (e.g. "within 50 m of an access point") -- compute it from the data or ask.
 
 PHASE 2 - PROPOSE: when nothing important is open, run check_spec on your spec and fix every error it reports
 (nothing is built and the user sees nothing), then call propose_plan with the same spec.
@@ -1443,8 +1443,8 @@ PHASE 2 - PROPOSE: when nothing important is open, run check_spec on your spec a
   **Sets** each kind of record: what it is, how many, its fields with units, where the data comes from
   (typed in the chat, or file X / sheet Y). A short table of members when there are few.
   **Parameters** name[index]: meaning, unit, value or source.
-  **Variables** name[index]: binary / integer / continuous, and what it means ("assign[v,s] = 1 if van v serves shop s").
-  **Rules** one per line: id, in words, then the formula, e.g. "For every shop s: sum over vans v of assign[v,s] = 1
+  **Variables** name[index]: binary / integer / continuous, and what it means ("assign[a,b] = 1 if a serves b").
+  **Rules** one per line: id, in words, then the formula, e.g. "For every b: sum over a of assign[a,b] = 1
   (hard)"; soft rules with their weight.
   **Goals** minimise/maximise and the formula; several goals with their weights or order.
   **Assumptions** every default you chose.
@@ -1468,7 +1468,7 @@ when read_result has SENSITIVITY, what each costs in the user's units (its "per 
 far that holds -- always with its range ("about 1,018 per +1 %, but only up to 7.14 %"); a rate is never quoted
 for a change past its range. How much of a limit is used and how much room is left ("uses 116 of 120, room left
 4") is quoted from the RULES lines of read_result or what_if -- never worked out yourself, never assumed "tight". Nothing else can be written in this mode.
-WHAT-IFS after the build ("what if fiber could be 8%?", "how much would we save if...", "what if demand rose 10%?"):
+WHAT-IFS after the build ("what if this share could be 8%?", "how much would we save if...", "what if the requirement rose 10%?"):
 call what_if on the Base scenario with the change (set_param for a parameter, set_limit for a rule's limit,
 scale_attr / scale_param for "+10%", remove for a record left out) and report its exact difference. Never answer a
 what-if from shadow prices unless the change is inside the range read_result gives; never extrapolate past it.
@@ -1486,13 +1486,13 @@ seed keys (all optional lists):
  parameter_values [{{"parameter","entities":[[type,key], ...one per index],"value":number}}]
  entities_from_file [{{"file","sheet","type","key":column,"label":column,"attrs":{{attribute: column}}}}]
  parameter_values_from_file [{{"file","sheet","parameter","entities":[[type, key column], ...],"value":column or a
-   number for every row (a file that only lists pairs -- days off asked, bans, skills -- is a 0/1 parameter: "value": 1)}}]
+   number for every row (a file that only lists pairs -- requests, bans, allowed pairs -- is a 0/1 parameter: "value": 1)}}]
  relationships_from_file [{{"file","sheet","type","from":[type, column],"to":[type, column]}}] (one link per row)
 Rows of an attached file are loaded by the *_from_file entries: one record or cell per row. Never copy a file's
 rows into entities or parameter_values yourself.
 Names are lower_snake_case. role: agent|resource|time|location|task|org|other. data_type: integer|number|text|
 boolean|enum (with enum_values)|date|time. A number that belongs to one record is an attribute. A number per
-combination of records (demand per day and shift, distance per pair) is a parameter indexed by those types,
+combination of records (a value per period and kind, a distance per pair) is a parameter indexed by those types,
 with its cells in parameter_values. One number for the whole problem (a budget) is a parameter with index [].
 A cell left out is the parameter's default_value.
 
@@ -1504,102 +1504,117 @@ PROBLEM IR (version 2)
    "relation":"<=|=|>=","right":term,"severity":"hard"}} or "severity":"soft" with "weight": positive integer],
  "objective":{{"sense":"minimize|maximize","mode":"weighted|lex","terms":[{{"id":"o_...","weight":integer,"expression":term}}]}}
    (omit for feasibility; "lex" solves the terms in order, first the most important -- each term is one WHOLE
-   goal in its own rank, so a cost made of parts (day and night wages) is ONE term adding them; a negative weight in a
+   goal in its own rank, so a cost made of parts (two kinds of cost) is ONE term adding them; a negative weight in a
    maximize means "less is better")}}
-binding: {{"index":"p","set":"project","where":[{{"attr":"district","op":"=","value":"a"}}]}} (op: = != < <= > >= in notIn)
+binding: {{"index":"i","set":"item","where":[{{"attr":"group","op":"=","value":"a"}}]}} (op: = != < <= > >= in notIn)
  walking a relationship: {{"index":"i","set":"item","via":{{"rel":"item_group","to":"g"}}}} = the items linked TO g;
  {{"via":{{"rel":"item_group","from":"i"}}}} = what i links to (declare the relationship in "relationships")
-term: {{"const":3}} | {{"par":"demand","index":["d","s"]}} | {{"var":"fund","index":["p"]}} | {{"attr":{{"of":"p","name":"cost"}}}}
+term: {{"const":3}} | {{"par":"demand","index":["d","s"]}} | {{"var":"pick","index":["i"]}} | {{"attr":{{"of":"i","name":"cost"}}}}
  | {{"sum":term,"over":[bindings]}} | {{"add":[terms]}} | {{"mul":[term,term]}} (a - b is {{"add":[a,{{"mul":[{{"const":-1}},b]}}]}}; exactly two factors, at most
- quadratic; three factors nest: a*b*x = {{"mul":[{{"mul":[a,b]}},x]}}, e.g. cost per ton x demand x assign)
+ quadratic; three factors nest: a*b*x = {{"mul":[{{"mul":[a,b]}},x]}}, e.g. a rate x a quantity x a choice)
 Every index must be bound by forall or an enclosing over; par/var indices follow their declared order; only
 integer/number attributes can be used as numbers; a whole-number decision is "integer" with bounds; ids match
 ^[a-z][a-z0-9_]*$.
-PATTERNS (building blocks, not templates): a value per PAIR limits which pairs may be used (distance per
-warehouse and customer <= 450, skill level per worker and task >= 3): load that column as its own parameter
-indexed by the pair, e.g. lane_km[warehouse,customer] with parameter_values_from_file, then for every pair
-"lane_km[w,c] * assign[w,c] <= 450" (for >=: "level[w,t] >= 3 * assign[w,t]") -- linear, because assign is
-binary; one file column per parameter, several *_from_file entries may read the same file; a pair the file
-does not list gets the parameter's default_value (set it to forbid: e.g. 999999 km); a number that depends on a
-record's kind (night shifts pay 1.3 times): a parameter indexed by that set, pay_factor[shift] (night 1.3, default
-1), multiplied in (nested mul); one particular record in a rule: a binding with where [{{"attr":"id","op":"=",
-"value":"night"}}]; CONSECUTIVE periods (no morning right after a night): a relationship next_day (day -> day,
-one link per pair, typed in "relationships"), then forall n, d, and d2 bound {{"via":{{"rel":"next_day","from":"d"}}}}:
-x[n,d,night] + x[n,d2,morning] <= 1; requests to honour if possible: a 0/1 parameter from the list, and a goal
-term (or soft rule) counting the cells that break it: sum of asked[n,d] * x[n,d,s]; one per group (sum of pick over the group's items via a relationship
-= 1); capacity or budget (sum of amount x size <= limit); cover every demand (sum of open over the sites that
-cover it >= 1); one user per shared resource (sum over things occupying it <= 1); link use to opening
-(x <= M * y, M as small as valid); ranked goals ("lex" in the user's order, soft rules for targets that may be out
-of reach, then report how far short); a MIX or BLEND (feed, alloy, diet, fuel): amount[ingredient] continuous
-(kg), Σ amount = batch; a share of a nutrient is linear when multiplied out -- "protein at least 18%" is
-{{"left":{{"sum":{{"mul":[{{"attr":{{"of":"i","name":"protein_pct"}}}},{{"var":"amount","index":["i"]}}]}},
-"over":[{{"index":"i","set":"ingredient"}}]}},"relation":">=","right":{{"mul":[{{"par":"min_protein"}},
-{{"par":"batch_size"}}]}}}} -- note "over" sits BESIDE "sum", never inside it; a stock limit that differs by
-record is a rule (forall i: amount[i] <= i.available_kg), not a variable bound (bounds are one number);
-a NETWORK FROM A SOURCE (fibre or pipes from an exchange or supply, roads to a depot, corridors to doors: "everything
-chosen must join the source along the links"): one binary pick[place] and ONE rule {{"connected": {{"assign":
-{{"var":"pick","index":["p"]}},"units":{{"index":"p","set":"place"}},"via":"road","sources":[{{"attr":"kind","op":"=",
-"value":"exchange"}}]}}}} -- sources is the where list that picks the start (or a 0/1 field); the relationship is
-loaded from the two-column file of links (relationships_from_file). Never write it as "a picked place touches a used
-link" or "has a picked neighbour": that lets cut-off islands through. No variable per link is needed;
-when the LINKS THEMSELVES are the decision (which cables, roads or pipes to build, at a cost per link -- network
-design, a spanning tree): links are records with two relationships to their places (link -> place, one per end),
-one binary lay[link], and ONE rule {{"join": {{"links":{{"index":"l","set":"segment"}},"build":{{"var":"lay",
-"index":["l"]}},"ends":["seg_a","seg_b"],"places":{{"index":"p","set":"site"}}}}}} -- add "sources" (as above) to
-join every place to a source instead of to each other, and "use": {{"var":"serve","index":["p"]}} when only some
-places must be joined (a link is then built only between two served places); with every place joined and a goal
-that only adds up link costs it is solved exactly as a minimum spanning tree; with sources, "demand" (a number field
-of the places: what each takes), "capacity" (of the links), "supply" (of the sources) and "carry" (an integer or
-continuous variable per link, which the goal may price per unit) make it a capacitated network design;
-SCHEDULING (operations on machines, steps in order, finish as early as possible): one record per operation --
-when no column is its key, join columns: "key": ["job","step"] (gives "Gear-1"), and load job and step as its
-fields; the order of steps is
-"relationships_in_order": [{{"type":"then","of":"op","by":"step","within":"job"}}] in the seed (it links each step
-to the next of the same job; declare "then": op -> op in relationship_types); the machine from the same file:
-relationships_from_file {{"type":"on","from":["op",["job","step"]],"to":["machine","machine"]}}; the duration a
-parameter per op (parameter_values_from_file with "entities": [["op", ["job","step"]]]). Decisions: begin and finish
-integer per op, makespan integer, and task {{"index":["op"],"domain":"interval","start":"begin","end":"finish",
-"size":"minutes"}}. Rules: {{"id":"c_machine","forall":[{{"index":"m","set":"machine"}}],"no_overlap":{{"interval":
-{{"var":"task","index":["o"]}},"over":[{{"index":"o","set":"op","via":{{"rel":"on","to":"m"}}}}]}},"severity":"hard"}};
-finish[a] <= begin[b] for b via then from a; finish[o] <= makespan. Goal: minimise makespan. Never invent "sub"
-or arithmetic on keys: order comes from relationships_in_order. The same "relationships_in_order" gives the next
-day or the next period of any sequence ("wrap": true for a repeating week); "by": "#row" keeps the file's own
-row order (month and weekday names sort by the calendar, other text naturally: "P2" before "P10");
-STOCK OVER PERIODS (production or inventory plans, stock carried from one period to the next, late delivery or
-backorders): periods linked in order ("relationships_in_order": [{{"type":"next","of":"month","by":"#row"}}]);
-decisions make[p], stock[p] (left at the end of p) and, when late delivery is allowed, owed[p] (demand still not
-delivered at the end of p), all >= 0. ONE balance rule for every period, the PREVIOUS one through the link -- the
-binding {{"index":"q","set":"month","via":{{"rel":"next","to":"p"}}}} (q -> p: the month BEFORE p; "from":"p" would be
-the month after) -- empty for the first period, so no rule needs "the first": forall p: sum over q of (stock[q] - owed[q]) +
-opening[p] + make[p] = p.demand + stock[p] - owed[p] -- opening a parameter per period, default 0, given only for
-the first (the starting stock); owed is extra demand, never supply, so it is SUBTRACTED on both sides. Everything
-delivered by the end: owed[p] = 0 for the last period (forall p where its name field = the last one). Costs:
-make x unit cost + stock x holding cost + owed x lateness cost, each summed over the periods;
-DECIDE BEFORE UNCERTAIN DATA ("demand could be anything from 100 to 300", "we only know it later"): declare the
-uncertain number in ir.parameters with its spread -- {{"demand":{{"index":[],"uncertainty":{{"kind":"interval",
-"deviation":0.5}}}}}} for 200 +/- 50% (evenly likely), or {{"kind":"scenarios","futures":[{{"label":"low","factor":0.7}},
-...]}} for named cases -- its value the middle (200); decisions made NOW get "stage": 1 (how many to bake or order),
-decisions made once it is known get "stage": 2 (how many sold: sell <= bake, sell <= demand). Build it, then call
-what_if on the Base scenario with "futures": 50: that plans for sampled futures; the plain run plans for the
-middle value only, so never report it as the answer to "on average";
-TWO GOALS THAT PULL APART, "show us the trade-off" (benefit against CO2, cost against service): the goal has
-exactly TWO terms, each one whole goal (e.g. maximise with benefit weight 1 and co2 weight -1), hard rules only;
-build it, then call what_if on the Base scenario with "front": 10 -- it returns every point of the front with what
-each chooses; report those points, never invent compromises or weights;
-CUTTING OR PACKING into identical rolls, bins or trucks (fewest rolls, least waste): never write the ways to cut
-yourself -- "patterns_that_fit": [{{"type":"pattern","of":"width","size":"width_cm","capacity":100,"count":"cuts"}}]
-in the seed makes every way to fill one roll (records "45 x2", "45 + 36 + 14", with fields used and waste) and
-cuts[pattern, width] (how many of each width a pattern holds). Decision uses[pattern] integer >= 0; rule forall w:
-sum over p of cuts[p, w] x uses[p] >= w.pieces; goal: minimise sum of uses (rolls) or of waste x uses;
-ROUTING (trucks from a depot visit places, least distance, capacity, time windows): places with their demand
-from the file; the trucks typed as entities with a capacity field (e.g. 3 records "truck1".. with "capacity": 15);
-distances from coordinate columns: "distances_from_fields": [{{"name":"distance","of":"place","x":"x_km","y":"y_km"}}]
-in the seed (straight lines, in the columns' unit; places from a map use the domain's distances instead); one
-binary visit[truck, place, place] and ONE rule {{"id":"c_routes","severity":"hard","route":{{"visit":{{"var":"visit",
-"index":["v","i","j"]}},"vehicles":{{"index":"v","set":"truck"}},"stops":{{"index":"i","set":"place"}},"depot":"<the
-depot's key>","demand":"<the places' demand field>","capacity":"<the trucks' capacity field>"}}}} (time windows add
-"travel":"<a time parameter>","earliest","latest","service": place fields). Goal: minimise the sum over v, i, j of
-distance[i, j] * visit[v, i, j]. Never write the visiting, sub-tour or load rules yourself: the route rule holds them.
+PATTERNS (modelling idioms, the same for every problem; recognise them by their structure, not by the subject):
+A VALUE PER PAIR limits which pairs may be used (a measure per pair of records must stay under a limit, a level per
+pair must reach a minimum): load that column as its own parameter indexed by the pair, e.g. measure[a,b] with
+parameter_values_from_file, then for every pair "measure[a,b] * use[a,b] <= limit" (for >=: "level[a,b] >= minimum *
+use[a,b]") -- linear, because use is binary; one file column per parameter, several *_from_file entries may read the
+same file; a pair the file does not list gets the parameter's default_value (set it to forbid: e.g. 999999); a file
+that only LISTS the allowed or forbidden pairs is a 0/1 parameter ("value": 1), with "where" on a column to keep
+only some rows ("where": [{{"column": "<col>", "op": "=", "value": "yes"}}]);
+A NUMBER THAT DEPENDS ON A RECORD'S KIND (one kind costs 1.3 times as much): a parameter indexed by that set,
+factor[kind] (1.3 for that kind, default 1), multiplied in (nested mul);
+ONE PARTICULAR RECORD in a rule: a binding with where [{{"attr":"id","op":"=","value":"<its key>"}}];
+CONSECUTIVE MEMBERS OF AN ORDERED SET (not B in the member right after A): a relationship next (t -> t, one link
+per pair, made by "relationships_in_order", declared in "relationships"), then forall r, t, and t2 bound
+{{"via":{{"rel":"next","from":"t"}}}}: x[r,t,A] + x[r,t2,B] <= 1;
+REQUESTS TO HONOUR IF POSSIBLE: a 0/1 parameter from the list, and a goal term (or soft rule) counting the cells that
+break it: sum of asked[r,t] * x[r,t,k];
+EXACTLY ONE / AT MOST ONE PER GROUP: sum of pick over the group's members (via a relationship, or a where) = 1 or <= 1;
+A LIMIT ON A TOTAL (capacity, budget, hours): sum of amount x size <= limit;
+COVERING (every requirement met by at least one chosen option): sum of open over the options that cover it >= 1, the
+"covers" pairs loaded as a relationship or a 0/1 parameter;
+EXCLUSIVE USE (one user per shared resource at a time): sum over the things occupying it <= 1;
+ONLY IF CHOSEN (an amount, a use or a cost exists only when a yes/no choice is made): x <= M * y with M the smallest
+valid bound (a capacity, a demand, the largest amount possible); a fixed charge is cost x y in the goal;
+THE LARGEST OF SEVERAL CONTRIBUTIONS (effects that overlap and do NOT add up: the level reached is the best one
+chosen): level[a] <= sum over options o of value[o,a] * best[o,a], sum over o of best[o,a] <= 1, best[o,a] <=
+pick[o] -- never "level >= value * pick", which lets the level reach any height with nothing chosen;
+A SHARE OF A TOTAL ("at least 18% of the mix is X", "at most 5% from one source"): linear once multiplied out --
+sum over i of share_i x amount[i] >= 0.18 x sum over i of amount[i], or, when the total is fixed, >= 0.18 x total:
+{{"left":{{"sum":{{"mul":[{{"attr":{{"of":"i","name":"x_pct"}}}},{{"var":"amount","index":["i"]}}]}},
+"over":[{{"index":"i","set":"input"}}]}},"relation":">=","right":{{"mul":[{{"par":"min_share"}},
+{{"par":"total"}}]}}}} -- note "over" sits BESIDE "sum", never inside it; a limit that differs by record is a rule
+(forall i: amount[i] <= i.available), not a variable bound (bounds are one number);
+RANKED GOALS: "lex" in the user's order, soft rules for targets that may be out of reach, then report how far short;
+CONNECTED TO A SOURCE ("everything chosen must join a source along the links"): one binary pick[node] and ONE rule
+{{"connected": {{"assign": {{"var":"pick","index":["n"]}},"units":{{"index":"n","set":"node"}},"via":"link",
+"sources":[{{"attr":"kind","op":"=","value":"source"}}]}}}} -- sources is the where list that picks the start (or a
+0/1 field); the relationship is loaded from the two-column file of links (relationships_from_file). Never write it
+as "a picked node touches a used link" or "has a picked neighbour": that lets cut-off islands through. No variable
+per link is needed;
+THE LINKS THEMSELVES ARE THE DECISION (which links to build, at a cost per link -- network design, a spanning tree):
+links are records with two relationships to their nodes (link -> node, one per end), one binary build[link], and
+ONE rule {{"join": {{"links":{{"index":"l","set":"link"}},"build":{{"var":"build","index":["l"]}},"ends":["end_a",
+"end_b"],"places":{{"index":"n","set":"node"}}}}}} -- add "sources" (as above) to join every node to a source
+instead of to each other, and "use": {{"var":"serve","index":["n"]}} when only some nodes must be joined (a link is
+then built only between two served nodes); with every node joined and a goal that only adds up link costs it is
+solved exactly as a minimum spanning tree; with sources, "demand" (a number field of the nodes: what each takes),
+"capacity" (of the links), "supply" (of the sources) and "carry" (an integer or continuous variable per link, which
+the goal may price per unit) make it a capacitated network design;
+TASKS IN ORDER ON SHARED RESOURCES, finish as early as possible: one record per task -- when no column is its key,
+join columns: "key": ["group","step"] (gives "A-1"), and load group and step as its fields; the order of steps is
+"relationships_in_order": [{{"type":"then","of":"task","by":"step","within":"group"}}] in the seed (it links each
+step to the next of the same group; declare "then": task -> task in relationship_types); the resource from the same
+file: relationships_from_file {{"type":"on","from":["task",["group","step"]],"to":["resource","resource"]}}; the
+duration a parameter per task (parameter_values_from_file with "entities": [["task", ["group","step"]]]).
+Decisions: begin and finish integer per task, makespan integer, and slot {{"index":["task"],"domain":"interval",
+"start":"begin","end":"finish","size":"duration"}}. Rules: {{"id":"c_resource","forall":[{{"index":"r",
+"set":"resource"}}],"no_overlap":{{"interval":{{"var":"slot","index":["o"]}},"over":[{{"index":"o","set":"task",
+"via":{{"rel":"on","to":"r"}}}}]}},"severity":"hard"}}; finish[a] <= begin[b] for b via then from a; finish[o] <=
+makespan. Goal: minimise makespan. Never invent "sub" or arithmetic on keys: order comes from relationships_in_order.
+The same "relationships_in_order" gives the next member of any ordered set ("wrap": true for a repeating cycle);
+"by": "#row" keeps the file's own row order (calendar names sort by the calendar, other text naturally: "P2" before
+"P10");
+A QUANTITY CARRIED FROM ONE PERIOD TO THE NEXT (anything left at the end of a period is there at the start of the
+next; late delivery or backlog may be allowed): periods linked in order ("relationships_in_order":
+[{{"type":"next","of":"period","by":"#row"}}]); decisions in[p], carried[p] (left at the end of p) and, when
+lateness is allowed, owed[p] (still owed at the end of p), all >= 0. ONE balance rule for every period, the
+PREVIOUS one through the link -- the binding {{"index":"q","set":"period","via":{{"rel":"next","to":"p"}}}} (q -> p:
+the period BEFORE p; "from":"p" would be the period after) -- empty for the first period, so no rule needs "the
+first": forall p: sum over q of (carried[q] - owed[q]) + initial[p] + in[p] = p.out + carried[p] - owed[p] --
+initial a parameter per period, default 0, given ONLY for the first period (the starting amount): never add the
+starting amount in every period, and never write a second balance for the first period; owed is extra outflow,
+never inflow, so it is SUBTRACTED on both sides. Everything settled by the end: owed[p] = 0 for the last period
+(forall p where its key = the last one). Costs: in x unit cost + carried x carrying cost + owed x lateness cost, each
+summed over the periods;
+DECIDE BEFORE UNCERTAIN DATA ("could be anything from 100 to 300", "we only know it later"): declare the uncertain
+number in ir.parameters with its spread -- {{"value_u":{{"index":[],"uncertainty":{{"kind":"interval",
+"deviation":0.5}}}}}} for 200 +/- 50% (evenly likely), or {{"kind":"scenarios","futures":[{{"label":"low",
+"factor":0.7}}, ...]}} for named cases -- its value the middle (200); decisions made NOW get "stage": 1, decisions
+made once it is known get "stage": 2 (later <= now, later <= the uncertain value). Build it, then call what_if on
+the Base scenario with "futures": 50: that plans for sampled futures; the plain run plans for the middle value only,
+so never report it as the answer to "on average";
+TWO GOALS THAT PULL APART, "show us the trade-off": the goal has exactly TWO terms, each one whole goal (e.g.
+maximise with one weight 1 and the other -1), hard rules only; build it, then call what_if on the Base scenario with
+"front": 10 -- it returns every point of the front with what each chooses; report those points, never invent
+compromises or weights;
+FILLING IDENTICAL CONTAINERS (fewest containers, least waste, from pieces of given sizes): never write the ways to
+fill one yourself -- "patterns_that_fit": [{{"type":"pattern","of":"piece","size":"size","capacity":100,
+"count":"fits"}}] in the seed makes every way to fill one container (records "45 x2", "45 + 36 + 14", with fields
+used and waste) and fits[pattern, piece] (how many of each piece a pattern holds). Decision uses[pattern] integer >=
+0; rule forall k: sum over p of fits[p, k] x uses[p] >= k.needed; goal: minimise sum of uses or of waste x uses;
+TOURS FROM A HUB (vehicles leave a hub, visit stops, return; least distance, capacity, time windows): stops with
+their demand from the file; the vehicles typed as entities with a capacity field (e.g. 3 records "v1".. with
+"capacity": 15); distances from coordinate columns: "distances_from_fields": [{{"name":"distance","of":"stop",
+"x":"x","y":"y"}}] in the seed (straight lines, in the columns' unit; places from a map use the domain's distances
+instead); one binary visit[vehicle, stop, stop] and ONE rule {{"id":"c_routes","severity":"hard","route":{{"visit":
+{{"var":"visit","index":["v","i","j"]}},"vehicles":{{"index":"v","set":"vehicle"}},"stops":{{"index":"i",
+"set":"stop"}},"depot":"<the hub's key>","demand":"<the stops' demand field>","capacity":"<the vehicles' capacity
+field>"}}}} (time windows add "travel":"<a time parameter>","earliest","latest","service": stop fields). Goal:
+minimise the sum over v, i, j of distance[i, j] * visit[v, i, j]. Never write the visiting, sub-tour or load rules
+yourself: the route rule holds them.
 
 TOOL CALLS: only through the tool interface, never as text in your reply; valid JSON with unique keys (each list,
 e.g. entity_types or constraints, once, with all its items); keep each call small (load rows from files, never
@@ -1608,7 +1623,8 @@ check_spec. When unsure how to write a rule, pick the closest PATTERN, check_spe
 repeat it unchanged. Never say something was built, imported, solved or checked unless a tool result in this
 turn shows it.
 
-EXAMPLE (a complete, valid spec): "fund the most valuable city projects within 500k; at most two in district A"
+EXAMPLE (a complete, valid spec; the subject is neutral on purpose): "choose the items worth most within a total
+of 500; at most two from group a"
 {json.dumps(EXAMPLE_SPEC, separators=(",", ":"))}
 
 Today is {time.strftime('%Y-%m-%d')}."""
@@ -1616,7 +1632,7 @@ Today is {time.strftime('%Y-%m-%d')}."""
 
 def system_prompt(index: ApiIndex, ctx: Context, native: bool) -> str:
     attached = agent_files.outline(ctx.files)
-    path_tool = ("run_python has networkx too (graphs, paths, connectivity, e.g. which cells reach a door)."
+    path_tool = ("run_python has networkx too (graphs, paths, connectivity, e.g. which cells reach an access point)."
                  if ctx.can_run_python else "")
     tools = list(MODEL_TOOLS if ctx.mode == "model" else TOOLS) + ([sandbox.SCHEMA] if ctx.can_run_python else [])
     if ctx.mode == "model":
@@ -1640,7 +1656,7 @@ Endpoint groups (tag (count)): {index.tag_overview()}
 
 How to work:
 0. A NEW PROBLEM TO MODEL AND SOLVE (the person describes what to choose, assign, schedule, place or mix, with a goal
-   such as most beds or least cost, and no problem for it exists yet): call hand_to_describe at once. Do not create
+   such as most items placed or least cost, and no problem for it exists yet): call hand_to_describe at once. Do not create
    kinds of record, records or relationships for it yourself; the Describe a problem tab does all of that.
 1. Use only tools listed in the current tool schema; never call an unavailable tool. Make one API call at a time.
    For writes, search_endpoints -> describe_endpoint -> call_api. Never guess a request body; describe it first.

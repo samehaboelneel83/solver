@@ -332,7 +332,7 @@ def test_creating_the_domain_with_call_api_is_refused_with_where_it_goes():
 def test_the_prompt_keeps_unrelated_problems_out_of_the_selected_domain_and_has_the_blend_pattern():
     prompt = core.model_prompt(core.Context("x", mode="model", domain_id=31))
     assert "never put an unrelated problem into the selected domain" in prompt
-    assert "a MIX or BLEND" in prompt and "BESIDE" in prompt
+    assert "A SHARE OF A TOTAL" in prompt and "BESIDE" in prompt
     assert "call what_if" in prompt and "never extrapolate" in prompt
 
 
@@ -649,7 +649,7 @@ def test_an_answer_placed_by_metres_offers_no_empty_map():
 def test_the_prompt_teaches_a_network_from_a_source_as_one_connected_rule():
     """Fibre test: the model wrote "a picked place touches a used road" (islands pass) and made roads records."""
     prompt = core.model_prompt(core.Context("x", mode="model"))
-    assert "NETWORK FROM A SOURCE" in prompt and '"sources":[{"attr":"kind"' in prompt
+    assert "CONNECTED TO A SOURCE" in prompt and '"sources":[{"attr":"kind"' in prompt
     assert "relationships_from_file" in prompt and "cut-off islands" in prompt
 
 

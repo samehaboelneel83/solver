@@ -108,8 +108,8 @@ def test_the_prompts_example_spec_is_a_valid_model_and_builds_all_or_nothing(ten
 def test_a_spec_that_would_be_half_built_is_refused_with_every_place_named(tenants, db):
     spec = _spec("broken")
     spec["seed"]["parameters"].append({"name": "demand", "index": ["day"]})            # no such type
-    spec["seed"]["entities"].append({"type": "project", "key": "x", "attrs": {"colour": "red"}})  # no such field, cost missing
-    spec["seed"]["parameter_values"] = [{"parameter": "budget", "entities": [["project", "roof"]], "value": 1}]
+    spec["seed"]["entities"].append({"type": "item", "key": "x", "attrs": {"colour": "red"}})  # no such field, cost missing
+    spec["seed"]["parameter_values"] = [{"parameter": "limit", "entities": [["item", "i1"]], "value": 1}]
     response = TestClient(app).post("/api/v1/problems/from-spec", json=spec, headers=tenants["b"])
     assert response.status_code == 422
     places = {tuple(e["loc"]) for e in response.json()["detail"]}
