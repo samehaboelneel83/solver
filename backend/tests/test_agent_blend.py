@@ -1651,6 +1651,18 @@ def test_a_product_of_one_part_and_a_stray_backslash_are_put_right():
     assert toolcall.strict_loads(raw)["summary"] == 'ship: Continuous $\\ge$ 0, path C:\\data, a "quote"\n'
 
 
+def test_relationships_written_as_objects_are_listed_by_name():
+    """The evaluation (10 October 2026): "relationships": [{"name": "next", ...}] crashed the plan check four turns
+    running ("unhashable type: 'dict'")."""
+    from app.agent.repair import repair
+
+    spec = {"seed": {}, "ir": {"version": 2, "sets": ["week"], "relationships": [
+        {"name": "next", "from": "week", "to": "week"}, "after", {"from": "week"}]}}
+    notes = repair(spec)
+    assert spec["ir"]["relationships"] == ["next", "after"] and any("by their names" in n for n in notes)
+    assert core._platform_order_faults({"ir": {"relationships": [{"name": "next"}]}, "seed": {}}, None, [], set())
+
+
 def test_a_bracket_dropped_or_doubled_in_a_long_spec_is_mended():
     """The production-planning trace: `{"attr": {"of": "p", "name": "rate"}, {"var": ...` -- one brace short, in the
     middle of a 12 KB spec, six times. Any closer dropped or doubled anywhere gives valid JSON back."""

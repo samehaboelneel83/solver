@@ -51,6 +51,7 @@ Settings (environment):
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import time
@@ -582,7 +583,12 @@ def _platform_order_faults(spec: dict, workspace: dict | None, files: list[dict]
     for r in (workspace or {}).get("relationship_types") or []:
         links[r.get("name")] = links.get(r.get("name"), 0) + int(r.get("links") or 0)
     for name in ir.get("relationships") or []:
-        if not links.get(name):
+        # A relationship written as an object ({"name": "next", "from": "week", ...}) is its name (the evaluation,
+        # 10 October 2026: "unhashable type: 'dict'" ended four turns running and lost the run).
+        name = name.get("name") if isinstance(name, dict) else name
+        if not isinstance(name, str) or not links.get(name):
+            if not isinstance(name, str):
+                continue
             declared = next((r for r in seed.get("relationship_types") or []
                              if isinstance(r, dict) and r.get("name") == name), None)
             endpoints = (f' Its declared endpoints are {declared.get("from")} -> {declared.get("to")}.'
@@ -3528,6 +3534,9 @@ class Agent:
         except LlmError as e:
             yield {"type": "error", "text": str(e)}
         except Exception as e:  # noqa: BLE001 -- the conversation so far is still returned
+            # Logged with its traceback: the evaluation of 10 October lost a run to "unhashable type: 'dict'" four
+            # turns running, and the log said only that.
+            logging.getLogger("solver.assistant").exception("assistant.turn_failed")
             yield {"type": "error", "text": f"{type(e).__name__}: {e}"}
         yield {"type": "state", "messages": messages, "wrote": self.wrote}
 

@@ -344,6 +344,13 @@ def repair(spec: dict[str, Any]) -> list[str]:
             declared.add(name)
             notes.append(f"parameter {name} had values in the seed but was declared only in ir.parameters; it was "
                          f"declared in the seed's parameters too, over {', '.join(index) or 'nothing'}")
+    rels = ir.get("relationships")
+    if isinstance(rels, list) and any(isinstance(r, dict) for r in rels):
+        # Relationships written as objects ({"name": "next", "from": "week", "to": "week"}): the IR lists their
+        # names; what they link is the seed's (the evaluation, 10 October 2026: four turns lost to it).
+        ir["relationships"] = [r.get("name") if isinstance(r, dict) else r for r in rels
+                               if isinstance(r, str) or (isinstance(r, dict) and isinstance(r.get("name"), str))]
+        notes.append("relationships written as objects were listed by their names; what they link is the seed's")
     if "sets" not in ir:
         # A model over no records (the bakery test: one quantity, one uncertain number) still states its sets.
         ir["sets"] = []
