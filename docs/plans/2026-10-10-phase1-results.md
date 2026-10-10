@@ -227,3 +227,25 @@ what. The multi-period, inventory and multi-objective parts were never reached.
 Not yet fixed: a layout rule for corridors "at least W wide all the way" (#3), the run's answer map
 without the placed items (#3), the "cannot be solved" notice above a solved run (#3), and alternatives for
 unbounded whole-number decisions (#1, #2).
+
+## The small cases again, after the fixes (rerun 20:18–22:17)
+
+| # | Problem | Before | After | Notes after |
+|---|---|---|---|---|
+| 2 | Supply chain | wrong (rule broken) | **right** — 16,249, 2.5 min | every rule held, 6 of 6 report items |
+| 4 | Factory | wrong (10x profit) | **right** — 963, 5.5 min | one "continue" caused by the harness restarting the frontend mid-run |
+| 6 | Timetabling | platform crash | not built | the model's own errors (a link field that does not exist), repeated |
+| 1 | Hospital | right | **right** — 83, 3.4 min | |
+| 8 | Cybersecurity | wrong, silent | wrong, **warned** | "CHECK THIS: pick can never help" on the plan card; the harness approved it before it learned to read the card |
+| 7 | Smart grid | not built | not built | a "next hour" link used but never declared |
+| 9 | Cloud | no solve behind the result | **right** — 106.645, 11.6 min | an actual run this time |
+| 5 | Ambulances | not built | not built | a record named before it was made; the duplicate-id JSON slip; a go-ahead lost in a summary (fixed after) |
+| 3 | Camp layout | 34 beds without a 1.2 m way | same | the layout rule was not changed |
+| 10 | Disaster response | not built | **right** — 113,733, 6.2 min | |
+
+**5 right in 10, from 1.** Of the rest: one wrong answer that the plan card warned about, one wrong
+answer from a rule the platform does not yet have (#3), three not built. No answer was reported without a
+run, no plan broke a rule silently except #3, and no run crashed.
+
+The full check passed on the fixes except one frontend test that timed out under the load of the browser
+runs; it passes on its own (22 of 22).
