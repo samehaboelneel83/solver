@@ -438,6 +438,9 @@ _ASKS = re.compile(r"(?:open questions|shall i (?:proceed|go ahead|build)|do you
 _NEW_WORKSPACE = re.compile(r"\b(?:new|fresh|separate|another) (?:workspace|domain)\b|\bstart (?:from scratch|fresh)\b",
                             re.I)
 _SAME_WORKSPACE = re.compile(r"\b(?:existing|same|this|selected|current|old) (?:workspace|domain)\b", re.I)
+PASTED_ATTACHED = ("The tables pasted in that message are attached as files: {files}. Load their rows with "
+                   "entities_from_file / parameter_values_from_file (and query_file to add up), never by typing the "
+                   "rows into the plan.")
 NEW_WORKSPACE_ASKED = ("The user asked for a NEW workspace: put domain_name (a new, unused name) in the spec instead of "
                        "domain_id, and make the records afresh from the files -- do not reuse the selected workspace's "
                        "records.")
@@ -3710,6 +3713,25 @@ class Agent:
         return (PLATFORM + "Looked up from the person's message: " + "; ".join(said)
                 + ". Use these ids directly (read_result, what_if, GET); they need no other workspace selected.")
 
+    def _attach_pasted(self, messages: list[dict]) -> list[str]:
+        """The tables pasted into the person's messages, attached as files (each turn: the browser sends only
+        its own attachments); returns the ones new in the last message, as "name (n rows)"."""
+        new: list[str] = []
+        people = [m for m in messages if m.get("role") == "user" and not str(m.get("content") or "").startswith(PLATFORM)]
+        for k, m in enumerate(people):
+            for name, text in agent_files.pasted_tables(str(m.get("content") or "")):
+                if any(f.get("name") == name for f in self.ctx.files):
+                    continue
+                try:
+                    parsed = agent_files.parse(name, text.encode("utf-8"))
+                except agent_files.FileRefused:
+                    continue
+                parsed["pasted"] = True
+                self.ctx.files = list(self.ctx.files) + [parsed]
+                if k == len(people) - 1:
+                    new.append(f"{name} ({parsed['sheets'][0]['total_rows']} rows)")
+        return new
+
     def _is_write(self, c: dict) -> bool:
         return c["function"]["name"] == "what_if" or (
             c["function"]["name"] == "call_api" and str(_args(c).get("method", "GET")).upper() != "GET")
@@ -3752,6 +3774,9 @@ class Agent:
             self.wrote |= any(self._is_write(c) and (allow or not self._needs_ok(c)) for c in pending)
             yield from self._execute(pending, messages, allow)
 
+        attached = self._attach_pasted(messages)
+        if attached and last and last["role"] == "user" and not str(last.get("content") or "").startswith(PLATFORM):
+            messages.append({"role": "user", "content": PLATFORM + PASTED_ATTACHED.format(files="; ".join(attached))})
         if last and last["role"] == "user" and not str(last.get("content") or "").startswith(PLATFORM):
             found = self._named_records(str(last.get("content") or ""))
             if found:

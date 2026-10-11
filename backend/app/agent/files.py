@@ -131,6 +131,57 @@ def _parse(filename: str, data: bytes, max_bytes: int) -> dict[str, Any]:
     return {"name": filename, "sheets": sheets}
 
 
+# -- tables pasted into a message ---------------------------------------------------
+
+_TIGHT = re.compile(r",(?! )")
+
+
+def _row_like(line: str) -> int:
+    """How many cells a line holds if it reads as a CSV row (commas with no space after them), else 0."""
+    line = line.strip()
+    if not line or ", " in line or not _TIGHT.search(line):
+        return 0
+    return line.count(",") + 1
+
+
+def _slug(heading: str, taken: set[str]) -> str:
+    named = re.search(r"([\w-]+\.csv)\b", heading)
+    if named:
+        base = named.group(1)[:-4].lower()
+    else:
+        words = re.findall(r"[A-Za-z0-9]+", re.split(r"[(:]", heading, 1)[0].lower())[:4]
+        base = "_".join(words) or "table"
+    name, n = f"{base}.csv", 2
+    while name in taken:
+        name, n = f"{base}_{n}.csv", n + 1
+    return name
+
+
+def pasted_tables(text: str) -> list[tuple[str, str]]:
+    """The tables a person pasted into a message (a heading, a header row, rows with as many cells), as
+    (file name, CSV text). The phase 1 evaluation, 11 October 2026: a 200-row table pasted into the request was
+    copied into the plan by hand -- 34,000-character replies, cut at the length limit, in every run."""
+    lines = (text or "").splitlines()
+    found: list[tuple[str, str]] = []
+    taken: set[str] = set()
+    i = 0
+    while i < len(lines):
+        width = _row_like(lines[i])
+        if width < 2 or any(re.fullmatch(r"-?[\d.]+", c.strip()) for c in lines[i].split(",")):
+            i += 1
+            continue
+        j = i + 1
+        while j < len(lines) and _row_like(lines[j]) == width:
+            j += 1
+        if j - i >= 2:
+            heading = next((lines[k].strip() for k in range(i - 1, max(-1, i - 3), -1) if lines[k].strip()), "")
+            name = _slug(heading, taken)
+            taken.add(name)
+            found.append((name, "\n".join(l.strip() for l in lines[i:j]) + "\n"))
+        i = max(j, i + 1)
+    return found
+
+
 # -- for the model ------------------------------------------------------------------
 
 

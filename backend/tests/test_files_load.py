@@ -123,3 +123,40 @@ def test_one_number_declared_in_the_seed_is_read_with_no_index_however_written()
     assert left == [{"par": "rate", "index": []}, {"par": "rate", "index": []}]
     assert spec["ir"]["constraints"][0]["right"] == {"par": "cost", "index": ["w"]}
     assert any("rate hold one number" in n for n in notes)
+
+
+PASTED = """Please plan this.
+
+Candidate stations (coordinates in km):
+id,x_km,y_km,bays
+ST001,4.72,7.98,2
+ST002,8.58,11.83,3
+
+Road travel time from each station to each zone (minutes):
+station,zone,road_minutes
+ST001,Z001,12
+ST001,Z002,30
+ST002,Z001,7
+
+Pairs:
+a,b
+
+Rules: open at most 3 stations, costs 1,200 a day, and say which, why, and how."""
+
+
+def test_tables_pasted_into_a_message_are_read_as_files():
+    found = files.pasted_tables(PASTED)
+    assert [n for n, _ in found] == ["candidate_stations.csv", "road_travel_time_from.csv"]
+    assert found[1][1].splitlines()[0] == "station,zone,road_minutes" and len(found[1][1].splitlines()) == 4
+
+
+def test_the_assistant_attaches_pasted_tables_once_and_says_so():
+    from app.api import agent as agent_api
+    from app.agent import core
+
+    agent = core.Agent(core.Settings(), agent_api._index, lambda *a, **k: {"ok": True, "body": {}}, core.Context("x"))
+    messages = [{"role": "user", "content": PASTED}]
+    said = agent._attach_pasted(messages)
+    assert said == ["candidate_stations.csv (2 rows)", "road_travel_time_from.csv (3 rows)"]
+    assert [f["name"] for f in agent.ctx.files] == ["candidate_stations.csv", "road_travel_time_from.csv"]
+    assert agent._attach_pasted(messages) == [] and len(agent.ctx.files) == 2
