@@ -292,6 +292,9 @@ Built from `main` without step 3b's paragraph. On top of step 4 it holds:
   decision 0, or every decision but one);
 - repairs: a list loaded or typed as 1 on a default of 1 gets default 0 (said on the card); one number read with
   an index, or with none, reads as one number;
+- send-backs: a trial plan that does nothing goes back to the Assistant before the person sees it (within the
+  two send-backs a plan with no answer already has), with what to look for: a missing rule, or a goal that lets
+  doing nothing win;
 - tables pasted into a message are attached as files, and the Assistant is told to load them;
 - plan E.1: with an aisle width, a way to an entrance must be that wide all along (the placement solver's
   reachability is now the eroded free area's door components, dilated back -- the layout checker's own test);

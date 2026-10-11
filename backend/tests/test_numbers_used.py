@@ -50,3 +50,13 @@ def test_a_plan_that_does_nothing_is_named_on_the_card_and_to_the_model():
     assert "the plan does nothing" in trial_said({"status": "optimal", "objective": 335000, "used": used, "seconds": 1})
     fine = {"open": {"non_zero": 2, "cells": 3}, "ship": {"non_zero": 20, "cells": 54}, "unmet": {"non_zero": 0, "cells": 18}}
     assert idle_decisions(fine) == [] and "CHECK THIS" not in trial_for_person({"status": "optimal", "used": fine})
+
+
+def test_a_plan_that_does_nothing_goes_back_to_the_model_before_the_person_sees_it():
+    from app.agent.core import trial_sent_back
+
+    used = {"open": {"non_zero": 0, "cells": 3}, "ship": {"non_zero": 0, "cells": 54}, "unmet": {"non_zero": 18, "cells": 18}}
+    back = trial_sent_back({"status": "optimal", "objective": 1, "used": used})
+    assert back.startswith("The plan was NOT shown to the user: solved once on its real data, it does nothing -- open, ship")
+    assert "only unmet is used" in back
+    assert trial_sent_back({"status": "optimal", "used": {"open": {"non_zero": 2, "cells": 3}, "ship": {"non_zero": 9, "cells": 54}}}) == ""

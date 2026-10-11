@@ -1797,10 +1797,10 @@ def trial_sent_back(trial: Any) -> str:
         rules = conflict_said(trial)
         return ("The plan was NOT shown to the user: solved once on its real data, it has NO answer (infeasible). "
                 "The problem the person described almost certainly has one, so a rule is written wrong -- a term on "
-                "the wrong side (something that adds room, like overtime or extra capacity, written where it uses "
-                "room up), a sign, a balance read the wrong way, a limit that should be a floor, or a rule written "
-                "for every record that must leave out the first or the last one (a balance from the week before also "
-                "written for the first week, where no week comes before, clashes with the opening rule). "
+                "the wrong side (something that adds room, like extra capacity, written where it uses room up), a "
+                "sign, a balance read the wrong way, a limit that should be a floor, or a rule written for every "
+                "record that must leave out the first or the last one (a balance from the period before also "
+                "written for the first period, where no period comes before, clashes with the opening rule). "
                 + (f"These rules cannot hold together: {rules}. " if rules else "")
                 + "Read each of them against the person's words, term by term and side by side, fix what is wrong "
                 "and call propose_plan again. A plan that still has no answer is shown to the person with this warning.")
@@ -1808,6 +1808,16 @@ def trial_sent_back(trial: Any) -> str:
         return ("The plan was NOT shown to the user: solved once on its real data, its goal can grow without limit "
                 "(unbounded), so a bound or a rule the person described is missing or reads the wrong way. Find it, "
                 "fix it and call propose_plan again; a plan still without a limit is shown with this warning.")
+    idle = idle_decisions(trial.get("used") or {}) if isinstance(trial, dict) else []
+    if status in ("optimal", "feasible") and idle:
+        used = [v for v in (trial.get("used") or {}) if v not in idle]
+        return ("The plan was NOT shown to the user: solved once on its real data, it does nothing -- "
+                f"{', '.join(idle)} are 0 everywhere and only {', '.join(used)} is used. A person who describes "
+                "something to be done expects it done: either a rule that forces it is missing (a demand to meet, a "
+                "least amount, a count to reach), or the goal lets doing nothing win (what is left undone costs "
+                "nothing, or the goal's sense is reversed). Read the person's words for what must happen, add the "
+                "rule or the cost, and call propose_plan again. A plan that still does nothing is shown with this "
+                "warning.")
     return ""
 
 

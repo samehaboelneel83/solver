@@ -76,6 +76,10 @@ def test_the_platforms_own_messages_name_no_domain():
         + core.trial_for_person({"status": "infeasible", "used": used})
     texts["trial.model"] = core.trial_said({"status": "optimal", "objective": 1, "used": used, "seconds": 1}) \
         + core.trial_said({"status": "infeasible", "used": used, "seconds": 1})
+    texts["trial.sent_back"] = core.trial_sent_back({"status": "infeasible", "used": used}) \
+        + core.trial_sent_back({"status": "unbounded"}) \
+        + core.trial_sent_back({"status": "optimal", "used": used})
+    texts["shape.sent_back"] = core.shape_sent_back([{"kind": "unread", "said": "x is given and no rule reads it"}])
     texts["numbers.card"] = core.numbers_for_person([{"role": "user", "content": "at most 70 and 15%"}], {"seed": {}, "ir": {}})
     spec = {"seed": {"parameters": [{"name": "rate", "default_value": 2}, {"name": "allowed", "index": ["a"], "default_value": 1}],
                      "parameter_values": [{"parameter": "allowed", "entities": [["a", "a1"]], "value": 1}]},
