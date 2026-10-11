@@ -209,3 +209,19 @@ def test_an_approved_plan_builds_with_the_pasted_tables_attached():
     first = next(agent._run(messages, allow=True))
     assert first["type"] == "answer"
     assert seen == [["candidate_stations.csv", "road_travel_time_from.csv"]]
+
+
+def test_a_term_with_over_and_no_sum_is_read_as_a_sum_over_the_binding():
+    """11 October 2026: {"add": [...], "over": [b]} was refused six times running, and the Assistant gave up."""
+    from app.agent import repair
+
+    b = {"index": "r", "set": "record"}
+    spec = {"seed": {}, "ir": {"version": 2, "constraints": [
+        {"id": "c", "left": {"var": "x", "index": []}, "relation": "<=",
+         "right": {"add": [{"var": "y", "index": ["r"]}, {"par": "p", "index": ["r"]}], "over": [b]}},
+        {"id": "d", "left": {"sum": {"var": "y", "index": ["r"]}, "over": [b]}, "relation": "<=", "right": {"const": 1}}]}}
+    notes = repair.repair(spec)
+    right = spec["ir"]["constraints"][0]["right"]
+    assert right == {"sum": {"add": [{"var": "y", "index": ["r"]}, {"par": "p", "index": ["r"]}]}, "over": [b]}
+    assert spec["ir"]["constraints"][1]["left"] == {"sum": {"var": "y", "index": ["r"]}, "over": [b]}
+    assert any('written with "over" and no "sum"' in n for n in notes)

@@ -56,6 +56,15 @@ def _lift_sum(term: dict[str, Any], notes: list[str]) -> None:
 
 def _walk(node: Any, notes: list[str]) -> None:
     if isinstance(node, dict):
+        if "over" in node and "sum" not in node and any(k in node for k in ("add", "mul", "var", "par", "attr", "const")):
+            # A term written with "over" and no "sum" (the evaluation, 11 October 2026: {"add": [...], "over":
+            # [b]} refused six times as '"over" is not a key an add term carries', and the Assistant gave up):
+            # it is the sum of that term over the binding.
+            over = node.pop("over")
+            inner = {k: node.pop(k) for k in list(node) if k not in ("note",)}
+            node["sum"] = inner
+            node["over"] = over
+            notes.append('a term written with "over" and no "sum" was read as {"sum": <the term>, "over": [...]}')
         if "sum" in node:
             _lift_sum(node, notes)
             if "default" in node and node["default"] in (0, None) and not isinstance(node["default"], bool):

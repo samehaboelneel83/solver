@@ -406,3 +406,7 @@ general: a decision used on a cell where a parameter over the same record kinds 
 applied there; on the card as CHECK THIS with the cells, and to the model with the rule shape (keep the
 decision to the pairs given). The same class as the allowed-list mistake, now caught from the answer rather than
 from the data's shape.
+
+Also queued (19:20): a term written with "over" and no "sum" is read as the sum of the term over the binding
+(p07 under step 5: {"add": [...], "over": [b]} refused six times with the same message; the Assistant gave up
+twice and the case was not built). A canonical-form repair, general.
