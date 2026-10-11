@@ -69,3 +69,23 @@ def test_a_number_given_to_compare_or_report_against_is_not_flagged():
                                             "cost with our current plan, whose cost is 17,305, and report the "
                                             "saving against today, when all 4 are on. Also at most 70 a day."}]
     assert unused_numbers(messages, _spec()) == ["70"]
+
+
+def test_a_decision_used_where_a_pair_parameter_gives_no_value_is_named():
+    """11 October 2026: a product made on a machine the times file never lists (its time defaulted to 0)."""
+    from app.agent.core import trial_for_person, trial_said
+    from app.api.model_spec import used_without_data
+
+    ir = {"variables": {"produce": {"index": ["product", "machine", "shift"]}, "on": {"index": ["machine"]}},
+          "parameters": {"time": {"index": ["product", "machine"]}, "demand": {"index": ["product"]}}}
+    data = {"parameters": {"time": [{"product": "P1", "machine": "M2", "value": 0.1}, {"product": "P2", "machine": "M2", "value": 0.2}],
+                           "demand": [{"product": "P1", "value": 5}]},
+            "parameter_defaults": {"time": 0, "demand": 0}}
+    assignments = {("produce", ("P1", "M2", "S1")): 4, ("produce", ("P2", "M1", "S1")): 19, ("produce", ("P2", "M2", "S2")): 0,
+                   ("on", ("M1",)): 1}
+    found = used_without_data(ir, data, assignments)
+    assert found == [{"var": "produce", "parameter": "time", "cells": 1, "default": 0, "examples": ["P2 · M1"]}]
+    trial = {"status": "optimal", "objective": 980, "used": {"produce": {"non_zero": 2, "cells": 12}}, "no_data": found, "seconds": 1}
+    assert "CHECK THIS: produce is used on 1 cell(s) where time gives no value (P2 · M1): its default 0 applies" in trial_for_person(trial)
+    assert "produce is used on 1 cell(s) where time gives no value" in trial_said(trial)
+    assert used_without_data(ir, data, {("produce", ("P1", "M2", "S1")): 4}) == []

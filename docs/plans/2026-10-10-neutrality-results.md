@@ -397,3 +397,12 @@ were not attached. On an approval turn the pending build runs first, and the pas
 after it. They are now attached before anything runs (a test approves a pending plan and checks the files are
 there when it builds). Partial run kept as `step5-3-aborted`; fourth start, same tag. Four starts: the first
 three defects were all in the day's additions, each caught by the first tuning case.
+
+## Queued for the next image (not in step 5's measurement): used where no data is given (11 Oct, 18:15)
+
+Fourth start of step 5: p02 right (10.6 min), p04 wrong with no warning -- a product made on a machine the
+times file never lists (its time defaulted to 0; the goal still matched the reference). New trial check,
+general: a decision used on a cell where a parameter over the same record kinds gives no value, so its default
+applied there; on the card as CHECK THIS with the cells, and to the model with the rule shape (keep the
+decision to the pairs given). The same class as the allowed-list mistake, now caught from the answer rather than
+from the data's shape.

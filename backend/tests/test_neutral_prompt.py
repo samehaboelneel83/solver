@@ -74,6 +74,8 @@ def test_the_platforms_own_messages_name_no_domain():
     texts["trial.card"] = core.trial_for_person({"status": "optimal", "objective": 1, "used": used}) \
         + core.trial_for_person({"status": "optimal", "used": {"x": {"non_zero": 0, "cells": 2}}}) \
         + core.trial_for_person({"status": "infeasible", "used": used})
+    nd = [{"var": "amount", "parameter": "rate", "cells": 1, "default": 0, "examples": ["a1 · b2"]}]
+    texts["trial.no_data"] = core.trial_for_person({"status": "optimal", "used": used, "no_data": nd})         + core.trial_said({"status": "optimal", "used": used, "no_data": nd, "seconds": 1})
     texts["trial.model"] = core.trial_said({"status": "optimal", "objective": 1, "used": used, "seconds": 1}) \
         + core.trial_said({"status": "infeasible", "used": used, "seconds": 1})
     texts["trial.sent_back"] = core.trial_sent_back({"status": "infeasible", "used": used}) \

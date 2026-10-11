@@ -310,6 +310,46 @@ TRIAL_CELLS = 200_000
 TRIAL_LISTED = 12
 
 
+def used_without_data(ir: dict[str, Any], data: dict[str, Any], assignments: dict) -> list[dict[str, Any]]:
+    """Decisions the trial uses on cells where a parameter over the same records gives no value, so its default
+    applied there (the phase 1 evaluation, 11 October 2026: a product made on a machine the times file never
+    lists -- its time defaulted to 0, the capacity rule never saw it, and the goal matched the reference). The
+    same for every model: a parameter over two or more record kinds, given for some cells, read where it was
+    not given."""
+    variables = ir.get("variables") if isinstance(ir.get("variables"), dict) else {}
+    params = ir.get("parameters") if isinstance(ir.get("parameters"), dict) else {}
+    rows_of = data.get("parameters") if isinstance(data.get("parameters"), dict) else {}
+    defaults = data.get("parameter_defaults") if isinstance(data.get("parameter_defaults"), dict) else {}
+    given: dict[str, tuple[list[str], set[tuple[str, ...]]]] = {}
+    for name, spec in params.items():
+        index = [str(t) for t in (spec.get("index") or [])] if isinstance(spec, dict) else []
+        rows = [r for r in (rows_of.get(name) or []) if isinstance(r, dict)]
+        if len(index) < 2 or len(set(index)) != len(index) or not rows:
+            continue
+        keys = {tuple(str(r.get(t, r.get(str(i)))) for i, t in enumerate(index)) for r in rows}
+        given[name] = (index, keys)
+    if not given:
+        return []
+    used: dict[tuple[str, str], list[tuple[str, ...]]] = {}
+    for key, value in assignments.items():
+        var = str(key[0])
+        spec = variables.get(var)
+        if not isinstance(spec, dict) or abs(float(value)) <= 1e-9 or var.startswith("__"):
+            continue
+        types = [str(t) for t in (spec.get("index") or [])]
+        cell = tuple(map(str, key[1] if len(key) > 1 and isinstance(key[1], (tuple, list)) else key[1:]))
+        if len(types) < 2 or len(cell) != len(types):
+            continue
+        for name, (index, keys) in given.items():
+            if not all(types.count(t) == 1 for t in index):
+                continue
+            projected = tuple(cell[types.index(t)] for t in index)
+            if projected not in keys:
+                used.setdefault((var, name), []).append(projected)
+    return [{"var": var, "parameter": name, "cells": len(cells), "default": defaults.get(name, 0),
+             "examples": [" · ".join(c) for c in cells[:3]]} for (var, name), cells in used.items()]
+
+
 def _trial(db: Session, domain_id: int, ir: dict[str, Any], keep: dict[str, Any] | None = None) -> dict[str, Any]:
     """One short solve of the planned model on its own data, inside the dry run's transaction (the field tests,
     October 2026: plans that passed every check read stock from the month after, or planned for futures with
@@ -363,8 +403,9 @@ def _trial(db: Session, domain_id: int, ir: dict[str, Any], keep: dict[str, Any]
     conflict: dict[str, Any] = {}
     if result.status == "infeasible":
         conflict = _trial_conflict(backend.name, compiled, ir)
+    no_data = used_without_data(ir, data, result.assignments or {})
     return {"status": result.status, "objective": result.objective, "solver": backend.name,
-            "seconds": TRIAL_SECONDS, **conflict,
+            "seconds": TRIAL_SECONDS, **conflict, **({"no_data": no_data} if no_data else {}),
             "used": {k: {"non_zero": v[0], "cells": v[1],
                          **({"chosen": chosen.get(k, [])} if v[0] <= TRIAL_LISTED else {})} for k, v in used.items()}}
 

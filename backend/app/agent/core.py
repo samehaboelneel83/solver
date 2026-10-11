@@ -1766,7 +1766,12 @@ def trial_said(trial: Any) -> str:
         flags.append("the goal can grow without limit: a bound or a rule is missing")
     elif used and all(not u.get("non_zero") for u in used.values()):
         flags.append("every decision is 0: the plan chooses or makes nothing -- check the goal's sense and the rules")
-    elif idle_decisions(used):
+    for nd in trial.get("no_data") or []:
+        flags.append(f"{nd.get('var')} is used on {nd.get('cells')} cell(s) where {nd.get('parameter')} gives no value "
+                     f"({', '.join(nd.get('examples') or [])}), so its default {_num(nd.get('default'))} applied there; "
+                     "if the data lists the only pairs allowed, add the rule that keeps the decision to them "
+                     "(amount <= most x a 0/1 parameter of the pairs given), or give those cells their value")
+    if idle_decisions(used):
         flags.append(f"{', '.join(idle_decisions(used))} are 0 everywhere and only "
                      f"{', '.join(v for v in used if v not in idle_decisions(used))} is used: the plan does nothing; "
                      "if the person asked for something to be done, a rule that forces it is missing, or the goal "
@@ -1959,7 +1964,19 @@ def trial_for_person(trial: Any) -> str:
         line += (f"\n- CHECK THIS: the plan does nothing with {', '.join(idle)} (0 everywhere); only "
                  f"{', '.join(v for v in used if v not in idle)} is used -- a plan that does nothing may be what the "
                  "rules allow, not what you meant")
+    for nd in trial.get("no_data") or []:
+        line += (f"\n- CHECK THIS: {nd.get('var')} is used on {nd.get('cells')} cell(s) where {nd.get('parameter')} "
+                 f"gives no value ({', '.join(nd.get('examples') or [])}): its default {_num(nd.get('default'))} "
+                 "applies there -- if those pairs are not allowed, restrict the decision to the pairs the data gives")
     return line
+
+
+def _num(value: Any) -> str:
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return str(int(f)) if f.is_integer() else f"{f:g}"
 
 
 def stale_totals(answer: str, tool_texts: list[str]) -> list[tuple[str, str, str]]:
