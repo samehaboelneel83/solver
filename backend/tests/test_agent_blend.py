@@ -1515,8 +1515,8 @@ def test_check_spec_runs_a_trial_solve_and_says_it(tenants, db):
     trial = client.post("/api/v1/problems/from-spec", json=spec, headers=tenants["b"]).json()["trial"]
     assert trial["status"] == "optimal" and core.trial_said(trial).count("every decision is 0") == 1
     assert core.trial_sent_back(trial) == "" and "conflict" not in trial
-    assert "TRIAL on your data (solved once, nothing kept): optimal, goal 0; make used in 0 of 6 -- it chooses or " \
-           "makes nothing" in core.trial_for_person(trial)
+    assert "TRIAL on your data (solved once, nothing kept): optimal, goal 0; make used in 0 of 6\n- CHECK THIS: the " \
+           "plan chooses or makes nothing (every decision is 0)" in core.trial_for_person(trial)
     # Nothing was kept.
     assert client.post("/api/v1/problems/from-spec", json=spec, headers=tenants["b"]).status_code == 200
 

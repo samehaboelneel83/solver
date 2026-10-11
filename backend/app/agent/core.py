@@ -1762,6 +1762,11 @@ def trial_said(trial: Any) -> str:
         flags.append("the goal can grow without limit: a bound or a rule is missing")
     elif used and all(not u.get("non_zero") for u in used.values()):
         flags.append("every decision is 0: the plan chooses or makes nothing -- check the goal's sense and the rules")
+    elif idle_decisions(used):
+        flags.append(f"{', '.join(idle_decisions(used))} are 0 everywhere and only "
+                     f"{', '.join(v for v in used if v not in idle_decisions(used))} is used: the plan does nothing; "
+                     "if the person asked for something to be done, a rule that forces it is missing, or the goal "
+                     "lets doing nothing win (a penalty for what is left undone)")
     if flags:
         line += " WARNING: " + "; ".join(flags) + "."
     if any(u.get("chosen") for u in used.values()):
@@ -1900,6 +1905,16 @@ def shape_for_person(shape: Any) -> str:
     return "".join(f"\n- CHECK THIS: {s}" for s in said)
 
 
+def idle_decisions(used: dict) -> list[str]:
+    """Decisions the trial left at zero everywhere when the plan has several and only one (or none) is used: a
+    plan that does nothing (the evaluation, 11 October 2026: open 0 of 3, ship 0 of 54, stock 0 of 9, unmet 18 of
+    18 -- every demand left unmet, nothing opened or shipped, and the card said only the counts)."""
+    if not isinstance(used, dict) or len(used) < 2:
+        return []
+    idle = [v for v, u in used.items() if isinstance(u, dict) and not u.get("non_zero")]
+    return idle if len(idle) >= len(used) - 1 else []
+
+
 def trial_for_person(trial: Any) -> str:
     """The trial solve as one line of the plan card (the production test: a plan carrying stock from the month
     after made in 3 of 6 months and was late in 5 -- visible at once beside a plan that makes in all 6)."""
@@ -1917,7 +1932,12 @@ def trial_for_person(trial: Any) -> str:
         if conflict_said(trial):
             line += f"; these rules cannot hold together: {conflict_said(trial)}"
     elif used and all(not u.get("non_zero") for u in used.values()):
-        line += " -- it chooses or makes nothing"
+        line += "\n- CHECK THIS: the plan chooses or makes nothing (every decision is 0) -- the goal's sense or a rule"
+    elif idle_decisions(used):
+        idle = idle_decisions(used)
+        line += (f"\n- CHECK THIS: the plan does nothing with {', '.join(idle)} (0 everywhere); only "
+                 f"{', '.join(v for v in used if v not in idle)} is used -- a plan that does nothing may be what the "
+                 "rules allow, not what you meant")
     return line
 
 

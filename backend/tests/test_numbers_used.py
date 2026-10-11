@@ -36,3 +36,17 @@ def test_counts_of_records_and_percent_as_fraction_count_as_used():
     messages = [{"role": "user", "content": "There are 2 items; waste stays under 15%; limit 500."}]
     assert unused_numbers(messages, _spec()) == []
     assert numbers_for_person(messages, _spec()) == ""
+
+
+def test_a_plan_that_does_nothing_is_named_on_the_card_and_to_the_model():
+    """The evaluation, 11 October 2026: open 0 of 3, ship 0 of 54, stock 0 of 9, unmet 18 of 18."""
+    from app.agent.core import idle_decisions, trial_for_person, trial_said
+
+    used = {"open": {"non_zero": 0, "cells": 3}, "ship": {"non_zero": 0, "cells": 54},
+            "stock": {"non_zero": 0, "cells": 9}, "unmet": {"non_zero": 18, "cells": 18}}
+    assert idle_decisions(used) == ["open", "ship", "stock"]
+    card = trial_for_person({"status": "optimal", "objective": 335000, "used": used})
+    assert "CHECK THIS: the plan does nothing with open, ship, stock (0 everywhere); only unmet is used" in card
+    assert "the plan does nothing" in trial_said({"status": "optimal", "objective": 335000, "used": used, "seconds": 1})
+    fine = {"open": {"non_zero": 2, "cells": 3}, "ship": {"non_zero": 20, "cells": 54}, "unmet": {"non_zero": 0, "cells": 18}}
+    assert idle_decisions(fine) == [] and "CHECK THIS" not in trial_for_person({"status": "optimal", "used": fine})

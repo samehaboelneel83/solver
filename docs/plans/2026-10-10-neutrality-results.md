@@ -282,3 +282,17 @@ Over the three tuning sets (step 2, 3, 4: 30 case runs, 9 not built in 20 minute
   (thinking length, tokens), and whether a shorter first reply (a cap on thinking for the first plan) helps.
 - The cascade (a timed-out turn left running) is fixed in the driver (13:20); "no plan card, nothing logged"
   should fall once the measurements carry that fix.
+
+## Step 5 image (queued after the step 4 hidden run; measured over three tuning runs, `rerun_three.sh step5`)
+
+Built from `main` without step 3b's paragraph. On top of step 4 it holds:
+
+- warnings on the card (CHECK THIS): numbers in the request the model does not use; a parameter whose given
+  values all equal its default; a pair parameter given one way round; a trial plan that does nothing (every
+  decision 0, or every decision but one);
+- repairs: a list loaded or typed as 1 on a default of 1 gets default 0 (said on the card); one number read with
+  an index, or with none, reads as one number;
+- tables pasted into a message are attached as files, and the Assistant is told to load them.
+
+More than one change in one measurement (rule 4 relaxed): each measurement now costs three tuning runs, and
+every item above was found on the tuning set and tested there. The hidden run that follows judges them together.
