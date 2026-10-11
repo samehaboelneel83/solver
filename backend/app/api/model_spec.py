@@ -326,6 +326,12 @@ def used_without_data(ir: dict[str, Any], data: dict[str, Any], assignments: dic
         rows = [r for r in (rows_of.get(name) or []) if isinstance(r, dict)]
         if len(index) < 2 or len(set(index)) != len(index) or not rows:
             continue
+        values = {float(r.get("value") or 0) for r in rows if isinstance(r.get("value"), (int, float))}
+        if values <= {0.0, 1.0}:
+            # A 0/1 list names what is allowed, or what is not (closed roads as 1): using an unlisted pair is
+            # right in one reading and wrong in the other, so a 0/1 list says nothing here (the data checks
+            # cover it). Quantities -- times, costs, distances -- given for some pairs are read where not given.
+            continue
         keys = {tuple(str(r.get(t, r.get(str(i)))) for i, t in enumerate(index)) for r in rows}
         given[name] = (index, keys)
     if not given:

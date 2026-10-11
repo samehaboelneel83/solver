@@ -165,3 +165,11 @@ The neutrality plan's step 5 and step 3b measurements run on within Phase 0; the
   image, no model, no database). Six tuning golds captured from right runs (p01, p02, p09 under step 5; p04,
   p07, p10 under step 2): **6 pass of 6**, each at its reference, in about a minute. Remaining: p03 (layout:
   no right run yet), p05, p06, p08; the hidden golds, captured blind as right runs come.
+- **11 Oct, 20:00 — Phase 0.3 started.** `bench/phase1/mutate.py`: for each gold, every hard rule dropped in
+  turn, the goal reversed, each parameter's values removed, each 0/1 list's default set to 1; the platform's
+  checks consulted (trial flags, shape, unused numbers, empty parameter, goal sense). First table: 27 caught,
+  25 same goal, 25 missed, and two false positives on right models (the new no-data check on a list of
+  exceptions; the numbers check without record counts). After fixing those and adding a goal-sense check
+  (the request's "lowest"/"most" against the model's sense): **39 caught, 23 harmless, 15 missed, 0 false
+  positives.** The 15: 13 dropped rules (Phase 3.2's sentence-to-rule mapping is the answer) and 2 partial
+  lists. The table is the gap list the plan asked for.

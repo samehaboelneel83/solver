@@ -89,3 +89,19 @@ def test_a_decision_used_where_a_pair_parameter_gives_no_value_is_named():
     assert "CHECK THIS: produce is used on 1 cell(s) where time gives no value (P2 · M1): its default 0 applies" in trial_for_person(trial)
     assert "produce is used on 1 cell(s) where time gives no value" in trial_said(trial)
     assert used_without_data(ir, data, {("produce", ("P1", "M2", "S1")): 4}) == []
+    # A 0/1 list (closed roads as 1, or allowed pairs as 1) says nothing here: using an unlisted pair is right
+    # in one reading and wrong in the other.
+    flags = {"parameters": {"closed": [{"product": "P1", "machine": "M2", "value": 1}]}, "parameter_defaults": {"closed": 0}}
+    ir2 = {"variables": {"produce": {"index": ["product", "machine", "shift"]}}, "parameters": {"closed": {"index": ["product", "machine"]}}}
+    assert used_without_data(ir2, flags, {("produce", ("P2", "M1", "S1")): 3}) == []
+
+
+def test_a_goal_running_the_other_way_from_the_request_is_named():
+    from app.agent.core import goal_sense_for_person, goal_sense_said
+
+    assert goal_sense_said("Goal: the lowest total shipping cost.") == "minimize"
+    assert goal_sense_said("Goal: as many beds as possible; among layouts with as many beds, the shortest walk.") is None
+    assert goal_sense_said("Goal: the most patients treated in total. Report the cheapest option too.") == "maximize"
+    msgs = [{"role": "user", "content": "Rules: ... Goal: the lowest total cost."}]
+    assert "CHECK THIS: the goal maximizes, but your words ask for the least" in goal_sense_for_person(msgs, {"objective": {"sense": "maximize"}})
+    assert goal_sense_for_person(msgs, {"objective": {"sense": "minimize"}}) == ""

@@ -82,6 +82,8 @@ def test_the_platforms_own_messages_name_no_domain():
         + core.trial_sent_back({"status": "unbounded"}) \
         + core.trial_sent_back({"status": "optimal", "used": used})
     texts["shape.sent_back"] = core.shape_sent_back([{"kind": "unread", "said": "x is given and no rule reads it"}])
+    texts["goal.sense"] = core.goal_sense_for_person([{"role": "user", "content": "Goal: the lowest cost."}],
+                                                     {"objective": {"sense": "maximize"}})
     texts["numbers.card"] = core.numbers_for_person([{"role": "user", "content": "at most 70 and 15%"}], {"seed": {}, "ir": {}})
     spec = {"seed": {"parameters": [{"name": "rate", "default_value": 2}, {"name": "allowed", "index": ["a"], "default_value": 1}],
                      "parameter_values": [{"parameter": "allowed", "entities": [["a", "a1"]], "value": 1}]},

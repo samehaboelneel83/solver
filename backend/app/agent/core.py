@@ -1916,6 +1916,39 @@ def unused_numbers(messages: list[dict], spec: dict) -> list[str]:
     return missing
 
 
+_WANTS_LEAST = re.compile(r"\b(?:minimi[sz]e|minimum|lowest|least|cheapest|smallest|shortest|fewest|as (?:small|low|short|few|cheap) as possible|"
+                          r"reduce|cut)\b", re.I)
+_WANTS_MOST = re.compile(r"\b(?:maximi[sz]e|maximum|highest|most|largest|greatest|biggest|longest|as (?:many|much|large|high|big) as possible)\b", re.I)
+_GOAL_SENTENCE = re.compile(r"\b(?:goal|objective|aim|target|optimi[sz]e|we want|should be)\b", re.I)
+
+
+def goal_sense_said(text: str) -> str | None:
+    """The sense the person's goal sentence asks for: "minimize", "maximize", or None when it does not say or
+    says both (a cost to cut and a count to reach in one sentence)."""
+    sentences = [s for s in re.split(r"(?<=[.;!?])\s+|\n", text or "") if _GOAL_SENTENCE.search(s)]
+    least = sum(len(_WANTS_LEAST.findall(s)) for s in sentences)
+    most = sum(len(_WANTS_MOST.findall(s)) for s in sentences)
+    if least and not most:
+        return "minimize"
+    if most and not least:
+        return "maximize"
+    return None
+
+
+def goal_sense_for_person(messages: list[dict], ir: dict) -> str:
+    """A model whose goal runs the other way from the request's goal sentence (the mutation checks of 11 October
+    2026: a reversed goal was caught in 1 of 6 gold models by anything else)."""
+    text = "\n".join(str(m.get("content") or "") for m in messages
+                     if m.get("role") == "user" and not str(m.get("content") or "").startswith(PLATFORM))
+    said = goal_sense_said(text)
+    sense = (ir.get("objective") or {}).get("sense") if isinstance(ir, dict) else None
+    if said and sense in ("minimize", "maximize") and said != sense:
+        return (f"\n- CHECK THIS: the goal {sense}s, but your words ask for the "
+                f"{'least' if said == 'minimize' else 'most'} -- a goal running the other way gives the worst plan, "
+                "not the best")
+    return ""
+
+
 def numbers_for_person(messages: list[dict], spec: dict) -> str:
     missing = unused_numbers(messages, spec)
     if not missing:
@@ -4086,7 +4119,8 @@ class Agent:
                     # what it does on the data, solved once before anything is kept.
                     built = self._spec(args)
                     built_as = agent_readback.readback(built, self.loaded).split("\n", 1)[-1] + trial_for_person(
-                        body.get("trial")) + shape_for_person(body.get("shape")) + numbers_for_person(messages, built)
+                        body.get("trial")) + shape_for_person(body.get("shape")) + numbers_for_person(messages, built) \
+                        + goal_sense_for_person(messages, built.get("ir") or {})
                     yield {"type": "plan", "summary": str(args.get("summary")) + "\n\n**As built** (read back "
                            "from the spec by the platform; check it says what you meant)\n```\n" + built_as + "\n```",
                            "counts": counts, "spec": self._spec(args, expand=False), "readback": built_as}
