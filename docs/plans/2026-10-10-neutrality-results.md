@@ -323,3 +323,11 @@ kept); the offline manifest and runbook now list the model as operator-supplied 
 works without it (everything but the Assistant); `scripts/egress-check.sh` probes the model from the backend
 container (OK / WARN). The migration ships in the step 5 image and is applied at its deploy
 (`alembic upgrade head`), not during the hidden run.
+
+Tile server on this machine (15:50–16:10): `spatial.tiles_index` names `http://localhost:8080/index.json`
+(four Egypt tilesets). From inside the backend container `localhost` is the container, and the code already
+tries `host.docker.internal` for the index, the terrain and the report's tiles. Found and fixed on the way:
+the report's map tiles came back as gzip (the tile server stores them so and declares it; a browser undoes it,
+urllib does not), so every report on the local satellite or topo tiles had no map. The report's tile fetch now
+undoes gzip as the terrain reader always did; real tiles over Cairo stitch (satellite 68 KB, topo 23 KB of
+picture). The egress smoke now also probes the tile index from the backend and prints where it reached it.

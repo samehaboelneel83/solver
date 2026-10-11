@@ -317,6 +317,18 @@ def _mercator(lon: float, lat: float, z: float) -> tuple[float, float]:
     return (lon + 180) / 360 * size, (0.5 - math.log((1 + s) / (1 - s)) / (4 * math.pi)) * size
 
 
+def _plain(body: bytes) -> bytes:
+    """A tile's bytes with gzip undone, whether declared (Content-Encoding) or not: a tile server that keeps its
+    tiles compressed (mbtiles) serves them so, a browser undoes it unasked and urllib does not (11 October 2026:
+    every report on the local satellite and topo tiles came back with no map, PIL could not read the bytes).
+    The terrain reader (app.spatial.terrain.fetch_bytes) applies the same rule."""
+    import gzip
+
+    if body[:2] == b"\x1f\x8b":
+        return gzip.decompress(body)
+    return body
+
+
 def _tile_picture(template: str, z: int, left: float, top: float, width: float, height: float,
                   out_w: int, out_h: int) -> str | None:
     """The tiles at zoom `z` covering world pixels [left, left+width) x [top, top+height), stitched, cut and
@@ -346,7 +358,7 @@ def _tile_picture(template: str, z: int, left: float, top: float, width: float, 
             try:
                 request = urllib.request.Request(address, headers={"User-Agent": "ProblemSolver-report/1.0"})
                 with urllib.request.urlopen(request, timeout=8) as response:  # noqa: S310 -- an address the app offers
-                    return xy, Image.open(io.BytesIO(response.read())).convert("RGB")
+                    return xy, Image.open(io.BytesIO(_plain(response.read()))).convert("RGB")
             except Exception:  # noqa: BLE001 -- a missing tile leaves a blank square
                 continue
         return xy, None

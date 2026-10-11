@@ -14,6 +14,32 @@ curl -fsS "$API_URL/api/health" | tee /tmp/solver-health.json
 web_code="$(curl -fsS -w '%{http_code}' "$WEB_URL/" | tail -c 3)"
 printf 'frontend HTTP %s\n' "$web_code"
 
+echo "==> The tile server (setting spatial.tiles_index), as the backend reaches it for reports and terrain"
+if docker compose exec -T backend python - <<'PY' 2>/dev/null; then
+import sys
+from app.core.db import SessionLocal
+from app.settings_resolve import resolve
+from app.spatial.terrain import candidates, fetch_bytes
+with SessionLocal() as db:
+    url = str(resolve(db)["spatial.tiles_index"].value or "").strip()
+if not url:
+    print("no tile index named: maps show no background (set spatial.tiles_index to the local tile server)")
+    sys.exit(0)
+for address in candidates(url):
+    try:
+        if fetch_bytes(address, timeout=5):
+            print(f"OK: tile index at {address}")
+            sys.exit(0)
+    except Exception:
+        pass
+print(f"WARN: the tile index {url} did not answer from the backend container")
+sys.exit(1)
+PY
+  :
+else
+  echo "WARN: tile index unreachable from the backend (reports and terrain reads will have no map)" >&2
+fi
+
 echo "==> The Assistant's model (LLM_BASE_URL, inside the network; a warning only: the rest serves without it)"
 if docker compose exec -T backend python - <<'PY' 2>/dev/null; then
 import os, sys, urllib.request
