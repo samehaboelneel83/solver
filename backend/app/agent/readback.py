@@ -104,7 +104,8 @@ def _values_said(seed: dict[str, Any], name: Any) -> str:
     return f" (values from {_num(min(values))} to {_num(max(values))})"
 
 
-def readback(spec: dict[str, Any]) -> str:
+def readback(spec: dict[str, Any], loaded: list[str] | None = None) -> str:
+    """The spec read back in plain lines; `loaded`: what each file entry stored against the file (files.expand)."""
     seed = spec.get("seed") if isinstance(spec.get("seed"), dict) else {}
     ir = spec.get("ir") if isinstance(spec.get("ir"), dict) else {}
     lines = ["AS BUILT (read back from the spec by the platform):"]
@@ -145,6 +146,8 @@ def readback(spec: dict[str, Any]) -> str:
                       if isinstance(r, dict) and r.get("type") == rt.get("name")][:8]
             lines.append(f"- link {rt.get('name')} ({rt.get('from')} → {rt.get('to')}): {links.get(rt.get('name'), 0)} "
                          f"links: {', '.join(sample)}")
+    for line in loaded or []:
+        lines.append(f"- loaded {line}")
     for name, v in (ir.get("variables") or {}).items():
         v = v or {}
         bounds = ""

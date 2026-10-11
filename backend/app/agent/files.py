@@ -14,6 +14,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 from datetime import date, datetime, time
 from typing import Any
 
@@ -383,16 +384,93 @@ _YES = {"yes", "y", "true", "t", "on"}
 _NO = {"no", "n", "false", "f", "off"}
 
 
-def _as_number(value: Any) -> Any:
-    """A yes/no cell where a number belongs, as 1/0 (phase 1 evaluation, 10 October 2026: an `open` column of
-    yes/no loaded into a number parameter was refused "a number is required" three times, and nothing was built)."""
+# A number written with its unit or currency: "$1,200", "1 200 kg", "EGP 45.5", "12.5 %".
+_WITH_UNIT = re.compile(r"^\s*([$€£¥]|[A-Za-z]{3}\s)?\s*(-?\d[\d, ]*(?:\.\d+)?|-?\.\d+)\s*(%|[A-Za-z/²³°]{1,12})?\s*$")
+
+
+def _numeric(value: Any) -> tuple[Any, str | None]:
+    """A cell where a number belongs, as a number, and how it was read (None: as it was). A yes/no cell is 1/0
+    (phase 1 evaluation, 10 October 2026: an `open` column of yes/no was refused "a number is required" three
+    times, and nothing was built); a number with its unit or currency is the number; a percentage is a fraction."""
     if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, str) and value.strip().casefold() in _YES:
-        return 1
-    if isinstance(value, str) and value.strip().casefold() in _NO:
-        return 0
-    return value
+        return int(value), "yes/no"
+    if not isinstance(value, str):
+        return value, None
+    text = value.strip()
+    if text.casefold() in _YES:
+        return 1, "yes/no"
+    if text.casefold() in _NO:
+        return 0, "yes/no"
+    m = _WITH_UNIT.match(text)
+    if not m:
+        return value, None
+    digits = m.group(2).replace(",", "").replace(" ", "")
+    try:
+        number = float(digits)
+    except ValueError:
+        return value, None
+    if m.group(3) == "%":
+        number, how = number / 100, "percent"
+    else:
+        how = "unit" if m.group(1) or m.group(3) else None
+    number = round(number, 12)
+    return (int(number) if number.is_integer() else number), how
+
+
+def _as_number(value: Any) -> Any:
+    return _numeric(value)[0]
+
+
+class _Load:
+    """What one *_from_file entry did with its sheet, in the file's terms (neutrality plan, step 4: the plan card
+    says what was stored against what the file holds -- phase 1, supply chain L, stored every route as open)."""
+
+    READ_AS = {"yes/no": "yes/no read as 1/0", "percent": "percentages read as fractions (35% = 0.35)",
+               "unit": "numbers read without their unit or currency"}
+
+    def __init__(self, what: str, s: dict[str, Any], spec: dict[str, Any]):
+        self.what, self.s, self.spec = what, s, spec
+        self.total = int(s.get("total_rows") or len(s.get("rows") or []))
+        self.kept = 0
+        self.no_key = 0
+        self.no_value = 0
+        self.repeated = 0
+        self.stored = 0
+        self.read_as: dict[str, int] = {}
+        self.not_number = 0
+        self.columns_note = ""
+
+    def number(self, value: Any) -> Any:
+        out, how = _numeric(value)
+        if how:
+            self.read_as[how] = self.read_as.get(how, 0) + 1
+        elif isinstance(out, str):
+            self.not_number += 1
+        return out
+
+    def line(self) -> str:
+        where = self.spec.get("where")
+        parts = [f'{self.what} from "{self.spec.get("file")}"'
+                 + (f' sheet "{self.s.get("name")}"' if self.spec.get("sheet") else "")
+                 + f": {self.total} rows"]
+        if where:
+            parts.append(f"{self.kept} kept by the filter {json.dumps(where, ensure_ascii=False)}")
+        if self.s.get("truncated"):
+            parts.append(f"only the first {len(self.s.get('rows') or [])} read")
+        if self.columns_note:
+            parts.append(self.columns_note)
+        if self.no_key:
+            parts.append(f"{self.no_key} skipped: a key cell empty")
+        if self.no_value:
+            parts.append(f"{self.no_value} skipped: the value empty")
+        if self.repeated:
+            parts.append(f"{self.repeated} repeated keys counted once")
+        for how, n in self.read_as.items():
+            parts.append(f"{n} {self.READ_AS[how]}")
+        if self.not_number:
+            parts.append(f"{self.not_number} values are not numbers")
+        parts.append(f"{self.stored} stored")
+        return "; ".join(parts)
 
 
 def _rows(s: dict[str, Any], spec: dict[str, Any]) -> list[list[Any]]:
@@ -410,9 +488,60 @@ def _rows(s: dict[str, Any], spec: dict[str, Any]) -> list[list[Any]]:
     return [r for r in s.get("rows") or [] if _keep(r, at, where)]
 
 
-def expand(seed: dict[str, Any], files: list[dict[str, Any]]) -> dict[str, Any]:
+def _wide(s: dict[str, Any], spec: dict[str, Any], pairs: list[tuple[str, Any]], wide: list[int],
+          entities: list[dict[str, Any]], load: _Load) -> list[dict[str, Any]]:
+    """A wide table's cells: one per row and per column whose header is a record of the "*" type (a cost per
+    plant and customer, one column per customer)."""
+    name = spec.get("parameter")
+    if len(wide) > 1:
+        raise FileRefused(f'parameter_values_from_file for "{name}": only one index can be read from the column '
+                          'headers ("*")')
+    if spec.get("value") is not None:
+        raise FileRefused(f'parameter_values_from_file for "{name}" reads a wide table ("*"): its cells are the '
+                          'values, so leave "value" out')
+    col_type = pairs[wide[0]][0]
+    row_ends = [(t, _columns(s, c)) for i, (t, c) in enumerate(pairs) if i != wide[0]]
+    used = {i for _, at in row_ends for i in at}
+    columns = s.get("columns") or []
+    if spec.get("columns"):
+        at = {c: _column(s, c) for c in spec["columns"]}
+    else:
+        known = {str(e.get("key")) for e in entities if isinstance(e, dict) and e.get("type") == col_type}
+        others = [c for i, c in enumerate(columns) if i not in used]
+        named = [c for c in others if str(c) in known]
+        if known and not named:
+            raise FileRefused(f'parameter_values_from_file for "{name}": no column header of sheet "{s.get("name")}" '
+                              f'is a key of "{col_type}" (headers {others}); name the columns with "columns"')
+        at = {c: columns.index(c) for c in (named if known else others)}
+        left = [c for c in others if c not in at]
+        if left:
+            load.columns_note = f"columns {left} are not {col_type} keys and were not read"
+    load.columns_note = (load.columns_note + "; " if load.columns_note else "") + f"{len(at)} columns of {col_type}"
+    rows = _rows(s, spec)
+    load.kept = len(rows)
+    cells = []
+    for row in rows:
+        keys = [_joined(row, a) for _, a in row_ends]
+        if None in keys:
+            load.no_key += 1
+            continue
+        for header, i in at.items():
+            value = load.number(row[i]) if i < len(row) else None
+            if value is None:
+                load.no_value += 1
+                continue
+            named_keys = [[t, k] for (t, _), k in zip(row_ends, keys)]
+            named_keys.insert(wide[0], [col_type, str(header)])
+            cells.append({"parameter": name, "entities": named_keys, "value": value})
+            load.stored += 1
+    return cells
+
+
+def expand(seed: dict[str, Any], files: list[dict[str, Any]], report: list[str] | None = None) -> dict[str, Any]:
     """`entities_from_file` and `parameter_values_from_file` as plain `entities` and `parameter_values`; each may
-    keep only the rows its `where` matches."""
+    keep only the rows its `where` matches. `report`, if given, gets one line per entry: what it stored against
+    what the file holds."""
+    loads: list[_Load] = []
     out = {k: v for k, v in seed.items()
            if k not in ("entities_from_file", "parameter_values_from_file", "relationships_from_file")}
     bindings = list(seed.get("source_bindings") or [])
@@ -453,12 +582,17 @@ def expand(seed: dict[str, Any], files: list[dict[str, Any]]) -> dict[str, Any]:
         label_at = _column(s, spec["label"]) if spec.get("label") else None
         attrs_at = {attr: _column(s, col) for attr, col in (spec.get("attrs") or {}).items()}
         made: dict[str, dict[str, Any]] = {}
-        for row in _rows(s, spec):
+        load = _Load(f'records "{spec.get("type")}"', s, spec)
+        loads.append(load)
+        rows = _rows(s, spec)
+        load.kept = len(rows)
+        for row in rows:
             key = _joined(row, key_at)
             if key is None:
+                load.no_key += 1
                 continue
             entity = {"type": spec.get("type"), "key": key,
-                      "attrs": {a: _as_number(row[i]) if (spec.get("type"), a) in numeric else _shape_or_value(row[i])
+                      "attrs": {a: load.number(row[i]) if (spec.get("type"), a) in numeric else _shape_or_value(row[i])
                                 for a, i in attrs_at.items() if row[i] is not None}}
             # A key repeated in the file (days from a sheet with a row per day and shift -- the retest):
             # one record, when the rows agree on its fields; when they disagree, the file is asked about.
@@ -467,8 +601,10 @@ def expand(seed: dict[str, Any], files: list[dict[str, Any]]) -> dict[str, Any]:
                 if first["attrs"] != entity["attrs"]:
                     raise FileRefused(f'"{spec.get("file")}" gives {spec.get("type")} "{entity["key"]}" twice with '
                                       f'different fields ({first["attrs"]} and {entity["attrs"]}); which is right?')
+                load.repeated += 1
                 continue
             made[entity["key"]] = entity
+            load.stored += 1
             if label_at is not None and row[label_at] is not None:
                 entity["label"] = str(row[label_at])
             entities.append(entity)
@@ -485,11 +621,17 @@ def expand(seed: dict[str, Any], files: list[dict[str, Any]]) -> dict[str, Any]:
             if not (isinstance(pair, (list, tuple)) and len(pair) == 2):
                 raise FileRefused(f'relationships_from_file "{end}" must be [record type, column]')
             ends.append((str(pair[0]), _columns(s, pair[1])))
-        for row in _rows(s, spec):
+        load = _Load(f'links "{spec.get("type")}"', s, spec)
+        loads.append(load)
+        rows = _rows(s, spec)
+        load.kept = len(rows)
+        for row in rows:
             keys = [_joined(row, at) for _, at in ends]
             if None in keys:
+                load.no_key += 1
                 continue
             links.append({"type": spec.get("type"), "from": [ends[0][0], keys[0]], "to": [ends[1][0], keys[1]]})
+            load.stored += 1
     if links:
         out["relationships"] = links
     from app.seed import field_distances, order_links, order_links_problems
@@ -503,7 +645,14 @@ def expand(seed: dict[str, Any], files: list[dict[str, Any]]) -> dict[str, Any]:
     for spec in seed.get("parameter_values_from_file") or []:
         s = find_sheet(files, spec.get("file"), spec.get("sheet"))
         bound("parameter_values", spec, spec.get("parameter"))
-        ends = [(str(t), _columns(s, c)) for t, c in (spec.get("entities") or [])]
+        load = _Load(f'parameter "{spec.get("parameter")}"', s, spec)
+        loads.append(load)
+        pairs = [(str(t), c) for t, c in (spec.get("entities") or [])]
+        wide = [i for i, (_, c) in enumerate(pairs) if c == "*"]
+        if wide:
+            cells.extend(_wide(s, spec, pairs, wide, out.get("entities") or [], load))
+            continue
+        ends = [(t, _columns(s, c)) for t, c in pairs]
         if len(ends) >= 2 and len({tuple(at) for _, at in ends}) < len(ends):
             # Two indices read from one column give each record only with itself (the evaluation's routing
             # test: distance[place, place] from ["place","place"] twice -- 9 cells of 81, the rest 999,999).
@@ -520,15 +669,24 @@ def expand(seed: dict[str, Any], files: list[dict[str, Any]]) -> dict[str, Any]:
         value_at = None if constant is not None else _column(
             s, spec.get("value"), f'parameter_values_from_file for "{spec.get("parameter")}": "value" (a column, or a '
                                   "number for every row)")
-        for row in _rows(s, spec):
-            value = constant if value_at is None else _as_number(row[value_at])
+        rows = _rows(s, spec)
+        load.kept = len(rows)
+        for row in rows:
             keys = [_joined(row, at) for _, at in ends]
-            if value is None or None in keys:
+            if None in keys:
+                load.no_key += 1
+                continue
+            value = constant if value_at is None else load.number(row[value_at])
+            if value is None:
+                load.no_value += 1
                 continue
             cells.append({"parameter": spec.get("parameter"),
                           "entities": [[t, k] for (t, _), k in zip(ends, keys)], "value": value})
+            load.stored += 1
     if cells:
         out["parameter_values"] = cells
+    if report is not None:
+        report.extend(load.line() for load in loads)
     if bindings:
         out["source_bindings"] = bindings
     if kept_files:

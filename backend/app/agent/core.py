@@ -1488,6 +1488,9 @@ seed keys (all optional lists):
  entities_from_file [{{"file","sheet","type","key":column,"label":column,"attrs":{{attribute: column}}}}]
  parameter_values_from_file [{{"file","sheet","parameter","entities":[[type, key column], ...],"value":column or a
    number for every row (a file that only lists pairs -- requests, bans, allowed pairs -- is a 0/1 parameter: "value": 1)}}]
+   A wide table (one row per record of one type, one COLUMN per record of another) is read whole: give the other
+   type's key column as "*" ("entities": [["row type", "key column"], ["column type", "*"]]) and leave "value" out;
+   every other column whose header is a key of that type is a cell ("columns": [...] to name them yourself).
  relationships_from_file [{{"file","sheet","type","from":[type, column],"to":[type, column]}}] (one link per row)
 Rows of an attached file are loaded by the *_from_file entries: one record or cell per row. Never copy a file's
 rows into entities or parameter_values yourself.
@@ -2246,6 +2249,7 @@ class Agent:
         self.facts: dict[Any, dict] = {}  # runs read this turn: their facts, shown beside the answer
         self.handover: str | None = None  # set by hand_to_describe: the turn ends with the offer
         self.joined: list[str] = []
+        self.loaded: list[str] = []  # the last expanded spec's load report (files.expand)
         self._spec_seen: dict[str, int] = {}
         self.refusals: dict[str, int] = {}
         #: Plans sent back because their trial solve had no answer (once; see `_check_plan`).
@@ -2961,7 +2965,7 @@ class Agent:
                         {**_sendable(expanded), "dry_run": True, "trial": True})
         if res.get("ok"):
             return ("SPEC_OK: it would build " + json.dumps((res.get("body") or {}).get("would_create"), default=str)
-                    + "\n\n" + agent_readback.readback(expanded)
+                    + "\n\n" + agent_readback.readback(expanded, self.loaded)
                     + trial_said((res.get("body") or {}).get("trial")) + "\n\n" + READBACK_CHECK)
         refused = "Not valid yet; fix these: " + clip(res.get("body"), 4000)
         key = re.sub(r"\d+", "#", refused)[:400]
@@ -3015,7 +3019,8 @@ class Agent:
             spec["domain_id"] = self.ctx.domain_id
         if expand and isinstance(spec.get("seed"), dict):
             self._typed_cells = len(spec["seed"].get("parameter_values") or [])
-            spec["seed"] = agent_files.expand(spec["seed"], self._load_files(spec["seed"]))  # FileRefused: told
+            self.loaded = []  # what each *_from_file entry stored against the file: on the plan card
+            spec["seed"] = agent_files.expand(spec["seed"], self._load_files(spec["seed"]), self.loaded)  # FileRefused: told
         if isinstance(spec.get("ir"), dict):
             spec["ir"] = json.loads(json.dumps(spec["ir"]))  # never the model's own copy
             for term in ((spec["ir"].get("objective") or {}).get("terms") or []):
@@ -3925,7 +3930,7 @@ class Agent:
                     counts = body.get("would_create", {})
                     # What will be built, read back by the platform beside the model's own account of it -- and
                     # what it does on the data, solved once before anything is kept.
-                    built_as = agent_readback.readback(self._spec(args)).split("\n", 1)[-1] + trial_for_person(
+                    built_as = agent_readback.readback(self._spec(args), self.loaded).split("\n", 1)[-1] + trial_for_person(
                         body.get("trial")) + shape_for_person(body.get("shape"))
                     yield {"type": "plan", "summary": str(args.get("summary")) + "\n\n**As built** (read back "
                            "from the spec by the platform; check it says what you meant)\n```\n" + built_as + "\n```",

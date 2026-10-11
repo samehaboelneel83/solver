@@ -16,6 +16,8 @@ warning on the plan card — the number that must reach 0.
 | base | 531fb9e (before step 2) | hidden, 16 small | 6 / 16 | 12 | 6 | re-scored after two checkers were fixed (rule 5); first read 5 / 16 |
 | step2 | b9f3943 (step 2 alone) | tuning, 10 small | 5 / 10 | 7 | 2 (p03, p07) | exit met: the tuning score did not drop |
 | step2 | b9f3943 (step 2 alone) | hidden, 16 small | running (from 04:19) | | | |
+| step3 | image `solver-backend:step3`, built from 10dc21e (backend = fa738c9: step 3 + the step 4 card) | both | next | | | |
+| step4 | the rest of step 4 (wide tables, units, the load report), committed after 10dc21e | both | after step3 | | | |
 
 ## base — hidden set, before step 2 (finished 02:29, 11 Oct)
 
