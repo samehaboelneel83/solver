@@ -1833,6 +1833,78 @@ def shape_sent_back(shape: Any) -> str:
             "it will be shown with these findings for them to judge.")
 
 
+_LIST_MARK = re.compile(r"(?m)^\s*\(?\d+[.)]\s")
+
+
+def _model_numbers(spec: dict) -> set[float]:
+    """Every number the built model holds: its data and its rules' constants and bounds, and how many records,
+    links and cells it has. Not the notes: a number written in a note is the model's prose, not the model."""
+    found: set[float] = set()
+
+    def walk(x: Any, key: str = "") -> None:
+        if isinstance(x, bool):
+            return
+        if isinstance(x, (int, float)):
+            found.add(round(float(x), 6))
+        elif isinstance(x, dict):
+            for k, v in x.items():
+                if k not in ("note", "summary", "label"):
+                    walk(v, k)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v, key)
+    seed = spec.get("seed") if isinstance(spec.get("seed"), dict) else {}
+    walk(seed)
+    walk(spec.get("ir") or {})
+    counts: dict[str, int] = {}
+    for part in ("entities", "relationships", "parameter_values"):
+        for r in seed.get(part) or []:
+            if isinstance(r, dict):
+                name = r.get("type") or r.get("parameter")
+                counts[f"{part}:{name}"] = counts.get(f"{part}:{name}", 0) + 1
+    found |= {float(n) for n in counts.values()}
+    return found
+
+
+def unused_numbers(messages: list[dict], spec: dict) -> list[str]:
+    """Numbers the person wrote that the model does not hold anywhere (neutrality plan, step 5: every number of
+    the request mapped to the model -- a limit read and then left out builds a model that answers a different
+    question, and nothing else on the card shows it). 35% counts as 35 or 0.35; list numbers, 0 and 1, and years
+    are not data. Only the prose: a table pasted into the message ("W01,204,233") is data, which the shape check
+    of unread data covers (app/solve/lint.py)."""
+    text = "\n".join(str(m.get("content") or "") for m in messages
+                     if m.get("role") == "user" and not str(m.get("content") or "").startswith(PLATFORM))
+    tight = re.compile(r",(?! )")
+    text = "\n".join(line for line in text.splitlines()
+                     if not (len(tight.findall(line)) >= 2 or (tight.search(line) and " " not in line.strip())))
+    text = _LIST_MARK.sub(" ", text)
+    held = _model_numbers(spec)
+    missing: list[str] = []
+    for raw in _NUMBER.findall(text):
+        raw = raw.rstrip(",")
+        try:
+            value = float(raw.rstrip("%").replace(",", ""))
+        except ValueError:
+            continue
+        if value in (0.0, 1.0) or (value.is_integer() and 1900 <= value <= 2100):
+            continue
+        ways = {round(value, 6), round(value / 100, 6), round(value * 100, 6), round(-value, 6)}
+        if raw.endswith("%"):
+            ways.add(round(1 - value / 100, 6))
+        if not ways & held and raw not in missing:
+            missing.append(raw)
+    return missing
+
+
+def numbers_for_person(messages: list[dict], spec: dict) -> str:
+    missing = unused_numbers(messages, spec)
+    if not missing:
+        return ""
+    return ("\n- CHECK THIS: numbers you wrote that the model does not use anywhere: " + ", ".join(missing[:12])
+            + (f" and {len(missing) - 12} more" if len(missing) > 12 else "")
+            + " -- each should be a limit, a value or a goal weight, or the model answers a different question")
+
+
 def shape_for_person(shape: Any) -> str:
     """The same findings as lines of the plan card."""
     said = [str(f.get("said")) for f in shape or [] if isinstance(f, dict) and f.get("said")]
@@ -3930,8 +4002,9 @@ class Agent:
                     counts = body.get("would_create", {})
                     # What will be built, read back by the platform beside the model's own account of it -- and
                     # what it does on the data, solved once before anything is kept.
-                    built_as = agent_readback.readback(self._spec(args), self.loaded).split("\n", 1)[-1] + trial_for_person(
-                        body.get("trial")) + shape_for_person(body.get("shape"))
+                    built = self._spec(args)
+                    built_as = agent_readback.readback(built, self.loaded).split("\n", 1)[-1] + trial_for_person(
+                        body.get("trial")) + shape_for_person(body.get("shape")) + numbers_for_person(messages, built)
                     yield {"type": "plan", "summary": str(args.get("summary")) + "\n\n**As built** (read back "
                            "from the spec by the platform; check it says what you meant)\n```\n" + built_as + "\n```",
                            "counts": counts, "spec": self._spec(args, expand=False), "readback": built_as}
