@@ -145,3 +145,16 @@ def test_a_parameter_given_only_its_default_is_named():
     assert "every value given for allowed is 1, its default" in found[0]["said"]
     seed["parameters"][0]["default_value"] = 0
     assert lint.as_default(seed) == []
+
+
+def test_a_pair_parameter_given_one_way_round_only_is_named():
+    """The evaluation, 11 October 2026: shared[e1, e2] for e1 < e2 only, read in one order by the rule."""
+    seed = {"parameters": [{"name": "shared", "index": ["exam", "exam"], "default_value": 0},
+                           {"name": "dist", "index": ["site", "site"], "default_value": 0}],
+            "parameter_values": [{"parameter": "shared", "entities": [["exam", a], ["exam", b]], "value": 3}
+                                 for a, b in (("E1", "E2"), ("E1", "E3"), ("E2", "E3"))]
+            + [{"parameter": "dist", "entities": [["site", a], ["site", b]], "value": 5}
+               for a, b in (("S1", "S2"), ("S2", "S1"))]}
+    found = lint.one_way(seed)
+    assert [f["what"] for f in found] == ["shared"]
+    assert "given one way round only (3 pairs" in found[0]["said"]

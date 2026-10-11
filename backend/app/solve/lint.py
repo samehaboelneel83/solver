@@ -219,7 +219,30 @@ def as_default(seed: dict[str, Any]) -> list[dict[str, Any]]:
     return found[:MOST]
 
 
+def one_way(seed: dict[str, Any]) -> list[dict[str, Any]]:
+    """Parameters over two records of one kind given one way round only: (a, b) and never (b, a) (the evaluation,
+    11 October 2026: students shared by two exams and consecutive slots, each given one way -- a rule reading
+    them in one order counted most back-to-back exams as nothing)."""
+    pairs = {p.get("name") for p in seed.get("parameters") or []
+             if isinstance(p, dict) and isinstance(p.get("index"), list) and len(p["index"]) == 2
+             and p["index"][0] == p["index"][1]}
+    cells: dict[str, set[tuple[str, str]]] = {}
+    for value in seed.get("parameter_values") or []:
+        ents = value.get("entities") if isinstance(value, dict) else None
+        if value.get("parameter") in pairs and isinstance(ents, list) and len(ents) == 2 \
+                and all(isinstance(e, (list, tuple)) and len(e) == 2 for e in ents):
+            cells.setdefault(value["parameter"], set()).add((str(ents[0][1]), str(ents[1][1])))
+    found = []
+    for name, given in cells.items():
+        off = {(a, b) for a, b in given if a != b}
+        if len(off) >= 2 and not any((b, a) in given for a, b in off):
+            found.append({"kind": "one_way", "what": name,
+                          "said": f"{name} is given one way round only ({len(off)} pairs (a, b), never (b, a)): if it "
+                                  "holds both ways, a rule reading it in one order misses the other half"})
+    return found[:MOST]
+
+
 def findings(ir: dict[str, Any], seed: dict[str, Any], compiled: Compiled | None) -> list[dict[str, Any]]:
     """The checks; a model that did not compile has only those of its data."""
     out = never_helps(compiled) if compiled is not None else []
-    return out + unread(ir, seed) + as_default(seed)
+    return out + unread(ir, seed) + as_default(seed) + one_way(seed)
