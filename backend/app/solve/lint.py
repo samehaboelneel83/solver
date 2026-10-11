@@ -197,7 +197,29 @@ def unread(ir: dict[str, Any], seed: dict[str, Any]) -> list[dict[str, Any]]:
     return found[:MOST]
 
 
+def as_default(seed: dict[str, Any]) -> list[dict[str, Any]]:
+    """Parameters whose given cells all equal the default: the data changes nothing (the evaluation, 11 October
+    2026: a list of the pairs allowed was loaded as 1 on a default of 1, so every pair stayed allowed -- twice)."""
+    defaults = {p.get("name"): p.get("default_value", 0) for p in seed.get("parameters") or []
+                if isinstance(p, dict) and p.get("index")}
+    given: dict[str, set[float]] = {}
+    for value in seed.get("parameter_values") or []:
+        if isinstance(value, dict) and value.get("parameter") in defaults \
+                and isinstance(value.get("value"), (int, float)) and not isinstance(value.get("value"), bool):
+            given.setdefault(value["parameter"], set()).add(float(value["value"]))
+    found = []
+    for name, values in given.items():
+        d = defaults[name]
+        if isinstance(d, (int, float)) and values == {float(d)}:
+            shown = int(d) if float(d).is_integer() else d
+            found.append({"kind": "as_default", "what": name,
+                          "said": f"every value given for {name} is {shown}, its default for the cells not given: "
+                                  f"the data changes nothing (if it lists what is allowed, the default should be "
+                                  f"the opposite)"})
+    return found[:MOST]
+
+
 def findings(ir: dict[str, Any], seed: dict[str, Any], compiled: Compiled | None) -> list[dict[str, Any]]:
-    """Both checks; a model that did not compile has only the second."""
+    """The checks; a model that did not compile has only those of its data."""
     out = never_helps(compiled) if compiled is not None else []
-    return out + unread(ir, seed)
+    return out + unread(ir, seed) + as_default(seed)

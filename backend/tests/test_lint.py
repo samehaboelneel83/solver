@@ -131,3 +131,17 @@ def test_the_findings_go_back_to_the_assistant_and_onto_the_plan_card():
     assert back.startswith("The plan was NOT shown") and "overtime can never help" in back
     assert core.shape_for_person(shape).startswith("\n- CHECK THIS: overtime can never help")
     assert core.shape_sent_back([]) == "" and core.shape_for_person(None) == ""
+
+
+def test_a_parameter_given_only_its_default_is_named():
+    """The evaluation, 11 October 2026: allowed[c, w] = 1 for the one pair listed, default 1 -- nothing restricted."""
+    seed = {"parameters": [{"name": "allowed", "index": ["c", "w"], "default_value": 1},
+                           {"name": "cost", "index": ["c", "w"], "default_value": 999999},
+                           {"name": "budget", "index": [], "default_value": 5}],
+            "parameter_values": [{"parameter": "allowed", "entities": [["c", "C4"], ["w", "W3"]], "value": 1},
+                                 {"parameter": "cost", "entities": [["c", "C4"], ["w", "W3"]], "value": 32}]}
+    found = lint.as_default(seed)
+    assert [f["what"] for f in found] == ["allowed"]
+    assert "every value given for allowed is 1, its default" in found[0]["said"]
+    seed["parameters"][0]["default_value"] = 0
+    assert lint.as_default(seed) == []
