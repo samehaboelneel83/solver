@@ -19,7 +19,8 @@ warning on the plan card — the number that must reach 0.
 | step3 | image `solver-backend:step3`, built from 10dc21e (backend = fa738c9: step 3 + the step 4 card) | tuning, 10 small | 3 / 10 | 9 | 6 | exit not met: down from 6; re-scored: p08 was scored on a what-if run (first read 2 / 10) |
 | step3 | same | hidden, 16 small | stopped after 2 (0 / 2) | | | stopped: step 3 withdrawn on the tuning result |
 | step4 | image `solver-backend:step4`: a37829d without step 3's instructions (step 2 + step 4; the idiom expansion is in, inert) | tuning, 10 small | 3 / 10 | 6 | 2 (+1 warned) | below step 2's 6; three not built in 20 minutes |
-| step4 | same | hidden, 16 small | queued after tuning | | | |
+| step4 | same | hidden, 16 small | 7 / 16 | 11 | 4 | the best hidden reading so far (base 6, step 2 4); 5 at the limit, all slow or lost replies |
+| step5 | image `solver-backend:step5` (main at 655ec70 without step 3b): the checks, repairs, send-back, pasted tables, corridor, map items, 0122 | tuning x3 + hidden | running (from 16:20) | | | read with `three.py runs step5` and `blind runs/hidden step5` |
 
 ## base — hidden set, before step 2 (finished 02:29, 11 Oct)
 
@@ -331,3 +332,37 @@ the report's map tiles came back as gzip (the tile server stores them so and dec
 urllib does not), so every report on the local satellite or topo tiles had no map. The report's tile fetch now
 undoes gzip as the terrain reader always did; real tiles over Cairo stitch (satellite 68 KB, topo 23 KB of
 picture). The egress smoke now also probes the tile index from the backend and prints where it reached it.
+
+## step4 — hidden set, step 4 on step 2 (finished 16:17, 11 Oct)
+
+```
+case           built  first  solved right  viol  warned  min
+h01-S          no     no     no     no    0     0       20.1
+h02-S          yes    yes    yes    yes   0     0       8
+h03-S          yes    yes    yes    yes   0     0       5
+h04-S          yes    yes    yes    yes   0     0       12.6
+h05-S          no     no     no     no    0     0       20.1
+h06-S          yes    yes    yes    yes   0     0       4.5
+h07-S          yes    yes    yes    no    5     0       11.1
+h08-S          yes    yes    yes    yes   0     0       3.4
+h09-S          yes    yes    yes    no    0     0       5.3
+h10-S          no     no     no     no    0     0       20.1
+h11-S          yes    yes    yes    yes   0     0       13.3
+h12-S          yes    yes    yes    no    23    0       5.8
+h13-S          yes    yes    yes    no    9     0       16
+h14-S          no     no     no     no    0     0       20.1
+h15-S          yes    yes    yes    yes   0     0       10.6
+h16-S          no     no     no     no    0     0       20.1
+
+7 right of 16; built 11; wrong but solved 4 (of them warned on the card 0)
+```
+
+- **7 right of 16**: base 6, step 2 4, step 4 7. Over one run each; the harness's stop-at-limit fix was in from
+  h02 on, so the cascade of one timeout into the next is gone from this reading.
+- **Where the time went** (`causes runs/hidden step4`): the 5 cases at the limit are all slow replies (a reply
+  past 7 minutes, cut) or turns that never returned; 0 refusals among them. 2 refusals in all, both "Internal
+  Server Error" on one case that was still built and right -- a platform 500 on a spec check; its backend log
+  left with the container at the step 5 deploy. **Lesson:** read the backend log before a deploy; if it recurs
+  under step 5, the log is the first place to look.
+- **Wrong, unwarned 4**: two break hard rules heavily (23 and 9 violations), one lightly (5), one keeps every
+  rule and misses the goal. The step 5 checks are the planned answer; this run is the base they are judged on.
