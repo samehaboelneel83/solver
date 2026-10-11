@@ -80,3 +80,10 @@ minutes of model time; then the hidden set, three runs, read blind.
 Domain-neutral (the build check), general (shape, never a name), isolated (the model and the tiles inside;
 nothing calls out), one image per measurement, nothing deployed during a hidden run, every change through the
 corpus before the browser.
+
+## Progress
+
+- **11 Oct, 23:40 — 1.1 built.** `app/agent/draft.py`: a `propose_plan` with only what changes (rules by id,
+  `{"id", "drop": true}` to remove, a goal, a decision) is completed from the last plan proposed, folded from
+  the conversation's own calls (nothing held between turns; the browser's round trip carries it); every
+  send-back now ends with how to patch instead of rewriting. 115 tests pass. Queued for the next image.

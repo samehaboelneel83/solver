@@ -65,6 +65,7 @@ from typing import Any, Callable, Iterator
 
 from app.agent import compact as agent_compact
 from app.agent import files as agent_files
+from app.agent import draft as agent_draft
 from app.agent import idioms as agent_idioms
 from app.agent import readback as agent_readback
 from app.agent import repair as agent_repair
@@ -438,6 +439,10 @@ _ASKS = re.compile(r"(?:open questions|shall i (?:proceed|go ahead|build)|do you
 _NEW_WORKSPACE = re.compile(r"\b(?:new|fresh|separate|another) (?:workspace|domain)\b|\bstart (?:from scratch|fresh)\b",
                             re.I)
 _SAME_WORKSPACE = re.compile(r"\b(?:existing|same|this|selected|current|old) (?:workspace|domain)\b", re.I)
+PATCH_HINT = (" Send propose_plan again with the summary and, in spec, ONLY what changes: {\"ir\": {\"constraints\": "
+              "[the rules you fixed or added]}} (to remove a rule: {\"id\": \"...\", \"drop\": true}; a changed goal "
+              "under \"objective\"; a changed decision under \"variables\"). Everything else is kept from your last "
+              "plan: do not resend the seed or the rules that stand.")
 PASTED_ATTACHED = ("The tables pasted in that message are attached as files: {files}. Load their rows with "
                    "entities_from_file / parameter_values_from_file (and query_file to add up), never by typing the "
                    "rows into the plan.")
@@ -3188,6 +3193,10 @@ class Agent:
         """The spec as the model wrote it; expanded, its file references become rows."""
         spec, notes = agent_repair.spec_of(args)
         self.joined.extend(notes)
+        # A plan sent with only what changes is completed from the last plan proposed (app/agent/draft.py).
+        spec, completed = agent_draft.complete(spec, self.messages)
+        if completed:
+            self.joined.append(completed)
         spec = {k: v for k, v in spec.items() if k != "dry_run"}
         self.joined.extend(agent_repair.misplaced(spec))
         self.joined.extend(agent_repair.joined_keys(spec))
@@ -3382,7 +3391,14 @@ class Agent:
                    for m in self.messages)
 
     def _check_plan(self, args: dict) -> str:
-        """The dry run. "PLAN_OK" lets the plan through to the person; anything else goes back to the model."""
+        """The dry run. "PLAN_OK" lets the plan through to the person; anything else goes back to the model --
+        with, once a plan exists, the way to patch it instead of rewriting it (app/agent/draft.py)."""
+        verdict = self._check_plan_whole(args)
+        if verdict.startswith("PLAN_OK") or agent_draft.draft_from(self.messages) is None:
+            return verdict
+        return verdict + PATCH_HINT
+
+    def _check_plan_whole(self, args: dict) -> str:
         # The person's own go-ahead ("you decide the rest and go ahead") is the discussion: the evaluation's
         # routing test deadlocked between this rule and the go-ahead guard, which forbids asking.
         # A summary of the earlier conversation keeps the person's words, and counts (phase 1 rerun, 10 October
