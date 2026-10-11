@@ -458,3 +458,33 @@ p10-S          no     no     no     no    0     1       20.1
 - **p03 right for the first time in any run** (the corridor-width fix), even after two cards declined for the
   cells-as-metres false warning (fixed, queued). p06 right after one warned card.
 - The two runs so far: 3 and 5 right; built 7 and 8; wrong unwarned 3 and 3. Run 3 from 21:38, then hidden.
+
+## step5 — the three-run reading (run 3 finished 00:06, 12 Oct)
+
+```
+case     runs right built warned min (mean)
+p01         3     3     3      0        3.7
+p02         3     2     2      0       11.2
+p03         3     2     3      3       17.0
+p04         3     0     3      1        7.2
+p05         3     0     3      0       14.7
+p06         3     1     1      1       19.7
+p07         3     0     1      0       14.9
+p08         3     0     0      2       20.1
+p09         3     3     3      0        6.9
+p10         3     0     2      2       10.9
+
+right per run: [3, 5, 3] -> mean 3.7 of 10, range 3-5; wrong unwarned (case-runs): 7 of 30
+```
+
+- **Mean 3.7 of 10, range 3–5.** Against the single runs before it (step 2: 6, step 4: 3) this image is not
+  better, and the range says a single run of it could have read 3 or 5. The hidden run decides whether the
+  checks pay there.
+- **Always right:** p01, p09. **Never right:** p04 (the unlisted pair, check queued), p05 (built every time
+  now, wrong by a swamped goal), p07 (the `over` term, repair queued), p08 (never built: the send-back catches
+  its wrong model, the retry never finishes), p10 (two of three runs warned).
+- **Warned:** 9 of 30 case-runs carried a warning, 7 wrong case-runs did not. The checks reach the person;
+  they do not yet cover the common mistakes (the dropped rule most of all).
+- **Time:** 9 of 30 not built, every one slow replies or a rewrite after a send-back -- lever 1.1 (patch, not
+  rewrite) and 1.2 (a 4-minute cap) are built and queued for the next image.
+- p05 run 3: the checker could not read the export (a tuning checker gap, to fix separately).
