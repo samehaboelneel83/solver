@@ -134,11 +134,10 @@ h16-S          no     no     no     no    0     0       20
 
 Against the baseline (6 right, 12 built, 6 wrong unwarned), by class only:
 
-- **Fewer built: 9, from 12.** Nine cases ended at the 20-minute limit, from four. Two of the cases right in
-  the baseline (h07, h14, h15 were right; h14 and h15 now not built, h07 now wrong) went the other way, and one
-  wrong one became right (h11). With one run a case, the swing of ±2 right is within run-to-run noise on this
-  LLM, but the drop in "built" is the larger move and is in the direction the plan warned of: without concrete
-  illustrations the Assistant takes longer to reach a model the platform accepts.
+- **Fewer built: 9, from 12.** Nine cases ended at the 20-minute limit, from four. Three of the baseline's
+  right cases went the other way (h14 and h15 now not built, h07 now wrong) and one wrong one became right (h11).
+  With one run a case, a net move of 2 right is within run-to-run noise on this LLM, but the drop in "built" is
+  the larger move and is in the direction the plan warned of: without concrete illustrations the Assistant takes longer to reach a model the platform accepts.
 - **Fewer wrong answers: 3 unwarned, from 6**, and fewer rules broken (2 + 2 violations, from 1 + 7 + 12 + 23).
   What it builds is more often right; it builds less often in time.
 - **Reading.** Step 2's exit (tuning score holds) is met: 5 / 10. On the hidden set it is not a gain. Step 3's
