@@ -88,3 +88,22 @@ step2: 5 right of 10; built 7; wrong but solved 2 (warned 0)
   either way is within run-to-run noise; the counts are what the step is judged on.
 - The blind runner counts p08 `after` as warned 0, where `2026-10-10-phase1-results.md` scored it warned by hand
   from the card; the hand reading stands for that run.
+
+## step 6 — solver-side audit (11 Oct, read only; no measurement)
+
+Looked for anything on the solve path keyed on a domain's or problem's name rather than the model's shape:
+
+- **Solver choice and the special methods are by structure.** `app/solve/fingerprint.py` and `classify.py`
+  name model classes (knapsack, partition, cover, packing) from the compiled rows, not from names; each special
+  method (`allocation`, `fixed_charge`, `greedy`, `horizon`, `join`, `lagrange`, `lns`, `matching`, network)
+  has an `applies(compiled)` that tests the rows. Comparisons with `.name ==` in `app/solve` are solver
+  (backend) names only.
+- **The routing solver is reached through a general rule type** (`route`, with its own `depot` / `depot_by`
+  keys, validated in `app/ir/validate.py`), not through a problem name.
+- **No branch on `domain_name` or `problem_name`** anywhere in `app/`: they are only checked for being new or
+  unused.
+- **Three domain-named modules exist** (`app/facilities.py`, `app/emergency_coverage.py`, `app/heatwave.py`):
+  ready-made example templates a person applies from the showcase (`app/showcase.py`). The Assistant does not
+  read or reach them (no reference in `app/agent/`), so they do not bias what it builds. They stay as examples.
+
+Result: step 6's audit finds nothing to change on the solver side.
