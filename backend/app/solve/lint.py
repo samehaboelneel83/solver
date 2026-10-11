@@ -214,8 +214,10 @@ def as_default(seed: dict[str, Any]) -> list[dict[str, Any]]:
             shown = int(d) if float(d).is_integer() else d
             found.append({"kind": "as_default", "what": name,
                           "said": f"every value given for {name} is {shown}, its default for the cells not given: "
-                                  f"the data changes nothing (if it lists what is allowed, the default should be "
-                                  f"the opposite)"})
+                                  f"the data changes nothing. If it is a complete list of what is allowed, the "
+                                  f"default should be the opposite; if it restricts only the records it names (the "
+                                  f"others free), the rule needs a 0/1 per record (1 for those named): "
+                                  f"amount <= most x (1 - listed[r] + {name}[r, o])"})
     return found[:MOST]
 
 

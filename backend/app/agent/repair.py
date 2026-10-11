@@ -341,12 +341,24 @@ def repair(spec: dict[str, Any]) -> list[str]:
     for p in seed.get("parameters") or []:
         # A 0/1 list typed as 1 on a default of 1 changes nothing (the evaluation, 11 October 2026: the one
         # approved pair typed as allowed = 1, every other pair allowed by default): what it does not name is 0.
-        given = [v.get("value") for v in cells if v.get("parameter") == (p.get("name") if isinstance(p, dict) else None)]
+        mine = [v for v in cells if v.get("parameter") == (p.get("name") if isinstance(p, dict) else None)]
+        given = [v.get("value") for v in mine]
         if isinstance(p, dict) and p.get("index") and given and all(g == 1 for g in given) \
                 and p.get("default_value") == 1:
-            p["default_value"] = 0
-            notes.append(f'{p["name"]} gave 1 for {len(given)} cell(s) on a default of 1, which changes nothing: '
-                         "every cell not given is now 0 (if every other cell should be 1, give the 0 cells instead)")
+            # Flipped only when the cells name every record of the first index; a list naming some restricts
+            # those alone (11 October 2026: flipping it made every unlisted record unservable).
+            first = str(p["index"][0])
+            named = {str(e[0][1]) for v in mine for e in [v.get("entities") or []] if e and isinstance(e[0], (list, tuple))}
+            every = {str(e.get("key")) for e in seed.get("entities") or [] if isinstance(e, dict) and e.get("type") == first}
+            if every and named >= every:
+                p["default_value"] = 0
+                notes.append(f'{p["name"]} gave 1 for {len(given)} cell(s) on a default of 1 and names every {first}: '
+                             "every cell not given is now 0")
+            else:
+                notes.append(f'{p["name"]} gives 1 for {len(given)} cell(s) on a default of 1, so as written it changes '
+                             f"nothing; it names {len(named)} of {len(every) or '?'} {first}. If it restricts only "
+                             "those it names, add a 0/1 parameter per record (1 for those named) and write "
+                             f"amount <= most x (1 - listed[r] + {p['name']}[r, o]); if it is complete, give it default 0")
     declared = {p.get("name") for p in seed.get("parameters") or [] if isinstance(p, dict)}
     for name in dict.fromkeys(v.get("parameter") for v in cells):
         # Values for a parameter only the IR declares (the Nile Juice trace: 48 cells of "demand", refused until

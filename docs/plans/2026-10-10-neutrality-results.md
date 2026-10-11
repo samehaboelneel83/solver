@@ -377,3 +377,15 @@ summarized, the tables pasted into the first message were gone and the Assistant
 now carries the folded messages' pasted tables and the Assistant attaches them from it; the history sent to the
 model is stripped to the API's own keys. The partial run (p02 not built, p04 right in 16 min) is kept as
 `step5-1-aborted`; the measurement restarts on the fixed image as `step5` (three tuning runs, then hidden).
+
+## Step 5, second start stopped: the list-default flip was wrong for a partial list (11 Oct, 17:40)
+
+On the restarted run, p02 took its first card only at 14.5 minutes and it was infeasible: the approved list
+names one customer of eight, the request says the others may be served from anywhere, and the repair that
+flips a list's default (1 on 1 -> 0) made every unlisted customer unservable. Two send-backs (each a long
+reply), a warned card declined, the retry stopped at the limit. The flip now happens only when the list names
+every record of its first index; a partial list gets a note on the card and to the model with both readings
+and the rule shape for the partial one (a 0/1 per record, amount <= most x (1 - listed[r] + pair[r, o])).
+The partial run (p02 not built, p04 under way) is kept as `step5-2-aborted`; the measurement restarts on the
+fixed image, still as `step5`. Three starts for one step: each defect was in a repair added today, found on the
+tuning set, as the plan intends -- and each would have been invisible on the hidden set.

@@ -721,14 +721,27 @@ def expand(seed: dict[str, Any], files: list[dict[str, Any]], report: list[str] 
             and not isinstance(spec.get("value"), bool) else None
         if constant not in (None, 0):
             # A file that LISTS pairs, loaded as `constant` on a default of the same: the list would change
-            # nothing (the evaluation, 11 October 2026: allowed pairs as 1 on a default of 1, three times). What
-            # the list does not name is the opposite: 0.
+            # nothing (the evaluation, 11 October 2026: allowed pairs as 1 on a default of 1, three times). When
+            # the list names EVERY record of its first index, what it does not name is the opposite: 0. When it
+            # names only some, it restricts those alone (the others are free), and the default must stay: the
+            # same day, flipping it made every unlisted record unservable and the plan infeasible.
             declared = next((p for p in out.get("parameters") or []
                              if isinstance(p, dict) and p.get("name") == spec.get("parameter")), None)
             if declared is not None and _number(declared.get("default_value")) == float(constant):
-                declared["default_value"] = 0
-                load.columns_note = (f"the default was {_fmt(float(constant))}, the same as every value the list "
-                                     "gives, so the list would change nothing: every pair it does not name is now 0")
+                ends0 = [(str(t), _columns(s, c)) for t, c in (spec.get("entities") or [])[:1] if c != "*"]
+                named = {_joined(r, ends0[0][1]) for r in _rows(s, spec)} - {None} if ends0 else set()
+                every = {str(e.get("key")) for e in out.get("entities") or []
+                         if isinstance(e, dict) and e.get("type") == (ends0[0][0] if ends0 else None)}
+                if every and named >= every:
+                    declared["default_value"] = 0
+                    load.columns_note = (f"the default was {_fmt(float(constant))}, the same as every value the list "
+                                         "gives, and the list names every record: every pair it does not name is now 0")
+                else:
+                    load.columns_note = (f"every value is {_fmt(float(constant))}, the same as the default, and the list "
+                                         f"names {len(named)} of {len(every) or '?'} records: as loaded it changes "
+                                         "nothing. If it restricts only the records it names, add a 0/1 parameter "
+                                         "per record (1 for those named) and write the rule for them: amount <= most "
+                                         "x (1 - listed[r] + pair[r, o]); if it is complete, give the default 0")
         value_at = None if constant is not None else _column(
             s, spec.get("value"), f'parameter_values_from_file for "{spec.get("parameter")}": "value" (a column, or a '
                                   "number for every row)")
