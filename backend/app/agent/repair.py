@@ -113,17 +113,24 @@ def _walk(node: Any, notes: list[str]) -> None:
             _walk(value, notes)
 
 
-def _scalar_indices(ir: dict[str, Any], notes: list[str]) -> None:
+def _scalar_indices(ir: dict[str, Any], notes: list[str], seed: dict[str, Any] | None = None) -> None:
     """A one-number decision or parameter read with an index (the live job-shop test: makespan[o]) is read with
     none: it has one value."""
     scalars = {("var", n) for n, v in (ir.get("variables") or {}).items() if isinstance(v, dict) and v.get("index") == []}
     scalars |= {("par", n) for n, p in (ir.get("parameters") or {}).items() if isinstance(p, dict) and p.get("index") == []}
+    # One number declared only in the seed (the evaluation, 11 October 2026: a cost per ton-minute, refused seven
+    # times as "declared over 0 sets") is one number too, unless the IR declares it with an index.
+    ir_pars = ir.get("parameters") if isinstance(ir.get("parameters"), dict) else {}
+    scalars |= {("par", p["name"]) for p in (seed or {}).get("parameters") or []
+                if isinstance(p, dict) and isinstance(p.get("name"), str) and not p.get("index")
+                and not (isinstance(ir_pars.get(p["name"]), dict) and ir_pars[p["name"]].get("index"))}
     fixed: set[str] = set()
 
     def walk(node: Any) -> None:
         if isinstance(node, dict):
             for kind in ("var", "par"):
-                if isinstance(node.get(kind), str) and (kind, node[kind]) in scalars and node.get("index"):
+                # Read with an index, or with no "index" at all: either way one number reads as "index": [].
+                if isinstance(node.get(kind), str) and (kind, node[kind]) in scalars and node.get("index") != []:
                     node["index"] = []
                     fixed.add(node[kind])
             for value in node.values():
@@ -331,6 +338,15 @@ def repair(spec: dict[str, Any]) -> list[str]:
             else:
                 p.pop("uncertainty")
     cells = [v for v in seed.get("parameter_values") or [] if isinstance(v, dict)]
+    for p in seed.get("parameters") or []:
+        # A 0/1 list typed as 1 on a default of 1 changes nothing (the evaluation, 11 October 2026: the one
+        # approved pair typed as allowed = 1, every other pair allowed by default): what it does not name is 0.
+        given = [v.get("value") for v in cells if v.get("parameter") == (p.get("name") if isinstance(p, dict) else None)]
+        if isinstance(p, dict) and p.get("index") and given and all(g == 1 for g in given) \
+                and p.get("default_value") == 1:
+            p["default_value"] = 0
+            notes.append(f'{p["name"]} gave 1 for {len(given)} cell(s) on a default of 1, which changes nothing: '
+                         "every cell not given is now 0 (if every other cell should be 1, give the 0 cells instead)")
     declared = {p.get("name") for p in seed.get("parameters") or [] if isinstance(p, dict)}
     for name in dict.fromkeys(v.get("parameter") for v in cells):
         # Values for a parameter only the IR declares (the Nile Juice trace: 48 cells of "demand", refused until
@@ -385,7 +401,7 @@ def repair(spec: dict[str, Any]) -> list[str]:
         if isinstance(c, dict) and c.get("severity") is None and "weight" not in c:
             c["severity"] = "hard"
             notes.append(f'rule {c.get("id")} had no severity and was made "hard" (must hold)')
-    _scalar_indices(ir, notes)
+    _scalar_indices(ir, notes, spec.get("seed") if isinstance(spec.get("seed"), dict) else {})
     _walk(ir.get("constraints"), notes)
     _walk(ir.get("objective"), notes)
     seed = spec.get("seed") if isinstance(spec.get("seed"), dict) else {}

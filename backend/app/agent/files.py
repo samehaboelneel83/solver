@@ -544,6 +544,8 @@ def expand(seed: dict[str, Any], files: list[dict[str, Any]], report: list[str] 
     loads: list[_Load] = []
     out = {k: v for k, v in seed.items()
            if k not in ("entities_from_file", "parameter_values_from_file", "relationships_from_file")}
+    if isinstance(seed.get("parameters"), list):  # a default may be corrected below: never the caller's copy
+        out["parameters"] = [dict(p) if isinstance(p, dict) else p for p in seed["parameters"]]
     bindings = list(seed.get("source_bindings") or [])
     kept_files: dict[str, dict[str, Any]] = {}
 
@@ -666,6 +668,16 @@ def expand(seed: dict[str, Any], files: list[dict[str, Any]], report: list[str] 
         # bans, skills held) is a 0/1 parameter with "value": 1 (the nurse roster field test, October 2026).
         constant = spec.get("value") if isinstance(spec.get("value"), (int, float)) \
             and not isinstance(spec.get("value"), bool) else None
+        if constant not in (None, 0):
+            # A file that LISTS pairs, loaded as `constant` on a default of the same: the list would change
+            # nothing (the evaluation, 11 October 2026: allowed pairs as 1 on a default of 1, three times). What
+            # the list does not name is the opposite: 0.
+            declared = next((p for p in out.get("parameters") or []
+                             if isinstance(p, dict) and p.get("name") == spec.get("parameter")), None)
+            if declared is not None and _number(declared.get("default_value")) == float(constant):
+                declared["default_value"] = 0
+                load.columns_note = (f"the default was {_fmt(float(constant))}, the same as every value the list "
+                                     "gives, so the list would change nothing: every pair it does not name is now 0")
         value_at = None if constant is not None else _column(
             s, spec.get("value"), f'parameter_values_from_file for "{spec.get("parameter")}": "value" (a column, or a '
                                   "number for every row)")

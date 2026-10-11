@@ -82,3 +82,44 @@ def test_records_report_repeated_keys_and_numbers_read():
     assert [e["attrs"] for e in out["entities"] if e["type"] == "plant"] == [{"cap": 10}, {"cap": 1}]
     assert report == ['records "plant" from "plants.csv": 3 rows; 1 repeated keys counted once; '
                       '2 numbers read without their unit or currency; 1 yes/no read as 1/0; 2 stored']
+
+
+def test_a_list_loaded_on_a_default_of_the_same_value_gets_the_opposite_default():
+    """The evaluation, 11 October 2026: approved pairs loaded as 1 with default 1 restricted nothing."""
+    f = _file("approved.csv", ["customer", "plant"], [["C1", "P2"]])
+    seed = _seed(parameters=[{"name": "allowed", "index": ["customer", "plant"], "default_value": 1}],
+                 parameter_values_from_file=[{"file": "approved.csv", "parameter": "allowed", "value": 1,
+                                              "entities": [["customer", "customer"], ["plant", "plant"]]}])
+    report: list[str] = []
+    out = files.expand(seed, [f], report)
+    assert out["parameters"][0]["default_value"] == 0 and seed["parameters"][0]["default_value"] == 1
+    assert "every pair it does not name is now 0" in report[0]
+    seed["parameters"][0]["default_value"] = 0
+    assert files.expand(seed, [f])["parameters"][0]["default_value"] == 0
+
+
+def test_a_typed_list_of_ones_on_a_default_of_one_gets_default_zero():
+    from app.agent import repair
+
+    spec = {"seed": {"parameters": [{"name": "allowed", "index": ["c", "w"], "default_value": 1},
+                                    {"name": "share", "index": ["c"], "default_value": 1}],
+                     "parameter_values": [{"parameter": "allowed", "entities": [["c", "C4"], ["w", "W3"]], "value": 1},
+                                          {"parameter": "share", "entities": [["c", "C4"]], "value": 0.5}]},
+            "ir": {"version": 2}}
+    notes = repair.repair(spec)
+    assert [p["default_value"] for p in spec["seed"]["parameters"]] == [0, 1]
+    assert any("allowed gave 1 for 1 cell(s) on a default of 1" in n for n in notes)
+
+
+def test_one_number_declared_in_the_seed_is_read_with_no_index_however_written():
+    from app.agent import repair
+
+    spec = {"seed": {"parameters": [{"name": "rate", "default_value": 2}, {"name": "cost", "index": ["w"]}]},
+            "ir": {"version": 2, "parameters": {"cost": {"index": ["w"]}},
+                   "constraints": [{"id": "c", "left": {"mul": [{"par": "rate"}, {"par": "rate", "index": ["w"]}]},
+                                    "relation": "<=", "right": {"par": "cost", "index": ["w"]}}]}}
+    notes = repair.repair(spec)
+    left = spec["ir"]["constraints"][0]["left"]["mul"]
+    assert left == [{"par": "rate", "index": []}, {"par": "rate", "index": []}]
+    assert spec["ir"]["constraints"][0]["right"] == {"par": "cost", "index": ["w"]}
+    assert any("rate hold one number" in n for n in notes)
