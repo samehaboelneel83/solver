@@ -17,8 +17,9 @@ warning on the plan card — the number that must reach 0.
 | step2 | b9f3943 (step 2 alone) | tuning, 10 small | 6 / 10 | 7 | 1 (p03) | exit met; re-scored: p07 was scored on a what-if run (first read 5 / 10) |
 | step2 | b9f3943 (step 2 alone) | hidden, 16 small | 4 / 16 | 9 | 3 | down from 6 / 16: more cases hit the 20-minute limit |
 | step3 | image `solver-backend:step3`, built from 10dc21e (backend = fa738c9: step 3 + the step 4 card) | tuning, 10 small | 3 / 10 | 9 | 6 | exit not met: down from 6; re-scored: p08 was scored on a what-if run (first read 2 / 10) |
-| step3 | same | hidden, 16 small | running (from 09:58) | | | |
-| step4 | the rest of step 4 (wide tables, units, the load report), committed after 10dc21e | both | after step3 | | | |
+| step3 | same | hidden, 16 small | stopped after 2 (0 / 2) | | | stopped: step 3 withdrawn on the tuning result |
+| step4 | image `solver-backend:step4`: a37829d without step 3's instructions (step 2 + step 4; the idiom expansion is in, inert) | tuning, 10 small | running (from 10:46) | | | |
+| step4 | same | hidden, 16 small | queued after tuning | | | |
 
 ## base — hidden set, before step 2 (finished 02:29, 11 Oct)
 
@@ -195,3 +196,12 @@ exactly (620,380). `drive_case.mjs` now takes the newest run of a scenario that 
 | step3 | 3 / 10 | 6 |
 
 The step 3 drop stands (6 to 3 right on the tuning set).
+
+## Step 3 withdrawn (11 Oct, 10:45, on the owner's "fix and go on")
+
+Step 3's instructions (the IDIOMS block and the building blocks pointing to it) took the tuning set from 6 to 3
+right, and the Assistant wrote an idiom in 3 of 10 cases. They are withdrawn (e5c361c); the expansion in
+`app/agent/idioms.py` stays, since it acts only on a rule written as an idiom. The step 3 hidden run was stopped
+after two cases (both at the 20-minute limit) -- the tuning result decided it, and the rest would have measured
+instructions that are no longer in. Step 4 is now measured on step 2 alone: the live image is a37829d without
+step 3's instructions, and holds neither of the step 5 checks committed since.
