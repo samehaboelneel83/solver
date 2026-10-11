@@ -43,11 +43,14 @@ def _signals(ir: dict, data: dict, request: str) -> tuple[set[str], float | None
         return {f"refused:{type(exc).__name__}"}, None, "refused"
     for f in lint.never_helps(compiled):
         out.add(f"shape:{f.get('kind')}")
-    found = refine(classify(ir, data), compiled)
-    backend, _ = choose(found)
-    result, _reason = sandbox.run("app.solve.sandbox:solve_in_child",
-                                  {"backend": backend.name, "compiled": compiled, "time_limit": 60.0,
-                                   "seed": 0, "workers": 1, "gap_rel": 0.0}, time_limit=65.0)
+    try:
+        found = refine(classify(ir, data), compiled)
+        backend, _ = choose(found)
+        result, _reason = sandbox.run("app.solve.sandbox:solve_in_child",
+                                      {"backend": backend.name, "compiled": compiled, "time_limit": 60.0,
+                                       "seed": 0, "workers": 1, "gap_rel": 0.0}, time_limit=65.0)
+    except Exception as exc:  # noqa: BLE001 -- a mutation no solver takes is refused: that is a catch
+        return out | {f"refused:{type(exc).__name__}"}, None, "refused"
     if result is None:
         return out | {"trial:no answer"}, None, "no answer"
     status = str(result.status)

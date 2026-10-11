@@ -173,3 +173,8 @@ The neutrality plan's step 5 and step 3b measurements run on within Phase 0; the
   (the request's "lowest"/"most" against the model's sense): **39 caught, 23 harmless, 15 missed, 0 false
   positives.** The 15: 13 dropped rules (Phase 3.2's sentence-to-rule mapping is the answer) and 2 partial
   lists. The table is the gap list the plan asked for.
+- **11 Oct, 21:55.** Golds for p03 (the layout, first right run ever, under step 5 run 2) and p06: **8 pass of
+  8**. Mutations on them: 13 caught (a reversed goal on the layout is refused by its solver, which counts), 4
+  harmless, 4 missed -- all dropped rules on the timetable, the Phase 3.2 gap. The harness now counts a refused
+  solve as a catch, and the platform's unused-numbers check counts an attachment's sizes (a drawing's layers and
+  features, a sheet's rows) as held: "layer PROTECTED holds 14 areas" is not a number of the model.

@@ -1,0 +1,670 @@
+{
+ "case": "p03",
+ "size": "S",
+ "run": 430,
+ "objective": 38,
+ "ir": {
+  "sets": [
+   "slot",
+   "area",
+   "access_point"
+  ],
+  "version": 2,
+  "objective": {
+   "sense": "maximize",
+   "terms": [
+    {
+     "id": "o_items",
+     "weight": 1,
+     "expression": {
+      "sum": {
+       "var": "placed",
+       "index": [
+        "s"
+       ]
+      },
+      "over": [
+       {
+        "set": "slot",
+        "index": "s"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  "variables": {
+   "x": {
+    "index": [
+     "slot"
+    ],
+    "lower": 0,
+    "upper": 141,
+    "domain": "integer"
+   },
+   "y": {
+    "index": [
+     "slot"
+    ],
+    "lower": 0,
+    "upper": 100,
+    "domain": "integer"
+   },
+   "placed": {
+    "index": [
+     "slot"
+    ],
+    "domain": "binary"
+   },
+   "turned": {
+    "index": [
+     "slot"
+    ],
+    "domain": "binary"
+   },
+   "aisle_side": {
+    "index": [
+     "slot"
+    ],
+    "lower": 0,
+    "upper": 3,
+    "domain": "integer"
+   }
+  },
+  "parameters": {},
+  "constraints": [
+   {
+    "id": "c_layout",
+    "note": "Items on the free area, no two on one cell, each aisle free",
+    "place": {
+     "x": {
+      "var": "x",
+      "index": [
+       "s"
+      ]
+     },
+     "y": {
+      "var": "y",
+      "index": [
+       "s"
+      ]
+     },
+     "side": {
+      "var": "aisle_side",
+      "index": [
+       "s"
+      ]
+     },
+     "step": 0.1,
+     "turn": {
+      "var": "turned",
+      "index": [
+       "s"
+      ]
+     },
+     "aisle": 12,
+     "areas": {
+      "set": "area",
+      "index": "a"
+     },
+     "shape": "shape",
+     "slots": {
+      "set": "slot",
+      "index": "s"
+     },
+     "width": "width_cells",
+     "access": {
+      "set": "access_point",
+      "index": "e"
+     },
+     "chosen": {
+      "var": "placed",
+      "index": [
+       "s"
+      ]
+     },
+     "length": "length_cells",
+     "origin": [
+      0.0,
+      0.0
+     ],
+     "can_turn": "can_turn",
+     "aisle_sides": "any",
+     "access_shape": "shape"
+    },
+    "severity": "hard"
+   }
+  ]
+ },
+ "data": {
+  "sets": {
+   "area": [
+    {
+     "id": "A1",
+     "zone": "A1",
+     "shape": "POLYGON ((0.000000 9.999000, 14.004000 9.999000, 14.004000 0.000000, 0.000000 0.000000, 0.000000 9.999000), (8.796000 4.401000, 8.796000 6.596000, 5.999000 6.596000, 5.999000 4.401000, 8.796000 4.401000))"
+    }
+   ],
+   "slot": [
+    {
+     "id": "bed_1",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_10",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_11",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_12",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_13",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_14",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_15",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_16",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_17",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_18",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_19",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_2",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_20",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_21",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_22",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_23",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_24",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_25",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_26",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_27",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_28",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_29",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_3",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_30",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_31",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_32",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_33",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_34",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_35",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_36",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_37",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_38",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_39",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_4",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_40",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_41",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_42",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_43",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_44",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_45",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_46",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_47",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_48",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_49",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_5",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_50",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_51",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_52",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_53",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_54",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_55",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_56",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_57",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_58",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_59",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_6",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_60",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_61",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_62",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_63",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_7",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_8",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    },
+    {
+     "id": "bed_9",
+     "kind": "bed",
+     "value": 1,
+     "can_turn": 1,
+     "width_cells": 9,
+     "length_cells": 20
+    }
+   ],
+   "access_point": [
+    {
+     "id": "access_1",
+     "shape": "LINESTRING (6.201000 0.000000, 7.802000 0.000000)"
+    }
+   ]
+  },
+  "parameters": {},
+  "relationships": {},
+  "parameter_defaults": {},
+  "labels": {
+   "area": {},
+   "slot": {},
+   "access_point": {}
+  }
+ }
+}

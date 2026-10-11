@@ -1890,7 +1890,27 @@ def _model_numbers(spec: dict) -> set[float]:
     return found
 
 
-def unused_numbers(messages: list[dict], spec: dict) -> list[str]:
+def attachment_counts(files: list[dict]) -> set[float]:
+    """The sizes of what the person attached -- a sheet's rows, a drawing's layers and each layer's features --
+    which a request names ("layer PROTECTED holds 14 areas") without their being numbers of the model (the
+    evaluation, 11 October 2026: 14 flagged as unused on a right layout)."""
+    found: set[float] = set()
+    for f in files or []:
+        for s in f.get("sheets") or []:
+            if isinstance(s, dict) and isinstance(s.get("total_rows"), (int, float)):
+                found.add(float(s["total_rows"]))
+        spatial = f.get("spatial") if isinstance(f.get("spatial"), dict) else {}
+        if isinstance(spatial.get("layers"), (int, float)):
+            found.add(float(spatial["layers"]))
+        for layer in spatial.get("layer_counts") or spatial.get("features") or []:
+            if isinstance(layer, dict) and isinstance(layer.get("count"), (int, float)):
+                found.add(float(layer["count"]))
+            elif isinstance(layer, (int, float)):
+                found.add(float(layer))
+    return found
+
+
+def unused_numbers(messages: list[dict], spec: dict, held_too: set[float] | None = None) -> list[str]:
     """Numbers the person wrote that the model does not hold anywhere (neutrality plan, step 5: every number of
     the request mapped to the model -- a limit read and then left out builds a model that answers a different
     question, and nothing else on the card shows it). 35% counts as 35 or 0.35; list numbers, 0 and 1, and years
@@ -1906,7 +1926,7 @@ def unused_numbers(messages: list[dict], spec: dict) -> list[str]:
     # evaluation, 11 October 2026: that number was flagged on three cards running, and the plan never built).
     text = "\n".join(s for s in re.split(r"(?<=[.;!?])\s+|\n", text) if not _FOR_THE_REPORT.search(s))
     text = _LIST_MARK.sub(" ", text)
-    held = _model_numbers(spec)
+    held = _model_numbers(spec) | set(held_too or ())
     missing: list[str] = []
     for raw in _NUMBER.findall(text):
         raw = raw.rstrip(",")
@@ -1957,8 +1977,8 @@ def goal_sense_for_person(messages: list[dict], ir: dict) -> str:
     return ""
 
 
-def numbers_for_person(messages: list[dict], spec: dict) -> str:
-    missing = unused_numbers(messages, spec)
+def numbers_for_person(messages: list[dict], spec: dict, files: list[dict] | None = None) -> str:
+    missing = unused_numbers(messages, spec, attachment_counts(files or []))
     if not missing:
         return ""
     return ("\n- CHECK THIS: numbers you wrote that the model does not use anywhere: " + ", ".join(missing[:12])
@@ -4127,7 +4147,7 @@ class Agent:
                     # what it does on the data, solved once before anything is kept.
                     built = self._spec(args)
                     built_as = agent_readback.readback(built, self.loaded).split("\n", 1)[-1] + trial_for_person(
-                        body.get("trial")) + shape_for_person(body.get("shape")) + numbers_for_person(messages, built) \
+                        body.get("trial")) + shape_for_person(body.get("shape")) + numbers_for_person(messages, built, self.ctx.files) \
                         + goal_sense_for_person(messages, built.get("ir") or {})
                     yield {"type": "plan", "summary": str(args.get("summary")) + "\n\n**As built** (read back "
                            "from the spec by the platform; check it says what you meant)\n```\n" + built_as + "\n```",

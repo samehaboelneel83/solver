@@ -1,0 +1,1203 @@
+{
+ "case": "p06",
+ "size": "S",
+ "run": 407,
+ "objective": 680,
+ "ir": {
+  "sets": [
+   "exam",
+   "room",
+   "slot",
+   "day"
+  ],
+  "version": 2,
+  "objective": {
+   "mode": "weighted",
+   "sense": "minimize",
+   "terms": [
+    {
+     "id": "o_consecutive",
+     "weight": 10,
+     "expression": {
+      "sum": {
+       "mul": [
+        {
+         "par": "shared_students",
+         "index": [
+          "e1",
+          "e2"
+         ]
+        },
+        {
+         "var": "consecutive_conflict",
+         "index": [
+          "e1",
+          "e2",
+          "s"
+         ]
+        }
+       ]
+      },
+      "over": [
+       {
+        "set": "exam",
+        "index": "e1"
+       },
+       {
+        "set": "exam",
+        "index": "e2"
+       },
+       {
+        "set": "slot",
+        "index": "s"
+       }
+      ]
+     }
+    },
+    {
+     "id": "o_empty_seats",
+     "weight": 1,
+     "expression": {
+      "sum": {
+       "mul": [
+        {
+         "var": "assign",
+         "index": [
+          "e",
+          "r",
+          "s"
+         ]
+        },
+        {
+         "add": [
+          {
+           "attr": {
+            "of": "r",
+            "name": "capacity"
+           }
+          },
+          {
+           "mul": [
+            {
+             "const": -1
+            },
+            {
+             "attr": {
+              "of": "e",
+              "name": "students"
+             }
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      "over": [
+       {
+        "set": "exam",
+        "index": "e"
+       },
+       {
+        "set": "room",
+        "index": "r"
+       },
+       {
+        "set": "slot",
+        "index": "s"
+       }
+      ]
+     }
+    },
+    {
+     "id": "o_imbalance",
+     "weight": 20,
+     "expression": {
+      "add": [
+       {
+        "var": "max_day_exams",
+        "index": []
+       },
+       {
+        "mul": [
+         {
+          "const": -1
+         },
+         {
+          "var": "min_day_exams",
+          "index": []
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  },
+  "variables": {
+   "assign": {
+    "index": [
+     "exam",
+     "room",
+     "slot"
+    ],
+    "domain": "binary"
+   },
+   "day_exams": {
+    "index": [
+     "day"
+    ],
+    "lower": 0,
+    "upper": 8,
+    "domain": "integer"
+   },
+   "max_day_exams": {
+    "index": [],
+    "lower": 0,
+    "upper": 8,
+    "domain": "integer"
+   },
+   "min_day_exams": {
+    "index": [],
+    "lower": 0,
+    "upper": 8,
+    "domain": "integer"
+   },
+   "consecutive_conflict": {
+    "index": [
+     "exam",
+     "exam",
+     "slot"
+    ],
+    "domain": "binary"
+   }
+  },
+  "parameters": {
+   "unavailable": {
+    "index": [
+     "exam",
+     "slot"
+    ]
+   },
+   "has_conflict": {
+    "index": [
+     "exam",
+     "exam"
+    ]
+   },
+   "forbidden_hall": {
+    "index": [
+     "exam",
+     "room"
+    ]
+   },
+   "shared_students": {
+    "index": [
+     "exam",
+     "exam"
+    ]
+   },
+   "imbalance_penalty": {
+    "index": []
+   },
+   "empty_seat_penalty": {
+    "index": []
+   },
+   "consecutive_penalty": {
+    "index": []
+   }
+  },
+  "constraints": [
+   {
+    "id": "c_one_assignment",
+    "left": {
+     "sum": {
+      "var": "assign",
+      "index": [
+       "e",
+       "r",
+       "s"
+      ]
+     },
+     "over": [
+      {
+       "set": "room",
+       "index": "r"
+      },
+      {
+       "set": "slot",
+       "index": "s"
+      }
+     ]
+    },
+    "note": "Every exam assigned exactly once",
+    "right": {
+     "const": 1
+    },
+    "forall": [
+     {
+      "set": "exam",
+      "index": "e"
+     }
+    ],
+    "relation": "=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_capacity",
+    "left": {
+     "mul": [
+      {
+       "var": "assign",
+       "index": [
+        "e",
+        "r",
+        "s"
+       ]
+      },
+      {
+       "attr": {
+        "of": "e",
+        "name": "students"
+       }
+      }
+     ]
+    },
+    "note": "Room capacity must hold exam students",
+    "right": {
+     "attr": {
+      "of": "r",
+      "name": "capacity"
+     }
+    },
+    "forall": [
+     {
+      "set": "exam",
+      "index": "e"
+     },
+     {
+      "set": "room",
+      "index": "r"
+     },
+     {
+      "set": "slot",
+      "index": "s"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_hall",
+    "left": {
+     "var": "assign",
+     "index": [
+      "e",
+      "r",
+      "s"
+     ]
+    },
+    "note": "Hall requirement: if needs_hall=\"yes\" then room must be hall=\"yes\"",
+    "right": {
+     "add": [
+      {
+       "const": 1
+      },
+      {
+       "mul": [
+        {
+         "const": -1
+        },
+        {
+         "par": "forbidden_hall",
+         "index": [
+          "e",
+          "r"
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "forall": [
+     {
+      "set": "exam",
+      "index": "e"
+     },
+     {
+      "set": "room",
+      "index": "r"
+     },
+     {
+      "set": "slot",
+      "index": "s"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_instructor",
+    "left": {
+     "var": "assign",
+     "index": [
+      "e",
+      "r",
+      "s"
+     ]
+    },
+    "note": "Instructor unavailable in slot",
+    "right": {
+     "add": [
+      {
+       "const": 1
+      },
+      {
+       "mul": [
+        {
+         "const": -1
+        },
+        {
+         "par": "unavailable",
+         "index": [
+          "e",
+          "s"
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "forall": [
+     {
+      "set": "exam",
+      "index": "e"
+     },
+     {
+      "set": "room",
+      "index": "r"
+     },
+     {
+      "set": "slot",
+      "index": "s"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_no_overlap_students",
+    "left": {
+     "mul": [
+      {
+       "par": "has_conflict",
+       "index": [
+        "e1",
+        "e2"
+       ]
+      },
+      {
+       "add": [
+        {
+         "sum": {
+          "var": "assign",
+          "index": [
+           "e1",
+           "r1",
+           "s"
+          ]
+         },
+         "over": [
+          {
+           "set": "room",
+           "index": "r1"
+          }
+         ]
+        },
+        {
+         "sum": {
+          "var": "assign",
+          "index": [
+           "e2",
+           "r2",
+           "s"
+          ]
+         },
+         "over": [
+          {
+           "set": "room",
+           "index": "r2"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "note": "Exams sharing students not in same slot",
+    "right": {
+     "const": 1
+    },
+    "forall": [
+     {
+      "set": "exam",
+      "index": "e1"
+     },
+     {
+      "set": "exam",
+      "index": "e2"
+     },
+     {
+      "set": "slot",
+      "index": "s"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_room_one_per_slot",
+    "left": {
+     "sum": {
+      "var": "assign",
+      "index": [
+       "e",
+       "r",
+       "s"
+      ]
+     },
+     "over": [
+      {
+       "set": "exam",
+       "index": "e"
+      }
+     ]
+    },
+    "note": "One exam per room per slot",
+    "right": {
+     "const": 1
+    },
+    "forall": [
+     {
+      "set": "room",
+      "index": "r"
+     },
+     {
+      "set": "slot",
+      "index": "s"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_day_count_1",
+    "left": {
+     "var": "day_exams",
+     "index": [
+      "k_1"
+     ]
+    },
+    "note": "Count exams on Day 1",
+    "right": {
+     "sum": {
+      "var": "assign",
+      "index": [
+       "e",
+       "r",
+       "s"
+      ]
+     },
+     "over": [
+      {
+       "set": "exam",
+       "index": "e"
+      },
+      {
+       "set": "room",
+       "index": "r"
+      },
+      {
+       "set": "slot",
+       "index": "s",
+       "where": [
+        {
+         "op": "=",
+         "attr": "day",
+         "value": 1
+        }
+       ]
+      }
+     ]
+    },
+    "forall": [
+     {
+      "set": "day",
+      "index": "k_1",
+      "where": [
+       {
+        "op": "=",
+        "attr": "id",
+        "value": "1"
+       }
+      ]
+     }
+    ],
+    "relation": "=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_day_count_2",
+    "left": {
+     "var": "day_exams",
+     "index": [
+      "k_2"
+     ]
+    },
+    "note": "Count exams on Day 2",
+    "right": {
+     "sum": {
+      "var": "assign",
+      "index": [
+       "e",
+       "r",
+       "s"
+      ]
+     },
+     "over": [
+      {
+       "set": "exam",
+       "index": "e"
+      },
+      {
+       "set": "room",
+       "index": "r"
+      },
+      {
+       "set": "slot",
+       "index": "s",
+       "where": [
+        {
+         "op": "=",
+         "attr": "day",
+         "value": 2
+        }
+       ]
+      }
+     ]
+    },
+    "forall": [
+     {
+      "set": "day",
+      "index": "k_2",
+      "where": [
+       {
+        "op": "=",
+        "attr": "id",
+        "value": "2"
+       }
+      ]
+     }
+    ],
+    "relation": "=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_max_min",
+    "left": {
+     "var": "day_exams",
+     "index": [
+      "d"
+     ]
+    },
+    "note": "Max day count lower bound",
+    "right": {
+     "var": "max_day_exams",
+     "index": []
+    },
+    "forall": [
+     {
+      "set": "day",
+      "index": "d"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_min_min",
+    "left": {
+     "var": "min_day_exams",
+     "index": []
+    },
+    "note": "Min day count upper bound",
+    "right": {
+     "var": "day_exams",
+     "index": [
+      "d"
+     ]
+    },
+    "forall": [
+     {
+      "set": "day",
+      "index": "d"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_consecutive_def",
+    "left": {
+     "var": "consecutive_conflict",
+     "index": [
+      "e1",
+      "e2",
+      "s"
+     ]
+    },
+    "note": "Consecutive conflict definition",
+    "right": {
+     "add": [
+      {
+       "sum": {
+        "var": "assign",
+        "index": [
+         "e1",
+         "r1",
+         "s"
+        ]
+       },
+       "over": [
+        {
+         "set": "room",
+         "index": "r1"
+        }
+       ]
+      },
+      {
+       "sum": {
+        "var": "assign",
+        "index": [
+         "e2",
+         "r2",
+         "s_next"
+        ]
+       },
+       "over": [
+        {
+         "set": "room",
+         "index": "r2"
+        }
+       ]
+      },
+      {
+       "const": -1
+      }
+     ]
+    },
+    "forall": [
+     {
+      "set": "exam",
+      "index": "e1"
+     },
+     {
+      "set": "exam",
+      "index": "e2"
+     },
+     {
+      "set": "slot",
+      "index": "s"
+     },
+     {
+      "set": "slot",
+      "via": {
+       "rel": "next_slot_same_day",
+       "from": "s"
+      },
+      "index": "s_next"
+     }
+    ],
+    "relation": ">=",
+    "severity": "hard"
+   }
+  ],
+  "relationships": [
+   "next_slot_same_day"
+  ]
+ },
+ "data": {
+  "sets": {
+   "day": [
+    {
+     "id": "1"
+    },
+    {
+     "id": "2"
+    }
+   ],
+   "exam": [
+    {
+     "id": "EX001",
+     "students": 22,
+     "instructor": "INS02",
+     "needs_hall": "no"
+    },
+    {
+     "id": "EX002",
+     "students": 57,
+     "instructor": "INS01",
+     "needs_hall": "no"
+    },
+    {
+     "id": "EX003",
+     "students": 57,
+     "instructor": "INS02",
+     "needs_hall": "no"
+    },
+    {
+     "id": "EX004",
+     "students": 70,
+     "instructor": "INS01",
+     "needs_hall": "yes"
+    },
+    {
+     "id": "EX005",
+     "students": 107,
+     "instructor": "INS02",
+     "needs_hall": "yes"
+    },
+    {
+     "id": "EX006",
+     "students": 28,
+     "instructor": "INS01",
+     "needs_hall": "no"
+    },
+    {
+     "id": "EX007",
+     "students": 28,
+     "instructor": "INS02",
+     "needs_hall": "no"
+    },
+    {
+     "id": "EX008",
+     "students": 29,
+     "instructor": "INS01",
+     "needs_hall": "no"
+    }
+   ],
+   "room": [
+    {
+     "id": "R01",
+     "hall": "yes",
+     "capacity": 155
+    },
+    {
+     "id": "R02",
+     "hall": "no",
+     "capacity": 37
+    },
+    {
+     "id": "R03",
+     "hall": "no",
+     "capacity": 66
+    },
+    {
+     "id": "R04",
+     "hall": "no",
+     "capacity": 36
+    }
+   ],
+   "slot": [
+    {
+     "id": "D1S1",
+     "day": 1
+    },
+    {
+     "id": "D1S2",
+     "day": 1
+    },
+    {
+     "id": "D2S1",
+     "day": 2
+    },
+    {
+     "id": "D2S2",
+     "day": 2
+    }
+   ]
+  },
+  "parameters": {
+   "unavailable": [
+    {
+     "exam": "EX002",
+     "slot": "D1S2",
+     "value": 1
+    },
+    {
+     "exam": "EX004",
+     "slot": "D1S2",
+     "value": 1
+    },
+    {
+     "exam": "EX006",
+     "slot": "D1S2",
+     "value": 1
+    },
+    {
+     "exam": "EX008",
+     "slot": "D1S2",
+     "value": 1
+    }
+   ],
+   "has_conflict": [
+    {
+     "0": "EX001",
+     "1": "EX002",
+     "value": 1
+    },
+    {
+     "0": "EX001",
+     "1": "EX003",
+     "value": 1
+    },
+    {
+     "0": "EX001",
+     "1": "EX004",
+     "value": 1
+    },
+    {
+     "0": "EX001",
+     "1": "EX008",
+     "value": 1
+    },
+    {
+     "0": "EX002",
+     "1": "EX001",
+     "value": 1
+    },
+    {
+     "0": "EX002",
+     "1": "EX004",
+     "value": 1
+    },
+    {
+     "0": "EX002",
+     "1": "EX008",
+     "value": 1
+    },
+    {
+     "0": "EX003",
+     "1": "EX001",
+     "value": 1
+    },
+    {
+     "0": "EX003",
+     "1": "EX005",
+     "value": 1
+    },
+    {
+     "0": "EX003",
+     "1": "EX006",
+     "value": 1
+    },
+    {
+     "0": "EX003",
+     "1": "EX007",
+     "value": 1
+    },
+    {
+     "0": "EX004",
+     "1": "EX001",
+     "value": 1
+    },
+    {
+     "0": "EX004",
+     "1": "EX002",
+     "value": 1
+    },
+    {
+     "0": "EX004",
+     "1": "EX008",
+     "value": 1
+    },
+    {
+     "0": "EX005",
+     "1": "EX003",
+     "value": 1
+    },
+    {
+     "0": "EX005",
+     "1": "EX006",
+     "value": 1
+    },
+    {
+     "0": "EX005",
+     "1": "EX007",
+     "value": 1
+    },
+    {
+     "0": "EX006",
+     "1": "EX003",
+     "value": 1
+    },
+    {
+     "0": "EX006",
+     "1": "EX005",
+     "value": 1
+    },
+    {
+     "0": "EX006",
+     "1": "EX007",
+     "value": 1
+    },
+    {
+     "0": "EX007",
+     "1": "EX003",
+     "value": 1
+    },
+    {
+     "0": "EX007",
+     "1": "EX005",
+     "value": 1
+    },
+    {
+     "0": "EX007",
+     "1": "EX006",
+     "value": 1
+    },
+    {
+     "0": "EX008",
+     "1": "EX001",
+     "value": 1
+    },
+    {
+     "0": "EX008",
+     "1": "EX002",
+     "value": 1
+    },
+    {
+     "0": "EX008",
+     "1": "EX004",
+     "value": 1
+    }
+   ],
+   "forbidden_hall": [
+    {
+     "exam": "EX004",
+     "room": "R02",
+     "value": 1
+    },
+    {
+     "exam": "EX004",
+     "room": "R03",
+     "value": 1
+    },
+    {
+     "exam": "EX004",
+     "room": "R04",
+     "value": 1
+    },
+    {
+     "exam": "EX005",
+     "room": "R02",
+     "value": 1
+    },
+    {
+     "exam": "EX005",
+     "room": "R03",
+     "value": 1
+    },
+    {
+     "exam": "EX005",
+     "room": "R04",
+     "value": 1
+    }
+   ],
+   "shared_students": [
+    {
+     "0": "EX001",
+     "1": "EX002",
+     "value": 23
+    },
+    {
+     "0": "EX001",
+     "1": "EX003",
+     "value": 1
+    },
+    {
+     "0": "EX001",
+     "1": "EX004",
+     "value": 21
+    },
+    {
+     "0": "EX001",
+     "1": "EX008",
+     "value": 5
+    },
+    {
+     "0": "EX002",
+     "1": "EX001",
+     "value": 23
+    },
+    {
+     "0": "EX002",
+     "1": "EX004",
+     "value": 21
+    },
+    {
+     "0": "EX002",
+     "1": "EX008",
+     "value": 8
+    },
+    {
+     "0": "EX003",
+     "1": "EX001",
+     "value": 1
+    },
+    {
+     "0": "EX003",
+     "1": "EX005",
+     "value": 9
+    },
+    {
+     "0": "EX003",
+     "1": "EX006",
+     "value": 16
+    },
+    {
+     "0": "EX003",
+     "1": "EX007",
+     "value": 14
+    },
+    {
+     "0": "EX004",
+     "1": "EX001",
+     "value": 21
+    },
+    {
+     "0": "EX004",
+     "1": "EX002",
+     "value": 21
+    },
+    {
+     "0": "EX004",
+     "1": "EX008",
+     "value": 11
+    },
+    {
+     "0": "EX005",
+     "1": "EX003",
+     "value": 9
+    },
+    {
+     "0": "EX005",
+     "1": "EX006",
+     "value": 24
+    },
+    {
+     "0": "EX005",
+     "1": "EX007",
+     "value": 24
+    },
+    {
+     "0": "EX006",
+     "1": "EX003",
+     "value": 16
+    },
+    {
+     "0": "EX006",
+     "1": "EX005",
+     "value": 24
+    },
+    {
+     "0": "EX006",
+     "1": "EX007",
+     "value": 14
+    },
+    {
+     "0": "EX007",
+     "1": "EX003",
+     "value": 14
+    },
+    {
+     "0": "EX007",
+     "1": "EX005",
+     "value": 24
+    },
+    {
+     "0": "EX007",
+     "1": "EX006",
+     "value": 14
+    },
+    {
+     "0": "EX008",
+     "1": "EX001",
+     "value": 5
+    },
+    {
+     "0": "EX008",
+     "1": "EX002",
+     "value": 8
+    },
+    {
+     "0": "EX008",
+     "1": "EX004",
+     "value": 11
+    }
+   ],
+   "imbalance_penalty": [],
+   "empty_seat_penalty": [],
+   "consecutive_penalty": []
+  },
+  "relationships": {
+   "next_slot_same_day": [
+    {
+     "to": "D1S2",
+     "from": "D1S1"
+    },
+    {
+     "to": "D2S2",
+     "from": "D2S1"
+    }
+   ]
+  },
+  "parameter_defaults": {
+   "unavailable": 0,
+   "has_conflict": 0,
+   "forbidden_hall": 0,
+   "shared_students": 0,
+   "imbalance_penalty": 20,
+   "empty_seat_penalty": 1,
+   "consecutive_penalty": 10
+  },
+  "labels": {
+   "day": {
+    "1": "Day 1",
+    "2": "Day 2"
+   },
+   "exam": {
+    "EX001": "EX001",
+    "EX002": "EX002",
+    "EX003": "EX003",
+    "EX004": "EX004",
+    "EX005": "EX005",
+    "EX006": "EX006",
+    "EX007": "EX007",
+    "EX008": "EX008"
+   },
+   "room": {
+    "R01": "R01",
+    "R02": "R02",
+    "R03": "R03",
+    "R04": "R04"
+   },
+   "slot": {
+    "D1S1": "D1S1",
+    "D1S2": "D1S2",
+    "D2S1": "D2S1",
+    "D2S2": "D2S2"
+   }
+  }
+ }
+}

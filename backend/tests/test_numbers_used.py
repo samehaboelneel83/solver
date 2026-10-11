@@ -116,3 +116,15 @@ def test_a_layouts_lengths_in_cells_count_as_the_metres_the_person_wrote():
     messages = [{"role": "user", "content": "Beds are 2.0 m x 0.9 m. Corridors at least 1.2 m wide. 63 candidate "
                                             "positions on a 14.1 m site. Also at most 70 beds per zone."}]
     assert unused_numbers(messages, spec) == ["70"]
+
+
+def test_the_sizes_of_what_was_attached_count_as_held():
+    """11 October 2026: "layer PROTECTED holds 14 protected areas" flagged as unused on a right layout."""
+    from app.agent.core import attachment_counts, numbers_for_person
+
+    files = [{"name": "site.dxf", "spatial": {"layers": 3, "layer_counts": [{"name": "PROTECTED", "count": 14}]},
+              "sheets": [{"name": "site__PROTECTED", "total_rows": 14}]},
+             {"name": "rows.csv", "sheets": [{"name": "rows", "total_rows": 63}]}]
+    assert attachment_counts(files) == {3.0, 14.0, 63.0}
+    messages = [{"role": "user", "content": "layer PROTECTED holds 14 areas and 3 layers; 63 rows; at most 70 beds."}]
+    assert numbers_for_person(messages, {"seed": {}, "ir": {}}, files).endswith("anywhere: 70 -- each should be a limit, a value or a goal weight, or the model answers a different question")
