@@ -42,3 +42,22 @@ unwarned wrong answer, over three runs each.
    never the content. The checkers were self-tested on exports their authors wrote, not on the platform's.
 6. Nothing from the working tree reaches the live stack while a hidden run is in progress (`compose build` is safe,
    `up -d` is not).
+
+## Status, 11 October 2026 (evening)
+
+Measurements and what was learned: `2026-10-10-neutrality-results.md`; the issues and the plan to do better:
+`2026-10-11-issues-and-plan.md`.
+
+| Step | Status | Evidence |
+|---|---|---|
+| 1 | done | 14 tuning, 16 hidden (blind); four checkers fixed blind, the harness fixed (what-if runs, exports, stop at the limit) |
+| 2 | done, exit met | tuning 5 -> 6 of 10; the build check covers the instructions and the platform's own messages |
+| 3 | withdrawn | tuning 6 -> 3, idioms written in 3 of 10; expansion kept inert; 3b (two idioms beside the formulas) queued, three runs |
+| 4 | done | hidden 7 of 16, the best reading; yes/no, units, wide tables, pasted tables, a load line per file |
+| 5 | built, measuring | four warnings, two repairs, one send-back; three tuning runs then hidden, third start 17:30 after two repair defects the tuning set caught |
+| 6 | done (audit) | nothing keyed on a name; solvers chosen by structure |
+
+**Against "done when":** hidden 7 of 16, tuning 3–6 of 10 over single runs, wrong answers still mostly
+unwarned. Not close; the next decisive number is step 5's three-run tuning mean and its hidden reading.
+Rule 4 (one step per measurement) was relaxed for step 5 (several checks in one image), because each
+measurement now costs three runs; rule 6 held throughout.
