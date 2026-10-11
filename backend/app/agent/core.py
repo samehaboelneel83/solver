@@ -1519,23 +1519,6 @@ term: {{"const":3}} | {{"par":"demand","index":["d","s"]}} | {{"var":"pick","ind
 Every index must be bound by forall or an enclosing over; par/var indices follow their declared order; only
 integer/number attributes can be used as numbers; a whole-number decision is "integer" with bounds; ids match
 ^[a-z][a-z0-9_]*$.
-IDIOMS -- write these FOUR as one compact rule each, NEVER by hand: the platform expands each into the right rules
-(and the links and values it needs) and the plan card shows what it became. A rule is {{"id", "note", "severity", and
-ONE of these keys instead of left/relation/right}}:
- "carried": a quantity carried from one period to the next (anything left at the end of a period is there at the
-   start of the next) -- {{"periods": {{"index": "t", "set": "<periods>", "by": "#row" or an ordering field}},
-   "for": [other bindings], "level": {{"var": "<left at the end of t>", "index": [..., "t"]}}, "in": [terms that
-   come in during t], "out": [terms that go out during t], "initial": <the starting amount, a term of data -- it is
-   counted in the FIRST period only>, "owed": {{"var": ..., "index": [..., "t"]}} (only when lateness is allowed)}};
-   no next-period relationship, no "first period" rule: the idiom makes them;
- "only_if": an amount exists only when a choice is made, or only on the pairs a list allows --
-   {{"for": [bindings], "amount": {{"var": ...}}, "chosen": {{"var": <a yes/no decision>}} or {{"par": <a 0/1 parameter
-   of the allowed pairs>}}, "most": <the largest the amount can be; omit it to use the amount's declared upper>}};
- "largest_of": the level reached is the largest value among the chosen options (effects that overlap and do NOT
-   add up) -- {{"for": [bindings], "level": {{"var": ...}}, "options": {{"index": "o", "set": "<options>"}},
-   "value": <what option o gives, a parameter or field>, "chosen": {{"var": <yes/no per option>, "index": ["o"]}}}};
- "exactly_one" / "at_most_one": one per group -- {{"for": [bindings], "over": [the group's members], "pick":
-   {{"var": ...}}}}.
 PATTERNS (modelling idioms, the same for every problem; recognise them by their structure, not by the subject):
 A VALUE PER PAIR limits which pairs may be used (a measure per pair of records must stay under a limit, a level per
 pair must reach a minimum): load that column as its own parameter indexed by the pair, e.g. measure[a,b] with
@@ -1552,16 +1535,14 @@ per pair, made by "relationships_in_order", declared in "relationships"), then f
 {{"via":{{"rel":"next","from":"t"}}}}: x[r,t,A] + x[r,t2,B] <= 1;
 REQUESTS TO HONOUR IF POSSIBLE: a 0/1 parameter from the list, and a goal term (or soft rule) counting the cells that
 break it: sum of asked[r,t] * x[r,t,k];
-EXACTLY ONE / AT MOST ONE PER GROUP: the idiom exactly_one / at_most_one (IDIOMS above);
+EXACTLY ONE / AT MOST ONE PER GROUP: sum of pick over the group's members (via a relationship, or a where) = 1 or <= 1;
 A LIMIT ON A TOTAL (capacity, budget, hours): sum of amount x size <= limit;
 COVERING (every requirement met by at least one chosen option): sum of open over the options that cover it >= 1, the
 "covers" pairs loaded as a relationship or a 0/1 parameter;
 EXCLUSIVE USE (one user per shared resource at a time): sum over the things occupying it <= 1;
-ONLY IF CHOSEN (an amount, a use or a cost exists only when a yes/no choice is made): the idiom only_if (IDIOMS
-above), which writes x <= M * y with M the smallest
+ONLY IF CHOSEN (an amount, a use or a cost exists only when a yes/no choice is made): x <= M * y with M the smallest
 valid bound (a capacity, a demand, the largest amount possible); a fixed charge is cost x y in the goal;
-THE LARGEST OF SEVERAL CONTRIBUTIONS -- the idiom largest_of (IDIOMS above); what it writes: (effects that overlap
-and do NOT add up: the level reached is the best one
+THE LARGEST OF SEVERAL CONTRIBUTIONS (effects that overlap and do NOT add up: the level reached is the best one
 chosen): level[a] <= sum over options o of value[o,a] * best[o,a], sum over o of best[o,a] <= 1, best[o,a] <=
 pick[o] -- never "level >= value * pick", which lets the level reach any height with nothing chosen;
 A SHARE OF A TOTAL ("at least 18% of the mix is X", "at most 5% from one source"): linear once multiplied out --
@@ -1600,8 +1581,7 @@ makespan. Goal: minimise makespan. Never invent "sub" or arithmetic on keys: ord
 The same "relationships_in_order" gives the next member of any ordered set ("wrap": true for a repeating cycle);
 "by": "#row" keeps the file's own row order (calendar names sort by the calendar, other text naturally: "P2" before
 "P10");
-A QUANTITY CARRIED FROM ONE PERIOD TO THE NEXT -- the idiom carried (IDIOMS above); what it writes, for reading
-only: (anything left at the end of a period is there at the start of the
+A QUANTITY CARRIED FROM ONE PERIOD TO THE NEXT (anything left at the end of a period is there at the start of the
 next; late delivery or backlog may be allowed): periods linked in order ("relationships_in_order":
 [{{"type":"next","of":"period","by":"#row"}}]); decisions in[p], carried[p] (left at the end of p) and, when
 lateness is allowed, owed[p] (still owed at the end of p), all >= 0. ONE balance rule for every period, the
