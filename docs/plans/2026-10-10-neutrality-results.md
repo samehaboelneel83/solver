@@ -15,7 +15,7 @@ warning on the plan card — the number that must reach 0.
 | after | 70004a0 (fixes of 10 Oct) | tuning, 10 small | 5 / 10 | 7 | 1 (p03) | from `2026-10-10-phase1-results.md` |
 | base | 531fb9e (before step 2) | hidden, 16 small | 6 / 16 | 12 | 6 | re-scored after two checkers were fixed (rule 5); first read 5 / 16 |
 | step2 | b9f3943 (step 2 alone) | tuning, 10 small | 5 / 10 | 7 | 2 (p03, p07) | exit met: the tuning score did not drop |
-| step2 | b9f3943 (step 2 alone) | hidden, 16 small | running (from 04:19) | | | |
+| step2 | b9f3943 (step 2 alone) | hidden, 16 small | 4 / 16 | 9 | 3 | down from 6 / 16: more cases hit the 20-minute limit |
 | step3 | image `solver-backend:step3`, built from 10dc21e (backend = fa738c9: step 3 + the step 4 card) | both | next | | | |
 | step4 | the rest of step 4 (wide tables, units, the load report), committed after 10dc21e | both | after step3 | | | |
 
@@ -107,3 +107,40 @@ Looked for anything on the solve path keyed on a domain's or problem's name rath
   read or reach them (no reference in `app/agent/`), so they do not bias what it builds. They stay as examples.
 
 Result: step 6's audit finds nothing to change on the solver side.
+
+## step2 — hidden set, step 2 alone (finished 08:02, 11 Oct)
+
+```
+case           built  first  solved right  viol  warned  min
+h01-S          yes    yes    no     no    0     0       20
+h02-S          yes    yes    yes    yes   0     0       7.4
+h03-S          yes    yes    yes    yes   0     0       4.9
+h04-S          no     no     no     no    0     0       20
+h05-S          no     no     no     no    0     0       20
+h06-S          yes    yes    yes    yes   0     0       3
+h07-S          yes    yes    yes    no    0     0       6.4
+h08-S          yes    yes    yes    no    2     0       2.2
+h09-S          yes    no     no     no    0     0       20
+h10-S          no     no     no     no    0     0       20
+h11-S          yes    yes    yes    yes   0     0       6.6
+h12-S          no     no     no     no    0     0       20
+h13-S          yes    yes    yes    no    2     0       9.8
+h14-S          no     no     no     no    0     2       20
+h15-S          no     no     no     no    0     0       20
+h16-S          no     no     no     no    0     0       20
+
+4 right of 16; built 9; wrong but solved 3 (of them warned on the card 0)
+```
+
+Against the baseline (6 right, 12 built, 6 wrong unwarned), by class only:
+
+- **Fewer built: 9, from 12.** Nine cases ended at the 20-minute limit, from four. Two of the cases right in
+  the baseline (h07, h14, h15 were right; h14 and h15 now not built, h07 now wrong) went the other way, and one
+  wrong one became right (h11). With one run a case, the swing of ±2 right is within run-to-run noise on this
+  LLM, but the drop in "built" is the larger move and is in the direction the plan warned of: without concrete
+  illustrations the Assistant takes longer to reach a model the platform accepts.
+- **Fewer wrong answers: 3 unwarned, from 6**, and fewer rules broken (2 + 2 violations, from 1 + 7 + 12 + 23).
+  What it builds is more often right; it builds less often in time.
+- **Reading.** Step 2's exit (tuning score holds) is met: 5 / 10. On the hidden set it is not a gain. Step 3's
+  idioms are the planned answer to the time lost: compact rules for the constructs that took several tries.
+  Measured next, alone.
