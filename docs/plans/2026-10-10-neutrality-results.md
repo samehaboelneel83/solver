@@ -18,7 +18,7 @@ warning on the plan card — the number that must reach 0.
 | step2 | b9f3943 (step 2 alone) | hidden, 16 small | 4 / 16 | 9 | 3 | down from 6 / 16: more cases hit the 20-minute limit |
 | step3 | image `solver-backend:step3`, built from 10dc21e (backend = fa738c9: step 3 + the step 4 card) | tuning, 10 small | 3 / 10 | 9 | 6 | exit not met: down from 6; re-scored: p08 was scored on a what-if run (first read 2 / 10) |
 | step3 | same | hidden, 16 small | stopped after 2 (0 / 2) | | | stopped: step 3 withdrawn on the tuning result |
-| step4 | image `solver-backend:step4`: a37829d without step 3's instructions (step 2 + step 4; the idiom expansion is in, inert) | tuning, 10 small | running (from 10:46) | | | |
+| step4 | image `solver-backend:step4`: a37829d without step 3's instructions (step 2 + step 4; the idiom expansion is in, inert) | tuning, 10 small | 3 / 10 | 6 | 2 (+1 warned) | below step 2's 6; three not built in 20 minutes |
 | step4 | same | hidden, 16 small | queued after tuning | | | |
 
 ## base — hidden set, before step 2 (finished 02:29, 11 Oct)
@@ -230,3 +230,28 @@ characters), offering only the two idioms whose hand-written form went wrong bef
 periods with the starting amount in the first period) and `largest_of` (effects that overlap). It is queued after
 step 5 and measured over **three tuning runs** (tags step3b-1..3) before any hidden run, since one run moves
 by about two cases on this LLM.
+
+## step4 — tuning set, step 4 on step 2 (finished 13:00, 11 Oct)
+
+```
+case           built  first  solved right  viol  warned  min
+p01-S          yes    yes    yes    yes   0     0       2.3
+p02-S          yes    yes    yes    yes   0     0       4.3
+p03-S          yes    yes    yes    no    34    0       5.6
+p04-S          yes    no     yes    no    2     0       14.8
+p05-S          no     no     no     no    0     0       20
+p06-S          yes    no     yes    no    0     1       16.7
+p07-S          no     no     no     no    0     0       20
+p08-S          no     no     no     no    0     1       20
+p09-S          yes    yes    yes    yes   0     0       7.1
+p10-S          no     no     no     no    0     0       20.1
+
+3 right of 10; built 6; wrong but solved 3 (of them warned on the card 1)
+```
+
+- p07 and p08, right under step 2 (p07) and step 3 (p08), were not built in 20 minutes; p10, right under step 2,
+  was not built either. Step 4 changed the loader and two lines of instructions, none of it on these cases' path
+  in a way that explains a timeout. This is the run-to-run noise the issues report puts first
+  (`2026-10-11-issues-and-plan.md`, A): one run cannot judge this step. p04 repeats the allowed-list mistake
+  (caught by the step 5 check `as_default`).
+- The step 4 hidden run follows (from 13:00).
