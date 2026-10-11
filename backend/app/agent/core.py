@@ -1879,6 +1879,14 @@ def _model_numbers(spec: dict) -> set[float]:
                 name = r.get("type") or r.get("parameter")
                 counts[f"{part}:{name}"] = counts.get(f"{part}:{name}", 0) + 1
     found |= {float(n) for n in counts.values()}
+    # A layout holds its lengths in grid cells (an aisle of 12 cells on a 0.1 m grid is the 1.2 m the person
+    # wrote): every number is held in metres too (the evaluation, 11 October 2026: 0.9 and 1.2 flagged on three
+    # cards of a layout that held them).
+    steps = {float(c["place"]["step"]) for c in (spec.get("ir") or {}).get("constraints") or []
+             if isinstance(c, dict) and isinstance(c.get("place"), dict)
+             and isinstance(c["place"].get("step"), (int, float)) and c["place"]["step"] > 0}
+    for step in steps:
+        found |= {round(n * step, 6) for n in list(found)} | {round(n / step, 6) for n in list(found)}
     return found
 
 

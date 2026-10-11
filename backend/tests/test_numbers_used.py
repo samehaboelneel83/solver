@@ -105,3 +105,14 @@ def test_a_goal_running_the_other_way_from_the_request_is_named():
     msgs = [{"role": "user", "content": "Rules: ... Goal: the lowest total cost."}]
     assert "CHECK THIS: the goal maximizes, but your words ask for the least" in goal_sense_for_person(msgs, {"objective": {"sense": "maximize"}})
     assert goal_sense_for_person(msgs, {"objective": {"sense": "minimize"}}) == ""
+
+
+def test_a_layouts_lengths_in_cells_count_as_the_metres_the_person_wrote():
+    """11 October 2026: 0.9 and 1.2 flagged on three cards of a layout holding them as 9 and 12 cells."""
+    spec = {"seed": {"entities": [{"type": "slot", "key": f"s{i}", "attrs": {"length": 20, "width": 9}} for i in range(63)]},
+            "ir": {"constraints": [{"id": "c_layout", "place": {"step": 0.1, "aisle": 12, "slots": {"set": "slot"},
+                                                              "length": "length", "width": "width"}}],
+                   "variables": {"x": {"index": ["slot"], "upper": 141}}}}
+    messages = [{"role": "user", "content": "Beds are 2.0 m x 0.9 m. Corridors at least 1.2 m wide. 63 candidate "
+                                            "positions on a 14.1 m site. Also at most 70 beds per zone."}]
+    assert unused_numbers(messages, spec) == ["70"]

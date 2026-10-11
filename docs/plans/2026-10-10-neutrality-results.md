@@ -410,3 +410,29 @@ from the data's shape.
 Also queued (19:20): a term written with "over" and no "sum" is read as the sum of the term over the binding
 (p07 under step 5: {"add": [...], "over": [b]} refused six times with the same message; the Assistant gave up
 twice and the case was not built). A canonical-form repair, general.
+
+## step5 — tuning run 1 of 3 (finished 19:53, 11 Oct; fourth start, image of 675334f + 34f5b6a + e0b29e8)
+
+```
+case           built  first  solved right  viol  warned  min
+p01-S          yes    yes    yes    yes   0     0       3.6
+p02-S          yes    yes    yes    yes   0     0       10.6
+p03-S          yes    no     no     no    0     3       20
+p04-S          yes    yes    yes    no    1     0       5.3
+p05-S          yes    yes    yes    no    0     0       17.7
+p06-S          no     no     no     no    0     0       20.1
+p07-S          no     no     no     no    0     0       20.1
+p08-S          no     no     no     no    0     0       20.1
+p09-S          yes    yes    yes    yes   0     0       5.3
+p10-S          yes    yes    yes    no    0     0       7.1
+
+3 right of 10; built 7; wrong but solved 3 (of them warned on the card 0)
+```
+
+- p05 built for the first time in any run (the pasted tables), wrong by a goal that a penalty term swamps.
+- p03: three cards, each warned by the unused-numbers check on lengths the layout holds in cells (0.9 m = 9
+  cells); the harness declined them. A defect of the measured image, fixed (held in cells counts as held in
+  metres) and **queued, not deployed**: the three runs stay on one image, and p03's reading is discounted.
+- p08: the "does nothing" send-back caught a wrong model before the person saw it; the retry ran out of time.
+- p07: refused six times for a term written with "over" and no "sum" (repair queued). p06: one long reply.
+- Run 2 from 19:53; run 3 and the hidden set follow.
