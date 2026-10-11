@@ -16,7 +16,8 @@ warning on the plan card — the number that must reach 0.
 | base | 531fb9e (before step 2) | hidden, 16 small | 6 / 16 | 12 | 6 | re-scored after two checkers were fixed (rule 5); first read 5 / 16 |
 | step2 | b9f3943 (step 2 alone) | tuning, 10 small | 5 / 10 | 7 | 2 (p03, p07) | exit met: the tuning score did not drop |
 | step2 | b9f3943 (step 2 alone) | hidden, 16 small | 4 / 16 | 9 | 3 | down from 6 / 16: more cases hit the 20-minute limit |
-| step3 | image `solver-backend:step3`, built from 10dc21e (backend = fa738c9: step 3 + the step 4 card) | both | next | | | |
+| step3 | image `solver-backend:step3`, built from 10dc21e (backend = fa738c9: step 3 + the step 4 card) | tuning, 10 small | 2 / 10 | 9 | 7 | exit not met: down from 5 |
+| step3 | same | hidden, 16 small | running (from 09:58) | | | |
 | step4 | the rest of step 4 (wide tables, units, the load report), committed after 10dc21e | both | after step3 | | | |
 
 ## base — hidden set, before step 2 (finished 02:29, 11 Oct)
@@ -143,3 +144,36 @@ Against the baseline (6 right, 12 built, 6 wrong unwarned), by class only:
 - **Reading.** Step 2's exit (tuning score holds) is met: 5 / 10. On the hidden set it is not a gain. Step 3's
   idioms are the planned answer to the time lost: compact rules for the constructs that took several tries.
   Measured next, alone.
+
+## step3 — tuning set, step 3 + the step 4 card (finished 09:58, 11 Oct)
+
+```
+case           built  first  solved right  viol  warned  min
+p01-S          yes    yes    yes    yes   0     0       3.4
+p02-S          yes    yes    yes    no    2     0       2.7
+p03-S          yes    yes    yes    no    0     0       6.7  (checker could not read the plan)
+p04-S          yes    yes    yes    no    2     0       12
+p05-S          no     no     no     no    0     0       20
+p06-S          yes    yes    yes    no    0     0       13.4
+p07-S          yes    yes    yes    no    69    0       12.2
+p08-S          yes    yes    yes    no    1     0       7.4
+p09-S          yes    yes    yes    yes   0     0       13.7
+p10-S          yes    no     yes    no    0     0       19.7  (checker could not read the plan)
+
+2 right of 10; built 9; wrong but solved 7 (of them warned on the card 0)
+```
+
+- **Built more (9, from 7), right less (2, from 5).** Step 3's exit (production and blending reach the other
+  problems' rate) is not met; the tuning score dropped.
+- **The idioms were written in 3 of 10 cases** (p07, p08, p09 -- p09 right). The other seven never used them,
+  so most of the change is the instructions' new text and run-to-run variation, not the idioms' expansion.
+- **What went wrong, on the tuning set (readable):**
+  - p02 and p04: a list of ALLOWED pairs was loaded as a 0/1 parameter whose default is 1 -- every pair the list
+    does not name stays allowed, so the list restricts nothing. The step 4 card showed it ("allowed: 1 cells
+    given (value 1), every other cell 1") but raised no warning. A data check that does not depend on the
+    problem catches it: a parameter whose given cells all equal its default changes nothing.
+  - p06: solved, all rules kept, goal 189 against the reference 909 -- a goal or a rule misread.
+  - p07: 69 violations (the grid problem: rules left out). p08: over budget by 2,000 (a rule weakened).
+  - p10: the export has no shipment decision over (warehouse, location, day, good) -- the model's decision has
+    another shape; the checker cannot judge it.
+- The step 3 hidden run follows now on the same image; step 4 (rest) and step 5 wait for it.
