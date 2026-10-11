@@ -1,0 +1,159 @@
+# The Assistant as a modeller — a build protocol instead of a prompt
+
+**11 October 2026.** The plan that follows the architecture review of the same day: the solver side is the
+asset, the modelling side is the risk, and the way to a professional general-purpose solver is to stop asking the
+language model for a whole model in one reply. It continues `2026-10-10-neutrality-plan.md` (whose rules and
+"done when" stay in force) and `2026-10-11-issues-and-plan.md` (whose items A–F it absorbs).
+
+**What changes, in one paragraph.** Today the Assistant writes the entire model (records, data, decisions, rules,
+goal: ~30,000 characters of JSON) in one reply, and the platform validates only whole specs; around that sit
+repairs, guards and nudges added one incident at a time. After this plan the Assistant builds in stages, each
+stage a small reply the platform checks as it arrives; the modelling knowledge lives in the platform as a tested
+library of constructs; every repair is one documented canonical form; and every change is judged in an hour on
+a corpus that needs no language model, before it is judged on the hidden set.
+
+**Principles that do not change:** domain-neutral (the build check fails on a field's word in anything the
+Assistant or the person reads); general (every check and repair reads the shape of the model or the data, never
+a name); isolated (nothing reaches outside the machine; the model is on the LAN); one image per measurement;
+nothing deployed during a hidden run.
+
+---
+
+## Phase 0 — Measure fast and true (days 1–3)
+
+Everything after this phase is judged by what this phase builds. Nothing here touches the live stack.
+
+| # | Work item | Where | Verified by | Exit |
+|---|---|---|---|---|
+| 0.1 | **Parallel tuning runs.** A runner that drives up to 3 cases at once (3 browser contexts, distinct workspace names — already unique per case), each with its own run folder; the 20-minute limit becomes 25 under concurrency. | `backend/bench/phase1/run_parallel.sh` (new), `drive_case.mjs` (no change: one case per process) | three serial runs vs three parallel runs of the same image give right-counts within one case; per-case minutes recorded with the concurrency level | a 10-case set in ≤ 1 hour; three runs in an evening |
+| 0.2 | **Gold models.** For every tuning case, the model that reaches the reference, captured from a right run (the problem's model version and frozen seed, through the API) into `bench/phase1/gold/<p>-S.json`; for the hidden set the same, captured blind (the tool prints nothing). | `backend/bench/phase1/gold.py` (new): `capture <run folder>`, `check [tag]` | `check` sends each gold through `/from-spec` with `dry_run` + `trial` and compares the trial's goal with `expected.json`; runs in the test image, no LLM | every tuning case has a gold that reaches its reference; `check` runs in < 5 minutes |
+| 0.3 | **Mutation checks.** From each gold, known-wrong variants: drop one hard rule; give a loaded list its default's value; reverse the goal's sense; remove a parameter's values; read a pair parameter on an unlisted pair. For each variant, the platform's checks must raise a warning (shape findings, trial flags, unused numbers, used-without-data). | `backend/bench/phase1/mutate.py` (new); the table mutation × check in `docs/plans/mutation-coverage.md` (generated) | each (gold, mutation) pair: warned / not warned; a not-warned pair is a listed gap, never silent | every mutation class caught by at least one check, or on the gap list with an owner |
+| 0.4 | **Time split per case.** The Assistant emits a `timing` event per model call (seconds, prompt and reply tokens, stage); the driver writes them to the run folder; `causes.py` splits each case's minutes into model time, platform time, waiting. | `app/agent/core.py` (`llm_chat` caller), `drive_case.mjs`, `causes.py` | the split adds up to the case's minutes within 5 % | every "not built" names its cause in counts |
+
+Governance from here on: **no platform change is measured on the tuning set in the browser before it passes
+0.2 and 0.3.** The corpus is the first gate, the browser the second, the hidden set the third.
+
+## Phase 1 — One canonical form (days 4–6)
+
+| # | Work item | Where | Verified by | Exit |
+|---|---|---|---|---|
+| 1.1 | **Inventory.** Every repair and inference now scattered: `repair.py` (spec_of, misplaced, joined_keys, repair, _scalar_indices, _bound_rules, _walk), `core.py` (bind_literal_keys, the guards), `toolcall.py` (mend_brackets, strict_loads), `files.py` (list default), `idioms.py`. Each classified: *canonicalisation* (one spelling → the contract's), *inference* (something the model left implicit, derivable from the spec), *heuristic* (a guess). | `docs/plans/canonical-form.md` (new) | the inventory lists every function with its class and the corpus case it came from | complete |
+| 1.2 | **`canonical(spec) -> (spec, notes)`.** One ordered pass, each rule a small named function with a docstring, an example and a test; the pydantic contract applied after it. Canonicalisations and tested inferences move in; heuristics become notes to the model (never silent edits) or are deleted. | `app/agent/canon.py` (new); `repair.py` reduced to a thin call | unit test per rule; **fixed point on the corpus:** `canonical(gold) == gold` for every gold model; every mutation still warned after canonicalisation | `repair.py` gone; no regex on model text outside JSON mending |
+| 1.3 | **Refusals that name the fix.** Every contract refusal the corpus can provoke carries the canonical spelling in its message (as the over-without-sum case should have). | `app/ir/validate.py`, `app/api/model_spec.py` | a test that every refusal kind seen in the runs' `causes` tables has a "write it as" clause | — |
+
+## Phase 2 — The constructs library (days 7–10)
+
+The modelling knowledge in the platform, deterministic and tested, so the model *selects and fills* and never
+hand-writes the algebra. `idioms.py` is the seed; it grows into a package.
+
+| # | Construct | Expands to | Test (hand-worked optimum) | Mutation it must refuse |
+|---|---|---|---|---|
+| 2.1 | **carried** — a quantity carried between periods, starting amount in the first period, optional backlog | the period links, the balance, the end rule | 15 (exists) | the starting amount in every period |
+| 2.2 | **allowed pairs** — complete list, or partial list restricting only the records it names | `amount <= most × pair[r,o]`, or `amount <= most × (1 − listed[r] + pair[r,o])` | a two-task assignment (exists for the complete form) | a partial list with default 1 |
+| 2.3 | **largest_of** — overlapping effects, the best chosen counts | the `_best` binaries and three rules (exists) | 50 (exists) | `level >= value × pick` |
+| 2.4 | **exactly_one / at_most_one** per group | one sum rule (exists) | 7 (exists) | — |
+| 2.5 | **covering** — every requirement met by at least one chosen option | sum of open over the options that cover it ≥ 1 | a 4-site cover | — |
+| 2.6 | **only_if** — an amount only when chosen, fixed charge | `amount <= most × chosen` and the charge in the goal (exists) | — | missing `most` |
+| 2.7 | **share_of_total** — at least/at most a share of a mix | the linear form | a 3-ingredient blend | the division written as is |
+| 2.8 | **next_in_order** — links from an ordering field | `relationships_in_order` (exists in the seed) | — | — |
+| 2.9 | **used_only_where_given** — a decision kept to the pairs a parameter is given for | `amount <= most × given[r,o]` (given = 1 where the parameter has a cell) | the machine-times case | — |
+
+Each construct: `app/agent/constructs/<name>.py` with its field schema, the expansion, the test, the refusal,
+and a neutral one-paragraph description that the Phase 3 instructions include verbatim (the neutrality test
+scans them). **Exit:** every hard rule of every tuning gold model is a construct or a plain linear rule; all
+construct tests pass; the mutation table shows each construct's refusal.
+
+## Phase 3 — The build protocol (days 11–18)
+
+The Assistant builds in stages through tool calls; the platform holds the draft, checks each stage and
+assembles the plan. Small replies, each checked; no 30,000-character JSON.
+
+### 3.1 The stages and their tools
+
+| Stage | Tool the Assistant calls | What the platform does at once | What it returns |
+|---|---|---|---|
+| Data | `stage_data({entity_types, parameters, *_from_file, entities, ...})` | loads (pasted tables and files), canonicalises, stores the draft's seed | the load report per entry (rows, kept, skipped, stored), the records per kind, each parameter's cells and default — and refusals per entry, not for the whole |
+| Decisions | `stage_decisions({variables})` | checks every index set has records; bounds | the decisions as read back |
+| Rules | `add_rule({sentence, rule})` — **one at a time**, the request's sentence quoted | canonicalises the one rule, compiles it against the staged data (its range, the data it reads), runs the shape checks on the draft so far | "rule c_x holds sentence '…', ranges over 24 pairs, reads cost and is_open" — or the refusal with the fix |
+| Goal | `stage_goal({objective})` | compiles; checks every term's data | the goal as read back |
+| Propose | `propose_plan({summary})` with **no spec** | assembles the spec from the draft, runs the trial, the shape and data checks, the unmatched-sentence check (3.2); builds the card | the card, or a send-back naming the stage to redo |
+
+The old `propose_plan(spec)` with a full spec stays accepted (through the canonical form): no cliff for the
+model, and the measurement can compare the two paths on the same image.
+
+**Draft state:** held in the conversation as a platform message carrying the draft (the same mechanism as a
+summary's `pasted` tables), so the browser round-trips it and nothing is stored server-side between turns;
+stripped from what goes to the model's API (`to_wire`). Files: `app/agent/stages.py` (new), `core.py` (the
+tools), `app/agent/draft.py` (new: the draft's shape and assembly).
+
+### 3.2 Every sentence of the request mapped
+
+The platform splits the person's request into sentences (the existing number and table readers already find the
+prose); a sentence that states a rule or a goal (contains a limit, a must/never/at most/at least/only, a goal
+word) and is claimed by no `add_rule` or `stage_goal` is a card line: **CHECK THIS: no rule holds "…"**. This is
+the step 5 item "every rule sentence mapped", and the explainability item of the owner's checklist: on the card,
+the request on the left, the model on the right. Files: `app/agent/sentences.py` (new), `readback.py`.
+
+### 3.3 Instructions
+
+The 34,000-character sheet becomes: the protocol (what each stage is for, ~3,000 characters), the constructs'
+descriptions (from Phase 2, ~3,000), the contract's term language (~2,000). The PATTERNS block is retired once
+the protocol's three-run tuning mean is at least the old path's. The neutrality test is unchanged and must pass.
+
+### 3.4 Reply caps per stage
+
+Each stage's reply is small: `LLM_REPLY_SECONDS` 120 for stage calls (a stage that takes longer is asked for
+again, shorter), the plan-level cap stays for the old path. A slow model loses one stage, not the whole model.
+
+### 3.5 The card
+
+Load report (exists), decisions, **sentence ↔ rule table**, goal, trial line, warnings (exist), send-backs
+(exist). The person sees what the model does against what they wrote, line by line.
+
+### 3.6 Measurement and exit
+
+- Corpus first: each stage tool tested on the gold models (a gold replayed stage by stage reaches its reference;
+  each mutation is caught at the stage it belongs to, not only at the end).
+- Then three parallel tuning runs (Phase 0.1) of the protocol path against three of the old path on the same
+  image. **Exit:** tuning mean ≥ 7 of 10 right, 0 wrong answers without a warning, "not built" ≤ 1 of 10, and no
+  case over 12 minutes on the model's own time.
+- Then the hidden set, three runs, read blind.
+
+## Phase 4 — Judge and harden (days 19–21, then ongoing)
+
+| # | Work item | Exit |
+|---|---|---|
+| 4.1 | Hidden set, three runs on the protocol; defects by class from the aggregate and the `causes` tables; each class becomes a construct, a canonical rule or a check — with its mutation in the corpus first | the plan's "done when": within a few points of tuning, ≥ 90 % right first time, no unwarned wrong answer |
+| 4.2 | `/api/health` reports the model (reachable, last latency) and the tile index; the egress smoke stays the acceptance on an isolated host | — |
+| 4.3 | Nightly: the corpus (`gold check`, `mutate`) in `scripts/nightly.sh`; a red night blocks a deploy | — |
+| 4.4 | Hand-over: `docs/handover.md` points at the protocol, the constructs, the canonical form and the corpus | — |
+
+## Order, dependencies, estimate
+
+```
+Phase 0 (3 d) ──► Phase 1 (3 d) ──► Phase 2 (4 d) ──► Phase 3 (8 d) ──► Phase 4 (3 d + ongoing)
+   │                                                      ▲
+   └──── 0.1 parallel runs and 0.2 gold capture start tonight, beside step 5's measurement ──┘
+```
+
+About three weeks at today's pace. Phase 3 depends on 1 (the canonical form is what stage tools return) and 2
+(the constructs are what `add_rule` accepts), and on 0 for its judgement; 1 and 2 can overlap after 0.2.
+The neutrality plan's step 5 and step 3b measurements run on within Phase 0; their readings feed 0.3's gap list.
+
+## Risks and what answers them
+
+| Risk | Answer |
+|---|---|
+| The local model does not follow a multi-call protocol | each call is smaller and more constrained than today's single call, and the old path stays as the fallback on the same image; the first corpus replay shows which stages it manages |
+| The draft carried through the browser grows large | it carries references to loaded files and the rules, not rows; `to_wire` strips it from the model's API |
+| Three cases at once on one GPU slow each other | 0.1 measures it before it is relied on; the limit is 25 minutes under concurrency; serial stays available |
+| A canonical rule changes a gold model's meaning | the fixed-point test (`canonical(gold) == gold`) fails the build |
+| Adding constructs re-creates the step 3 drop | constructs enter the instructions as one-paragraph descriptions beside the formulas, measured over three runs, kept only if the mean does not drop (the step 3b rule) |
+
+## What starts now
+
+1. Phase 0.1: `run_parallel.sh` and a three-way timing comparison on the step 5 image once its serial runs are
+   recorded (no deploy needed).
+2. Phase 0.2: `gold.py capture` on the right runs of today (p01, p02, p09, p10 and the others as they come);
+   `gold.py check` in the test image.
+3. Phase 0.3: the first five mutations and their table.
