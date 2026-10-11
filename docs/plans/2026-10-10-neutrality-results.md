@@ -264,3 +264,21 @@ without stopping the Assistant's turn, which kept the model busy. p07 started at
 of every "not built" count so far (tuning and hidden) may be this cascade, not the platform. `drive_case.mjs`
 now presses Stop at the limit and waits for the turn to end before the next case. In effect from the step 4
 hidden run's next case on; earlier measurements carry this fault and are read with it in mind.
+
+## Where the time goes (plan A.2; `python -m bench.phase1.causes runs <tag>`, counts only)
+
+Over the three tuning sets (step 2, 3, 4: 30 case runs, 9 not built in 20 minutes):
+
+| What ended the case | Cases | Which |
+|---|---|---|
+| A model reply ran past 7 minutes (cut, asked again shorter) | 4 | p05 in every run it timed out; p08 |
+| No plan card at all, no refusal, no slow reply: the turn never came back | 3 | p05 and p06 (step 2), p07 (step 4: behind p08's unstopped turn) |
+| A warned card declined, the second card not in time | 2 | p08 (step 2, step 4) |
+| Refusals of the spec, one after another | 1 | p10 (step 4: 7 refusals, now repaired) |
+
+- **Refusals are rare** (8 in 30 runs; 7 of them in one case). The time is lost in the model's own replies:
+  thinking replies longer than 7 minutes, and turns that do not come back at all.
+- p05 is the clearest case: every run, a reply over 7 minutes. Next for plan C: what p05's first reply is doing
+  (thinking length, tokens), and whether a shorter first reply (a cap on thinking for the first plan) helps.
+- The cascade (a timed-out turn left running) is fixed in the driver (13:20); "no plan card, nothing logged"
+  should fall once the measurements carry that fix.
