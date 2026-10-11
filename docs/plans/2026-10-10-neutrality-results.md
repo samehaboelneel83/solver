@@ -300,3 +300,12 @@ Built from `main` without step 3b's paragraph. On top of step 4 it holds:
 
 More than one change in one measurement (rule 4 relaxed): each measurement now costs three tuning runs, and
 every item above was found on the tuning set and tested there. The hidden run that follows judges them together.
+
+## Neutrality enforced on the platform's own messages too (11 Oct, 15:25)
+
+`tests/test_neutral_prompt.py` covered the Assistant's instructions only. It now also scans every message
+constant the platform sends to the person or the model (15 in the Assistant's core) and renders, on neutral
+inputs, the messages built at run time: the shape and data checks (`unread`, `as_default`, `one_way`), the trial
+card and its model-facing line, the unused-numbers line, the repair notes and the file load line. Any word from
+a particular field fails the build. Everything added today passes: each check and repair reads the model's or
+the data's shape, never a name.
