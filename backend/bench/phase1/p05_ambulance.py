@@ -150,7 +150,13 @@ def check(folder: Path, export_csv: str) -> list[str]:
             serve.setdefault(r["key2"], []).append(r["key1"])
         if r.get("key1") in zn and r.get("key2") in st and float(r["value"]) > 0.5:
             serve.setdefault(r["key1"], []).append(r["key2"])
-    amb_name = next((n for n in per_s if "amb" in n.lower() or "vehic" in n.lower() or "fleet" in n.lower()), None)
+    amb_name = next((n for n in per_s if any(w in n.lower() for w in ("amb", "vehic", "fleet", "placed", "place", "count",
+                                                                       "units", "number", "assign", "alloc"))), None)
+    if amb_name is None:
+        # The one decision over stations that is not the open flag (12 October 2026: `placed` held 1 ambulance
+        # at each of three open stations and was read as a flag).
+        others = [n for n in per_s if not any(w in n.lower() for w in ("open", "use", "active", "select", "pick"))]
+        amb_name = others[0] if len(others) == 1 else None
     if amb_name is None:
         return [f"no decision for ambulances per station (decisions over stations: {', '.join(per_s)})"]
     amb = per_s[amb_name]
