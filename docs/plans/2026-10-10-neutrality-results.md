@@ -255,3 +255,12 @@ p10-S          no     no     no     no    0     0       20.1
   (`2026-10-11-issues-and-plan.md`, A): one run cannot judge this step. p04 repeats the allowed-list mistake
   (caught by the step 5 check `as_default`).
 - The step 4 hidden run follows (from 13:00).
+
+## Harness: a timed-out turn is now stopped (11 Oct, 13:20)
+
+Cause of time found in the step 4 tuning run: p08 reached the 20-minute limit at 11:46 and the driver moved on
+without stopping the Assistant's turn, which kept the model busy. p07 started at once and its FIRST model call
+(about 1 token of context) waited the whole 20 minutes. So one timeout can make the next case time out too: part
+of every "not built" count so far (tuning and hidden) may be this cascade, not the platform. `drive_case.mjs`
+now presses Stop at the limit and waits for the turn to end before the next case. In effect from the step 4
+hidden run's next case on; earlier measurements carry this fault and are read with it in mind.

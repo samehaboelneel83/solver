@@ -130,6 +130,14 @@ try {
     log(`typed "continue" (${result.continues})`);
   }
   result.minutes = +((Date.now() - t0) / 60000).toFixed(1);
+  // A turn still running at the limit is stopped: left alone it holds the model, and the next case's first call
+  // waited 20 minutes behind it (11 October 2026: p08 timed out, then p07 never got a reply).
+  if (await busy()) {
+    await page.getByRole("button", { name: "Stop" }).click().catch(() => {});
+    result.stopped = true;
+    for (let i = 0; i < 60 && (await busy()); i++) await page.waitForTimeout(2000);
+    log(`stopped the running turn at the limit (busy after: ${await busy()})`);
+  }
   for (const fold of await page.getByRole("button", { name: /\d+ steps?/ }).all()) {
     if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click().catch(() => {});
   }
