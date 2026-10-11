@@ -1,0 +1,923 @@
+{
+ "case": "p10",
+ "size": "S",
+ "run": 270,
+ "objective": 113733,
+ "ir": {
+  "sets": [
+   "warehouse",
+   "location",
+   "day"
+  ],
+  "version": 2,
+  "objective": {
+   "mode": "weighted",
+   "sense": "minimize",
+   "terms": [
+    {
+     "id": "o_unmet",
+     "weight": 1,
+     "expression": {
+      "sum": {
+       "mul": [
+        {
+         "par": "unit_unmet_cost",
+         "index": [
+          "loc"
+         ]
+        },
+        {
+         "var": "unmet",
+         "index": [
+          "loc",
+          "d"
+         ]
+        }
+       ]
+      },
+      "over": [
+       {
+        "set": "location",
+        "index": "loc"
+       },
+       {
+        "set": "day",
+        "index": "d"
+       }
+      ]
+     }
+    },
+    {
+     "id": "o_time",
+     "weight": 1,
+     "expression": {
+      "sum": {
+       "mul": [
+        {
+         "par": "unit_time_cost",
+         "index": []
+        },
+        {
+         "mul": [
+          {
+           "par": "travel_min",
+           "index": [
+            "wh",
+            "loc"
+           ]
+          },
+          {
+           "var": "ship",
+           "index": [
+            "wh",
+            "loc",
+            "d"
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      "over": [
+       {
+        "set": "warehouse",
+        "index": "wh"
+       },
+       {
+        "set": "location",
+        "index": "loc"
+       },
+       {
+        "set": "day",
+        "index": "d"
+       }
+      ]
+     }
+    },
+    {
+     "id": "o_opening",
+     "weight": 1,
+     "expression": {
+      "sum": {
+       "mul": [
+        {
+         "par": "opening_cost",
+         "index": [
+          "wh"
+         ]
+        },
+        {
+         "var": "open",
+         "index": [
+          "wh"
+         ]
+        }
+       ]
+      },
+      "over": [
+       {
+        "set": "warehouse",
+        "index": "wh"
+       }
+      ]
+     }
+    },
+    {
+     "id": "o_trucking",
+     "weight": 1,
+     "expression": {
+      "sum": {
+       "mul": [
+        {
+         "par": "unit_truck_cost",
+         "index": []
+        },
+        {
+         "var": "ship",
+         "index": [
+          "wh",
+          "loc",
+          "d"
+         ]
+        }
+       ]
+      },
+      "over": [
+       {
+        "set": "warehouse",
+        "index": "wh"
+       },
+       {
+        "set": "location",
+        "index": "loc"
+       },
+       {
+        "set": "day",
+        "index": "d"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  "variables": {
+   "open": {
+    "index": [
+     "warehouse"
+    ],
+    "domain": "binary"
+   },
+   "ship": {
+    "index": [
+     "warehouse",
+     "location",
+     "day"
+    ],
+    "lower": 0,
+    "domain": "continuous"
+   },
+   "stock": {
+    "index": [
+     "warehouse",
+     "day"
+    ],
+    "lower": 0,
+    "domain": "continuous"
+   },
+   "unmet": {
+    "index": [
+     "location",
+     "day"
+    ],
+    "lower": 0,
+    "domain": "continuous"
+   }
+  },
+  "parameters": {
+   "intake": {
+    "index": [
+     "warehouse"
+    ]
+   },
+   "capacity": {
+    "index": [
+     "warehouse"
+    ]
+   },
+   "is_closed": {
+    "index": [
+     "warehouse",
+     "location",
+     "day"
+    ]
+   },
+   "travel_min": {
+    "index": [
+     "warehouse",
+     "location"
+    ]
+   },
+   "demand_tons": {
+    "index": [
+     "location",
+     "day"
+    ]
+   },
+   "opening_cost": {
+    "index": [
+     "warehouse"
+    ]
+   },
+   "unit_time_cost": {
+    "index": []
+   },
+   "unit_truck_cost": {
+    "index": []
+   },
+   "unit_unmet_cost": {
+    "index": [
+     "location"
+    ]
+   }
+  },
+  "constraints": [
+   {
+    "id": "c_max_open",
+    "left": {
+     "sum": {
+      "var": "open",
+      "index": [
+       "wh"
+      ]
+     },
+     "over": [
+      {
+       "set": "warehouse",
+       "index": "wh"
+      }
+     ]
+    },
+    "note": "At most 2 warehouses open",
+    "right": {
+     "const": 2
+    },
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_stock_balance",
+    "left": {
+     "add": [
+      {
+       "var": "stock",
+       "index": [
+        "wh",
+        "d"
+       ]
+      },
+      {
+       "sum": {
+        "var": "ship",
+        "index": [
+         "wh",
+         "loc",
+         "d"
+        ]
+       },
+       "over": [
+        {
+         "set": "location",
+         "index": "loc"
+        }
+       ]
+      }
+     ]
+    },
+    "note": "Stock balance: stock[t] + shipments = intake*open + stock[t-1]",
+    "right": {
+     "add": [
+      {
+       "mul": [
+        {
+         "par": "intake",
+         "index": [
+          "wh"
+         ]
+        },
+        {
+         "var": "open",
+         "index": [
+          "wh"
+         ]
+        }
+       ]
+      },
+      {
+       "sum": {
+        "var": "stock",
+        "index": [
+         "wh",
+         "q"
+        ]
+       },
+       "over": [
+        {
+         "set": "day",
+         "via": {
+          "to": "d",
+          "rel": "next_day"
+         },
+         "index": "q"
+        }
+       ]
+      }
+     ]
+    },
+    "forall": [
+     {
+      "set": "warehouse",
+      "index": "wh"
+     },
+     {
+      "set": "day",
+      "index": "d"
+     }
+    ],
+    "relation": "=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_capacity",
+    "left": {
+     "var": "stock",
+     "index": [
+      "wh",
+      "d"
+     ]
+    },
+    "note": "Stock <= capacity",
+    "right": {
+     "par": "capacity",
+     "index": [
+      "wh"
+     ]
+    },
+    "forall": [
+     {
+      "set": "warehouse",
+      "index": "wh"
+     },
+     {
+      "set": "day",
+      "index": "d"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_truck_limit",
+    "left": {
+     "sum": {
+      "var": "ship",
+      "index": [
+       "wh",
+       "loc",
+       "d"
+      ]
+     },
+     "over": [
+      {
+       "set": "location",
+       "index": "loc"
+      }
+     ]
+    },
+    "note": "Shipments <= truck_loads_per_day * 10 * open",
+    "right": {
+     "mul": [
+      {
+       "mul": [
+        {
+         "attr": {
+          "of": "wh",
+          "name": "truck_loads_per_day"
+         }
+        },
+        {
+         "const": 10
+        }
+       ]
+      },
+      {
+       "var": "open",
+       "index": [
+        "wh"
+       ]
+      }
+     ]
+    },
+    "forall": [
+     {
+      "set": "warehouse",
+      "index": "wh"
+     },
+     {
+      "set": "day",
+      "index": "d"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_closed_road",
+    "left": {
+     "mul": [
+      {
+       "var": "ship",
+       "index": [
+        "wh",
+        "loc",
+        "d"
+       ]
+      },
+      {
+       "par": "is_closed",
+       "index": [
+        "wh",
+        "loc",
+        "d"
+       ]
+      }
+     ]
+    },
+    "note": "No shipment on closed roads",
+    "right": {
+     "const": 0
+    },
+    "forall": [
+     {
+      "set": "warehouse",
+      "index": "wh"
+     },
+     {
+      "set": "location",
+      "index": "loc"
+     },
+     {
+      "set": "day",
+      "index": "d"
+     }
+    ],
+    "relation": "=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_demand",
+    "left": {
+     "add": [
+      {
+       "sum": {
+        "var": "ship",
+        "index": [
+         "wh",
+         "loc",
+         "d"
+        ]
+       },
+       "over": [
+        {
+         "set": "warehouse",
+         "index": "wh"
+        }
+       ]
+      },
+      {
+       "var": "unmet",
+       "index": [
+        "loc",
+        "d"
+       ]
+      }
+     ]
+    },
+    "note": "Demand = delivered + unmet",
+    "right": {
+     "par": "demand_tons",
+     "index": [
+      "loc",
+      "d"
+     ]
+    },
+    "forall": [
+     {
+      "set": "location",
+      "index": "loc"
+     },
+     {
+      "set": "day",
+      "index": "d"
+     }
+    ],
+    "relation": "=",
+    "severity": "hard"
+   }
+  ],
+  "relationships": [
+   "next_day"
+  ]
+ },
+ "data": {
+  "sets": {
+   "day": [
+    {
+     "id": "DAY1",
+     "order": 1
+    },
+    {
+     "id": "DAY2",
+     "order": 2
+    },
+    {
+     "id": "DAY3",
+     "order": 3
+    }
+   ],
+   "location": [
+    {
+     "id": "LOC001",
+     "priority": false
+    },
+    {
+     "id": "LOC002",
+     "priority": false
+    },
+    {
+     "id": "LOC003",
+     "priority": false
+    },
+    {
+     "id": "LOC004",
+     "priority": true
+    },
+    {
+     "id": "LOC005",
+     "priority": true
+    },
+    {
+     "id": "LOC006",
+     "priority": false
+    }
+   ],
+   "warehouse": [
+    {
+     "id": "WH01",
+     "opening_cost": 39680,
+     "capacity_tons": 51,
+     "truck_loads_per_day": 7,
+     "intake_food_tons_per_day": 17
+    },
+    {
+     "id": "WH02",
+     "opening_cost": 41521,
+     "capacity_tons": 51,
+     "truck_loads_per_day": 3,
+     "intake_food_tons_per_day": 17
+    },
+    {
+     "id": "WH03",
+     "opening_cost": 26648,
+     "capacity_tons": 51,
+     "truck_loads_per_day": 3,
+     "intake_food_tons_per_day": 17
+    }
+   ]
+  },
+  "parameters": {
+   "intake": [
+    {
+     "value": 17,
+     "warehouse": "WH01"
+    },
+    {
+     "value": 17,
+     "warehouse": "WH02"
+    },
+    {
+     "value": 17,
+     "warehouse": "WH03"
+    }
+   ],
+   "capacity": [
+    {
+     "value": 51,
+     "warehouse": "WH01"
+    },
+    {
+     "value": 51,
+     "warehouse": "WH02"
+    },
+    {
+     "value": 51,
+     "warehouse": "WH03"
+    }
+   ],
+   "is_closed": [
+    {
+     "day": "DAY1",
+     "value": 1,
+     "location": "LOC001",
+     "warehouse": "WH03"
+    },
+    {
+     "day": "DAY1",
+     "value": 1,
+     "location": "LOC002",
+     "warehouse": "WH02"
+    },
+    {
+     "day": "DAY1",
+     "value": 1,
+     "location": "LOC002",
+     "warehouse": "WH03"
+    },
+    {
+     "day": "DAY3",
+     "value": 1,
+     "location": "LOC005",
+     "warehouse": "WH02"
+    }
+   ],
+   "travel_min": [
+    {
+     "value": 114,
+     "location": "LOC004",
+     "warehouse": "WH01"
+    },
+    {
+     "value": 122,
+     "location": "LOC005",
+     "warehouse": "WH02"
+    },
+    {
+     "value": 136,
+     "location": "LOC001",
+     "warehouse": "WH02"
+    },
+    {
+     "value": 138,
+     "location": "LOC001",
+     "warehouse": "WH01"
+    },
+    {
+     "value": 144,
+     "location": "LOC002",
+     "warehouse": "WH01"
+    },
+    {
+     "value": 156,
+     "location": "LOC004",
+     "warehouse": "WH02"
+    },
+    {
+     "value": 188,
+     "location": "LOC005",
+     "warehouse": "WH01"
+    },
+    {
+     "value": 201,
+     "location": "LOC003",
+     "warehouse": "WH01"
+    },
+    {
+     "value": 207,
+     "location": "LOC004",
+     "warehouse": "WH03"
+    },
+    {
+     "value": 212,
+     "location": "LOC002",
+     "warehouse": "WH03"
+    },
+    {
+     "value": 214,
+     "location": "LOC005",
+     "warehouse": "WH03"
+    },
+    {
+     "value": 22,
+     "location": "LOC003",
+     "warehouse": "WH02"
+    },
+    {
+     "value": 24,
+     "location": "LOC006",
+     "warehouse": "WH02"
+    },
+    {
+     "value": 29,
+     "location": "LOC006",
+     "warehouse": "WH03"
+    },
+    {
+     "value": 35,
+     "location": "LOC003",
+     "warehouse": "WH03"
+    },
+    {
+     "value": 40,
+     "location": "LOC006",
+     "warehouse": "WH01"
+    },
+    {
+     "value": 85,
+     "location": "LOC001",
+     "warehouse": "WH03"
+    },
+    {
+     "value": 96,
+     "location": "LOC002",
+     "warehouse": "WH02"
+    }
+   ],
+   "demand_tons": [
+    {
+     "day": "DAY1",
+     "value": 10,
+     "location": "LOC002"
+    },
+    {
+     "day": "DAY1",
+     "value": 13,
+     "location": "LOC004"
+    },
+    {
+     "day": "DAY1",
+     "value": 13,
+     "location": "LOC005"
+    },
+    {
+     "day": "DAY1",
+     "value": 14,
+     "location": "LOC006"
+    },
+    {
+     "day": "DAY1",
+     "value": 4,
+     "location": "LOC001"
+    },
+    {
+     "day": "DAY1",
+     "value": 4,
+     "location": "LOC003"
+    },
+    {
+     "day": "DAY2",
+     "value": 14,
+     "location": "LOC002"
+    },
+    {
+     "day": "DAY2",
+     "value": 3,
+     "location": "LOC003"
+    },
+    {
+     "day": "DAY2",
+     "value": 3,
+     "location": "LOC005"
+    },
+    {
+     "day": "DAY2",
+     "value": 6,
+     "location": "LOC001"
+    },
+    {
+     "day": "DAY2",
+     "value": 6,
+     "location": "LOC004"
+    },
+    {
+     "day": "DAY2",
+     "value": 6,
+     "location": "LOC006"
+    },
+    {
+     "day": "DAY3",
+     "value": 10,
+     "location": "LOC005"
+    },
+    {
+     "day": "DAY3",
+     "value": 2,
+     "location": "LOC002"
+    },
+    {
+     "day": "DAY3",
+     "value": 3,
+     "location": "LOC001"
+    },
+    {
+     "day": "DAY3",
+     "value": 4,
+     "location": "LOC006"
+    },
+    {
+     "day": "DAY3",
+     "value": 5,
+     "location": "LOC003"
+    },
+    {
+     "day": "DAY3",
+     "value": 7,
+     "location": "LOC004"
+    }
+   ],
+   "opening_cost": [
+    {
+     "value": 26648,
+     "warehouse": "WH03"
+    },
+    {
+     "value": 39680,
+     "warehouse": "WH01"
+    },
+    {
+     "value": 41521,
+     "warehouse": "WH02"
+    }
+   ],
+   "unit_time_cost": [],
+   "unit_truck_cost": [],
+   "unit_unmet_cost": [
+    {
+     "value": 1000,
+     "location": "LOC001"
+    },
+    {
+     "value": 1000,
+     "location": "LOC002"
+    },
+    {
+     "value": 1000,
+     "location": "LOC003"
+    },
+    {
+     "value": 1000,
+     "location": "LOC006"
+    },
+    {
+     "value": 5000,
+     "location": "LOC004"
+    },
+    {
+     "value": 5000,
+     "location": "LOC005"
+    }
+   ]
+  },
+  "relationships": {
+   "next_day": [
+    {
+     "to": "DAY2",
+     "from": "DAY1"
+    },
+    {
+     "to": "DAY3",
+     "from": "DAY2"
+    }
+   ]
+  },
+  "parameter_defaults": {
+   "intake": 0,
+   "capacity": 0,
+   "is_closed": 0,
+   "travel_min": 0,
+   "demand_tons": 0,
+   "opening_cost": 0,
+   "unit_time_cost": 1,
+   "unit_truck_cost": 80,
+   "unit_unmet_cost": 1000
+  },
+  "labels": {
+   "day": {
+    "DAY1": "DAY1",
+    "DAY2": "DAY2",
+    "DAY3": "DAY3"
+   },
+   "location": {
+    "LOC001": "LOC001",
+    "LOC002": "LOC002",
+    "LOC003": "LOC003",
+    "LOC004": "LOC004",
+    "LOC005": "LOC005",
+    "LOC006": "LOC006"
+   },
+   "warehouse": {
+    "WH01": "WH01",
+    "WH02": "WH02",
+    "WH03": "WH03"
+   }
+  }
+ }
+}

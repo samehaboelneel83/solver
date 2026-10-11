@@ -1,0 +1,1143 @@
+{
+ "case": "p07",
+ "size": "S",
+ "run": 255,
+ "objective": 26803.944784,
+ "ir": {
+  "sets": [
+   "hour",
+   "generator"
+  ],
+  "version": 2,
+  "objective": {
+   "sense": "minimize",
+   "terms": [
+    {
+     "id": "o_fuel",
+     "weight": 1,
+     "expression": {
+      "sum": {
+       "mul": [
+        {
+         "var": "gen",
+         "index": [
+          "g",
+          "h"
+         ]
+        },
+        {
+         "attr": {
+          "of": "g",
+          "name": "fuel_cost_per_kwh"
+         }
+        }
+       ]
+      },
+      "over": [
+       {
+        "set": "generator",
+        "index": "g"
+       },
+       {
+        "set": "hour",
+        "index": "h"
+       }
+      ]
+     }
+    },
+    {
+     "id": "o_start",
+     "weight": 1,
+     "expression": {
+      "sum": {
+       "mul": [
+        {
+         "var": "start",
+         "index": [
+          "g",
+          "h"
+         ]
+        },
+        {
+         "attr": {
+          "of": "g",
+          "name": "start_cost"
+         }
+        }
+       ]
+      },
+      "over": [
+       {
+        "set": "generator",
+        "index": "g"
+       },
+       {
+        "set": "hour",
+        "index": "h"
+       }
+      ]
+     }
+    },
+    {
+     "id": "o_co2",
+     "weight": 1,
+     "expression": {
+      "sum": {
+       "mul": [
+        {
+         "var": "gen",
+         "index": [
+          "g",
+          "h"
+         ]
+        },
+        {
+         "mul": [
+          {
+           "attr": {
+            "of": "g",
+            "name": "co2_kg_per_kwh"
+           }
+          },
+          {
+           "par": "co2_price",
+           "index": []
+          }
+         ]
+        }
+       ]
+      },
+      "over": [
+       {
+        "set": "generator",
+        "index": "g"
+       },
+       {
+        "set": "hour",
+        "index": "h"
+       }
+      ]
+     }
+    },
+    {
+     "id": "o_unmet",
+     "weight": 1,
+     "expression": {
+      "sum": {
+       "mul": [
+        {
+         "var": "unmet",
+         "index": [
+          "h"
+         ]
+        },
+        {
+         "par": "unmet_penalty",
+         "index": []
+        }
+       ]
+      },
+      "over": [
+       {
+        "set": "hour",
+        "index": "h"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  "variables": {
+   "on": {
+    "index": [
+     "generator",
+     "hour"
+    ],
+    "domain": "binary"
+   },
+   "gen": {
+    "index": [
+     "generator",
+     "hour"
+    ],
+    "lower": 0,
+    "domain": "continuous"
+   },
+   "start": {
+    "index": [
+     "generator",
+     "hour"
+    ],
+    "domain": "binary"
+   },
+   "unmet": {
+    "index": [
+     "hour"
+    ],
+    "lower": 0,
+    "domain": "continuous"
+   },
+   "charge": {
+    "index": [
+     "hour"
+    ],
+    "lower": 0,
+    "domain": "continuous"
+   },
+   "stored": {
+    "index": [
+     "hour"
+    ],
+    "lower": 0,
+    "domain": "continuous"
+   },
+   "discharge": {
+    "index": [
+     "hour"
+    ],
+    "lower": 0,
+    "domain": "continuous"
+   },
+   "solar_used": {
+    "index": [
+     "hour"
+    ],
+    "lower": 0,
+    "domain": "continuous"
+   },
+   "reserve_battery": {
+    "index": [
+     "hour"
+    ],
+    "lower": 0,
+    "domain": "continuous"
+   },
+   "solar_curtailed": {
+    "index": [
+     "hour"
+    ],
+    "lower": 0,
+    "domain": "continuous"
+   }
+  },
+  "parameters": {
+   "co2_price": {
+    "index": []
+   },
+   "unmet_penalty": {
+    "index": []
+   },
+   "reserve_factor": {
+    "index": []
+   },
+   "stored_initial": {
+    "index": [
+     "hour"
+    ]
+   },
+   "battery_initial": {
+    "index": []
+   },
+   "battery_capacity": {
+    "index": []
+   },
+   "battery_final_min": {
+    "index": []
+   },
+   "battery_efficiency": {
+    "index": []
+   },
+   "battery_rate_limit": {
+    "index": []
+   }
+  },
+  "constraints": [
+   {
+    "id": "c_balance",
+    "left": {
+     "add": [
+      {
+       "var": "solar_used",
+       "index": [
+        "h"
+       ]
+      },
+      {
+       "sum": {
+        "var": "gen",
+        "index": [
+         "g",
+         "h"
+        ]
+       },
+       "over": [
+        {
+         "set": "generator",
+         "index": "g"
+        }
+       ]
+      },
+      {
+       "var": "discharge",
+       "index": [
+        "h"
+       ]
+      },
+      {
+       "mul": [
+        {
+         "const": -1
+        },
+        {
+         "var": "charge",
+         "index": [
+          "h"
+         ]
+        }
+       ]
+      },
+      {
+       "var": "unmet",
+       "index": [
+        "h"
+       ]
+      }
+     ]
+    },
+    "note": "Power balance: solar + diesel + discharge - charge + unmet = demand",
+    "right": {
+     "attr": {
+      "of": "h",
+      "name": "demand_kwh"
+     }
+    },
+    "forall": [
+     {
+      "set": "hour",
+      "index": "h"
+     }
+    ],
+    "relation": "=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_solar_limit",
+    "left": {
+     "var": "solar_used",
+     "index": [
+      "h"
+     ]
+    },
+    "note": "Solar used cannot exceed available",
+    "right": {
+     "attr": {
+      "of": "h",
+      "name": "solar_kwh"
+     }
+    },
+    "forall": [
+     {
+      "set": "hour",
+      "index": "h"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_solar_curtail",
+    "left": {
+     "var": "solar_curtailed",
+     "index": [
+      "h"
+     ]
+    },
+    "note": "Solar curtailed is the remainder",
+    "right": {
+     "add": [
+      {
+       "attr": {
+        "of": "h",
+        "name": "solar_kwh"
+       }
+      },
+      {
+       "mul": [
+        {
+         "const": -1
+        },
+        {
+         "var": "solar_used",
+         "index": [
+          "h"
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "forall": [
+     {
+      "set": "hour",
+      "index": "h"
+     }
+    ],
+    "relation": "=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_gen_min",
+    "left": {
+     "var": "gen",
+     "index": [
+      "g",
+      "h"
+     ]
+    },
+    "note": "Generator output at least min when on",
+    "right": {
+     "mul": [
+      {
+       "attr": {
+        "of": "g",
+        "name": "min_kw"
+       }
+      },
+      {
+       "var": "on",
+       "index": [
+        "g",
+        "h"
+       ]
+      }
+     ]
+    },
+    "forall": [
+     {
+      "set": "generator",
+      "index": "g"
+     },
+     {
+      "set": "hour",
+      "index": "h"
+     }
+    ],
+    "relation": ">=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_gen_max",
+    "left": {
+     "var": "gen",
+     "index": [
+      "g",
+      "h"
+     ]
+    },
+    "note": "Generator output at most max when on",
+    "right": {
+     "mul": [
+      {
+       "attr": {
+        "of": "g",
+        "name": "max_kw"
+       }
+      },
+      {
+       "var": "on",
+       "index": [
+        "g",
+        "h"
+       ]
+      }
+     ]
+    },
+    "forall": [
+     {
+      "set": "generator",
+      "index": "g"
+     },
+     {
+      "set": "hour",
+      "index": "h"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_charge_limit",
+    "left": {
+     "var": "charge",
+     "index": [
+      "h"
+     ]
+    },
+    "note": "Charge rate limit",
+    "right": {
+     "par": "battery_rate_limit",
+     "index": []
+    },
+    "forall": [
+     {
+      "set": "hour",
+      "index": "h"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_discharge_limit",
+    "left": {
+     "var": "discharge",
+     "index": [
+      "h"
+     ]
+    },
+    "note": "Discharge rate limit",
+    "right": {
+     "par": "battery_rate_limit",
+     "index": []
+    },
+    "forall": [
+     {
+      "set": "hour",
+      "index": "h"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_stored_update",
+    "left": {
+     "var": "stored",
+     "index": [
+      "h"
+     ]
+    },
+    "note": "Battery state update with efficiency",
+    "right": {
+     "add": [
+      {
+       "par": "stored_initial",
+       "index": [
+        "h"
+       ]
+      },
+      {
+       "sum": {
+        "var": "stored",
+        "index": [
+         "q"
+        ]
+       },
+       "over": [
+        {
+         "set": "hour",
+         "via": {
+          "to": "h",
+          "rel": "next"
+         },
+         "index": "q"
+        }
+       ]
+      },
+      {
+       "mul": [
+        {
+         "var": "charge",
+         "index": [
+          "h"
+         ]
+        },
+        {
+         "par": "battery_efficiency",
+         "index": []
+        }
+       ]
+      },
+      {
+       "mul": [
+        {
+         "const": -1
+        },
+        {
+         "var": "discharge",
+         "index": [
+          "h"
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "forall": [
+     {
+      "set": "hour",
+      "index": "h"
+     }
+    ],
+    "relation": "=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_stored_capacity",
+    "left": {
+     "var": "stored",
+     "index": [
+      "h"
+     ]
+    },
+    "note": "Stored energy cannot exceed capacity",
+    "right": {
+     "par": "battery_capacity",
+     "index": []
+    },
+    "forall": [
+     {
+      "set": "hour",
+      "index": "h"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_stored_final",
+    "left": {
+     "var": "stored",
+     "index": [
+      "h"
+     ]
+    },
+    "note": "Final stored energy at least minimum",
+    "right": {
+     "par": "battery_final_min",
+     "index": []
+    },
+    "forall": [
+     {
+      "set": "hour",
+      "index": "h",
+      "where": [
+       {
+        "op": "=",
+        "attr": "order",
+        "value": 24
+       }
+      ]
+     }
+    ],
+    "relation": ">=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_start",
+    "left": {
+     "var": "start",
+     "index": [
+      "g",
+      "h"
+     ]
+    },
+    "note": "Start cost incurred when generator turns on",
+    "right": {
+     "add": [
+      {
+       "var": "on",
+       "index": [
+        "g",
+        "h"
+       ]
+      },
+      {
+       "mul": [
+        {
+         "const": -1
+        },
+        {
+         "sum": {
+          "var": "on",
+          "index": [
+           "g",
+           "q"
+          ]
+         },
+         "over": [
+          {
+           "set": "hour",
+           "via": {
+            "to": "h",
+            "rel": "next"
+           },
+           "index": "q"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "forall": [
+     {
+      "set": "generator",
+      "index": "g"
+     },
+     {
+      "set": "hour",
+      "index": "h"
+     }
+    ],
+    "relation": ">=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_reserve_battery_limit",
+    "left": {
+     "var": "reserve_battery",
+     "index": [
+      "h"
+     ]
+    },
+    "note": "Reserve battery contribution cannot exceed rate limit",
+    "right": {
+     "par": "battery_rate_limit",
+     "index": []
+    },
+    "forall": [
+     {
+      "set": "hour",
+      "index": "h"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_reserve_battery_stored",
+    "left": {
+     "var": "reserve_battery",
+     "index": [
+      "h"
+     ]
+    },
+    "note": "Reserve battery contribution cannot exceed stored energy from previous hour",
+    "right": {
+     "sum": {
+      "var": "stored",
+      "index": [
+       "q"
+      ]
+     },
+     "over": [
+      {
+       "set": "hour",
+       "via": {
+        "to": "h",
+        "rel": "next"
+       },
+       "index": "q"
+      }
+     ]
+    },
+    "forall": [
+     {
+      "set": "hour",
+      "index": "h"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_reserve",
+    "left": {
+     "add": [
+      {
+       "sum": {
+        "mul": [
+         {
+          "attr": {
+           "of": "g",
+           "name": "max_kw"
+          }
+         },
+         {
+          "var": "on",
+          "index": [
+           "g",
+           "h"
+          ]
+         }
+        ]
+       },
+       "over": [
+        {
+         "set": "generator",
+         "index": "g"
+        }
+       ]
+      },
+      {
+       "var": "reserve_battery",
+       "index": [
+        "h"
+       ]
+      }
+     ]
+    },
+    "note": "Reserve margin: available capacity >= demand * 1.1",
+    "right": {
+     "mul": [
+      {
+       "attr": {
+        "of": "h",
+        "name": "demand_kwh"
+       }
+      },
+      {
+       "par": "reserve_factor",
+       "index": []
+      }
+     ]
+    },
+    "forall": [
+     {
+      "set": "hour",
+      "index": "h"
+     }
+    ],
+    "relation": ">=",
+    "severity": "hard"
+   }
+  ],
+  "relationships": [
+   "next"
+  ]
+ },
+ "data": {
+  "sets": {
+   "hour": [
+    {
+     "id": "H001",
+     "order": 1,
+     "solar_kwh": 0,
+     "demand_kwh": 640
+    },
+    {
+     "id": "H002",
+     "order": 2,
+     "solar_kwh": 0,
+     "demand_kwh": 640
+    },
+    {
+     "id": "H003",
+     "order": 3,
+     "solar_kwh": 0,
+     "demand_kwh": 603
+    },
+    {
+     "id": "H004",
+     "order": 4,
+     "solar_kwh": 0,
+     "demand_kwh": 501
+    },
+    {
+     "id": "H005",
+     "order": 5,
+     "solar_kwh": 0,
+     "demand_kwh": 482
+    },
+    {
+     "id": "H006",
+     "order": 6,
+     "solar_kwh": 0,
+     "demand_kwh": 423
+    },
+    {
+     "id": "H007",
+     "order": 7,
+     "solar_kwh": 0,
+     "demand_kwh": 420
+    },
+    {
+     "id": "H008",
+     "order": 8,
+     "solar_kwh": 140,
+     "demand_kwh": 424
+    },
+    {
+     "id": "H009",
+     "order": 9,
+     "solar_kwh": 270,
+     "demand_kwh": 492
+    },
+    {
+     "id": "H010",
+     "order": 10,
+     "solar_kwh": 382,
+     "demand_kwh": 502
+    },
+    {
+     "id": "H011",
+     "order": 11,
+     "solar_kwh": 468,
+     "demand_kwh": 632
+    },
+    {
+     "id": "H012",
+     "order": 12,
+     "solar_kwh": 521,
+     "demand_kwh": 663
+    },
+    {
+     "id": "H013",
+     "order": 13,
+     "solar_kwh": 540,
+     "demand_kwh": 635
+    },
+    {
+     "id": "H014",
+     "order": 14,
+     "solar_kwh": 521,
+     "demand_kwh": 650
+    },
+    {
+     "id": "H015",
+     "order": 15,
+     "solar_kwh": 468,
+     "demand_kwh": 599
+    },
+    {
+     "id": "H016",
+     "order": 16,
+     "solar_kwh": 382,
+     "demand_kwh": 481
+    },
+    {
+     "id": "H017",
+     "order": 17,
+     "solar_kwh": 270,
+     "demand_kwh": 477
+    },
+    {
+     "id": "H018",
+     "order": 18,
+     "solar_kwh": 140,
+     "demand_kwh": 402
+    },
+    {
+     "id": "H019",
+     "order": 19,
+     "solar_kwh": 0,
+     "demand_kwh": 394
+    },
+    {
+     "id": "H020",
+     "order": 20,
+     "solar_kwh": 0,
+     "demand_kwh": 402
+    },
+    {
+     "id": "H021",
+     "order": 21,
+     "solar_kwh": 0,
+     "demand_kwh": 452
+    },
+    {
+     "id": "H022",
+     "order": 22,
+     "solar_kwh": 0,
+     "demand_kwh": 527
+    },
+    {
+     "id": "H023",
+     "order": 23,
+     "solar_kwh": 0,
+     "demand_kwh": 590
+    },
+    {
+     "id": "H024",
+     "order": 24,
+     "solar_kwh": 0,
+     "demand_kwh": 594
+    }
+   ],
+   "generator": [
+    {
+     "id": "G1",
+     "max_kw": 373,
+     "min_kw": 101,
+     "start_cost": 699,
+     "co2_kg_per_kwh": 0.76,
+     "fuel_cost_per_kwh": 2.83
+    },
+    {
+     "id": "G2",
+     "max_kw": 365,
+     "min_kw": 129,
+     "start_cost": 707,
+     "co2_kg_per_kwh": 0.71,
+     "fuel_cost_per_kwh": 3.03
+    }
+   ]
+  },
+  "parameters": {
+   "co2_price": [],
+   "unmet_penalty": [],
+   "reserve_factor": [],
+   "stored_initial": [
+    {
+     "hour": "H001",
+     "value": 600
+    }
+   ],
+   "battery_initial": [],
+   "battery_capacity": [],
+   "battery_final_min": [],
+   "battery_efficiency": [],
+   "battery_rate_limit": []
+  },
+  "relationships": {
+   "next": [
+    {
+     "to": "H002",
+     "from": "H001"
+    },
+    {
+     "to": "H003",
+     "from": "H002"
+    },
+    {
+     "to": "H004",
+     "from": "H003"
+    },
+    {
+     "to": "H005",
+     "from": "H004"
+    },
+    {
+     "to": "H006",
+     "from": "H005"
+    },
+    {
+     "to": "H007",
+     "from": "H006"
+    },
+    {
+     "to": "H008",
+     "from": "H007"
+    },
+    {
+     "to": "H009",
+     "from": "H008"
+    },
+    {
+     "to": "H010",
+     "from": "H009"
+    },
+    {
+     "to": "H011",
+     "from": "H010"
+    },
+    {
+     "to": "H012",
+     "from": "H011"
+    },
+    {
+     "to": "H013",
+     "from": "H012"
+    },
+    {
+     "to": "H014",
+     "from": "H013"
+    },
+    {
+     "to": "H015",
+     "from": "H014"
+    },
+    {
+     "to": "H016",
+     "from": "H015"
+    },
+    {
+     "to": "H017",
+     "from": "H016"
+    },
+    {
+     "to": "H018",
+     "from": "H017"
+    },
+    {
+     "to": "H019",
+     "from": "H018"
+    },
+    {
+     "to": "H020",
+     "from": "H019"
+    },
+    {
+     "to": "H021",
+     "from": "H020"
+    },
+    {
+     "to": "H022",
+     "from": "H021"
+    },
+    {
+     "to": "H023",
+     "from": "H022"
+    },
+    {
+     "to": "H024",
+     "from": "H023"
+    }
+   ]
+  },
+  "parameter_defaults": {
+   "co2_price": 0.08,
+   "unmet_penalty": 50,
+   "reserve_factor": 1.1,
+   "stored_initial": 0,
+   "battery_initial": 600,
+   "battery_capacity": 1200,
+   "battery_final_min": 600,
+   "battery_efficiency": 0.92,
+   "battery_rate_limit": 300
+  },
+  "labels": {
+   "hour": {
+    "H001": "Hour 1",
+    "H002": "Hour 2",
+    "H003": "Hour 3",
+    "H004": "Hour 4",
+    "H005": "Hour 5",
+    "H006": "Hour 6",
+    "H007": "Hour 7",
+    "H008": "Hour 8",
+    "H009": "Hour 9",
+    "H010": "Hour 10",
+    "H011": "Hour 11",
+    "H012": "Hour 12",
+    "H013": "Hour 13",
+    "H014": "Hour 14",
+    "H015": "Hour 15",
+    "H016": "Hour 16",
+    "H017": "Hour 17",
+    "H018": "Hour 18",
+    "H019": "Hour 19",
+    "H020": "Hour 20",
+    "H021": "Hour 21",
+    "H022": "Hour 22",
+    "H023": "Hour 23",
+    "H024": "Hour 24"
+   },
+   "generator": {
+    "G1": "Generator 1",
+    "G2": "Generator 2"
+   }
+  }
+ }
+}

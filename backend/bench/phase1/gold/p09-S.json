@@ -1,0 +1,643 @@
+{
+ "case": "p09",
+ "size": "S",
+ "run": 386,
+ "objective": 106.645,
+ "ir": {
+  "sets": [
+   "server",
+   "workload"
+  ],
+  "version": 2,
+  "objective": {
+   "sense": "minimize",
+   "terms": [
+    {
+     "id": "o_cost",
+     "weight": 1,
+     "expression": {
+      "sum": {
+       "mul": [
+        {
+         "add": [
+          {
+           "attr": {
+            "of": "s",
+            "name": "running_cost_per_hour"
+           }
+          },
+          {
+           "mul": [
+            {
+             "attr": {
+              "of": "s",
+              "name": "power_kw"
+             }
+            },
+            {
+             "par": "energy_price",
+             "index": []
+            }
+           ]
+          }
+         ]
+        },
+        {
+         "var": "server_on",
+         "index": [
+          "s"
+         ]
+        }
+       ]
+      },
+      "over": [
+       {
+        "set": "server",
+        "index": "s"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  "variables": {
+   "assign": {
+    "index": [
+     "workload",
+     "server"
+    ],
+    "domain": "binary"
+   },
+   "server_on": {
+    "index": [
+     "server"
+    ],
+    "domain": "binary"
+   }
+  },
+  "parameters": {
+   "can_place": {
+    "index": [
+     "workload",
+     "server"
+    ]
+   },
+   "energy_price": {
+    "index": []
+   }
+  },
+  "constraints": [
+   {
+    "id": "c_one_server",
+    "left": {
+     "sum": {
+      "var": "assign",
+      "index": [
+       "w",
+       "s"
+      ]
+     },
+     "over": [
+      {
+       "set": "server",
+       "index": "s"
+      }
+     ]
+    },
+    "note": "Every workload runs on exactly one server",
+    "right": {
+     "const": 1
+    },
+    "forall": [
+     {
+      "set": "workload",
+      "index": "w"
+     }
+    ],
+    "relation": "=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_region",
+    "left": {
+     "var": "assign",
+     "index": [
+      "w",
+      "s"
+     ]
+    },
+    "note": "Workload runs only on servers in allowed regions",
+    "right": {
+     "par": "can_place",
+     "index": [
+      "w",
+      "s"
+     ]
+    },
+    "forall": [
+     {
+      "set": "workload",
+      "index": "w"
+     },
+     {
+      "set": "server",
+      "index": "s"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_cpu",
+    "left": {
+     "sum": {
+      "mul": [
+       {
+        "attr": {
+         "of": "w",
+         "name": "cpu"
+        }
+       },
+       {
+        "var": "assign",
+        "index": [
+         "w",
+         "s"
+        ]
+       }
+      ]
+     },
+     "over": [
+      {
+       "set": "workload",
+       "index": "w"
+      }
+     ]
+    },
+    "note": "Server CPU capacity",
+    "right": {
+     "attr": {
+      "of": "s",
+      "name": "cpu"
+     }
+    },
+    "forall": [
+     {
+      "set": "server",
+      "index": "s"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_memory",
+    "left": {
+     "sum": {
+      "mul": [
+       {
+        "attr": {
+         "of": "w",
+         "name": "memory_gb"
+        }
+       },
+       {
+        "var": "assign",
+        "index": [
+         "w",
+         "s"
+        ]
+       }
+      ]
+     },
+     "over": [
+      {
+       "set": "workload",
+       "index": "w"
+      }
+     ]
+    },
+    "note": "Server memory capacity",
+    "right": {
+     "attr": {
+      "of": "s",
+      "name": "memory_gb"
+     }
+    },
+    "forall": [
+     {
+      "set": "server",
+      "index": "s"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_storage",
+    "left": {
+     "sum": {
+      "mul": [
+       {
+        "attr": {
+         "of": "w",
+         "name": "storage_gb"
+        }
+       },
+       {
+        "var": "assign",
+        "index": [
+         "w",
+         "s"
+        ]
+       }
+      ]
+     },
+     "over": [
+      {
+       "set": "workload",
+       "index": "w"
+      }
+     ]
+    },
+    "note": "Server storage capacity",
+    "right": {
+     "attr": {
+      "of": "s",
+      "name": "storage_gb"
+     }
+    },
+    "forall": [
+     {
+      "set": "server",
+      "index": "s"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_server_on",
+    "left": {
+     "sum": {
+      "var": "assign",
+      "index": [
+       "w",
+       "s"
+      ]
+     },
+     "over": [
+      {
+       "set": "workload",
+       "index": "w"
+      }
+     ]
+    },
+    "note": "Server is on if any workload is assigned",
+    "right": {
+     "mul": [
+      {
+       "const": 12
+      },
+      {
+       "var": "server_on",
+       "index": [
+        "s"
+       ]
+      }
+     ]
+    },
+    "forall": [
+     {
+      "set": "server",
+      "index": "s"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_server_off",
+    "left": {
+     "var": "server_on",
+     "index": [
+      "s"
+     ]
+    },
+    "note": "Server is off if no workload is assigned",
+    "right": {
+     "sum": {
+      "var": "assign",
+      "index": [
+       "w",
+       "s"
+      ]
+     },
+     "over": [
+      {
+       "set": "workload",
+       "index": "w"
+      }
+     ]
+    },
+    "forall": [
+     {
+      "set": "server",
+      "index": "s"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   }
+  ]
+ },
+ "data": {
+  "sets": {
+   "server": [
+    {
+     "id": "SRV001",
+     "cpu": 29,
+     "zone": "CAI-Z1",
+     "region": "CAI",
+     "power_kw": 1.03,
+     "memory_gb": 145,
+     "storage_gb": 1084,
+     "running_cost_per_hour": 35
+    },
+    {
+     "id": "SRV002",
+     "cpu": 29,
+     "zone": "ALX-Z1",
+     "region": "ALX",
+     "power_kw": 0.91,
+     "memory_gb": 145,
+     "storage_gb": 1084,
+     "running_cost_per_hour": 40
+    },
+    {
+     "id": "SRV003",
+     "cpu": 29,
+     "zone": "SUZ-Z1",
+     "region": "SUZ",
+     "power_kw": 1.01,
+     "memory_gb": 145,
+     "storage_gb": 1084,
+     "running_cost_per_hour": 42
+    },
+    {
+     "id": "SRV004",
+     "cpu": 14,
+     "zone": "CAI-Z2",
+     "region": "CAI",
+     "power_kw": 0.51,
+     "memory_gb": 70,
+     "storage_gb": 542,
+     "running_cost_per_hour": 21
+    }
+   ],
+   "workload": [
+    {
+     "id": "WL00001",
+     "cpu": 1,
+     "memory_gb": 2,
+     "storage_gb": 119,
+     "allowed_regions": "ALX SUZ"
+    },
+    {
+     "id": "WL00002",
+     "cpu": 4,
+     "memory_gb": 16,
+     "storage_gb": 137,
+     "allowed_regions": "CAI SUZ"
+    },
+    {
+     "id": "WL00003",
+     "cpu": 2,
+     "memory_gb": 8,
+     "storage_gb": 199,
+     "allowed_regions": "SUZ"
+    },
+    {
+     "id": "WL00004",
+     "cpu": 8,
+     "memory_gb": 16,
+     "storage_gb": 48,
+     "allowed_regions": "SUZ"
+    },
+    {
+     "id": "WL00005",
+     "cpu": 3,
+     "memory_gb": 9,
+     "storage_gb": 184,
+     "allowed_regions": "CAI SUZ"
+    },
+    {
+     "id": "WL00006",
+     "cpu": 7,
+     "memory_gb": 21,
+     "storage_gb": 123,
+     "allowed_regions": "CAI"
+    },
+    {
+     "id": "WL00007",
+     "cpu": 3,
+     "memory_gb": 15,
+     "storage_gb": 186,
+     "allowed_regions": "ALX"
+    },
+    {
+     "id": "WL00008",
+     "cpu": 7,
+     "memory_gb": 21,
+     "storage_gb": 276,
+     "allowed_regions": "ALX SUZ"
+    },
+    {
+     "id": "WL00009",
+     "cpu": 1,
+     "memory_gb": 3,
+     "storage_gb": 82,
+     "allowed_regions": "SUZ"
+    },
+    {
+     "id": "WL00010",
+     "cpu": 1,
+     "memory_gb": 2,
+     "storage_gb": 129,
+     "allowed_regions": "ALX CAI"
+    },
+    {
+     "id": "WL00011",
+     "cpu": 3,
+     "memory_gb": 9,
+     "storage_gb": 132,
+     "allowed_regions": "ALX CAI"
+    },
+    {
+     "id": "WL00012",
+     "cpu": 5,
+     "memory_gb": 25,
+     "storage_gb": 72,
+     "allowed_regions": "CAI SUZ"
+    }
+   ]
+  },
+  "parameters": {
+   "can_place": [
+    {
+     "value": 1,
+     "server": "SRV001",
+     "workload": "WL00002"
+    },
+    {
+     "value": 1,
+     "server": "SRV001",
+     "workload": "WL00005"
+    },
+    {
+     "value": 1,
+     "server": "SRV001",
+     "workload": "WL00006"
+    },
+    {
+     "value": 1,
+     "server": "SRV001",
+     "workload": "WL00010"
+    },
+    {
+     "value": 1,
+     "server": "SRV001",
+     "workload": "WL00011"
+    },
+    {
+     "value": 1,
+     "server": "SRV001",
+     "workload": "WL00012"
+    },
+    {
+     "value": 1,
+     "server": "SRV002",
+     "workload": "WL00001"
+    },
+    {
+     "value": 1,
+     "server": "SRV002",
+     "workload": "WL00007"
+    },
+    {
+     "value": 1,
+     "server": "SRV002",
+     "workload": "WL00008"
+    },
+    {
+     "value": 1,
+     "server": "SRV002",
+     "workload": "WL00010"
+    },
+    {
+     "value": 1,
+     "server": "SRV002",
+     "workload": "WL00011"
+    },
+    {
+     "value": 1,
+     "server": "SRV003",
+     "workload": "WL00001"
+    },
+    {
+     "value": 1,
+     "server": "SRV003",
+     "workload": "WL00002"
+    },
+    {
+     "value": 1,
+     "server": "SRV003",
+     "workload": "WL00003"
+    },
+    {
+     "value": 1,
+     "server": "SRV003",
+     "workload": "WL00004"
+    },
+    {
+     "value": 1,
+     "server": "SRV003",
+     "workload": "WL00005"
+    },
+    {
+     "value": 1,
+     "server": "SRV003",
+     "workload": "WL00008"
+    },
+    {
+     "value": 1,
+     "server": "SRV003",
+     "workload": "WL00009"
+    },
+    {
+     "value": 1,
+     "server": "SRV003",
+     "workload": "WL00012"
+    },
+    {
+     "value": 1,
+     "server": "SRV004",
+     "workload": "WL00002"
+    },
+    {
+     "value": 1,
+     "server": "SRV004",
+     "workload": "WL00005"
+    },
+    {
+     "value": 1,
+     "server": "SRV004",
+     "workload": "WL00006"
+    },
+    {
+     "value": 1,
+     "server": "SRV004",
+     "workload": "WL00010"
+    },
+    {
+     "value": 1,
+     "server": "SRV004",
+     "workload": "WL00011"
+    },
+    {
+     "value": 1,
+     "server": "SRV004",
+     "workload": "WL00012"
+    }
+   ],
+   "energy_price": []
+  },
+  "relationships": {},
+  "parameter_defaults": {
+   "can_place": 0,
+   "energy_price": 1.5
+  },
+  "labels": {
+   "server": {
+    "SRV001": "SRV001",
+    "SRV002": "SRV002",
+    "SRV003": "SRV003",
+    "SRV004": "SRV004"
+   },
+   "workload": {
+    "WL00001": "WL00001",
+    "WL00002": "WL00002",
+    "WL00003": "WL00003",
+    "WL00004": "WL00004",
+    "WL00005": "WL00005",
+    "WL00006": "WL00006",
+    "WL00007": "WL00007",
+    "WL00008": "WL00008",
+    "WL00009": "WL00009",
+    "WL00010": "WL00010",
+    "WL00011": "WL00011",
+    "WL00012": "WL00012"
+   }
+  }
+ }
+}

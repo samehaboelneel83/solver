@@ -1,0 +1,679 @@
+{
+ "case": "p04",
+ "size": "S",
+ "run": 249,
+ "objective": 963,
+ "ir": {
+  "sets": [
+   "product",
+   "machine",
+   "shift",
+   "material"
+  ],
+  "version": 2,
+  "objective": {
+   "sense": "maximize",
+   "terms": [
+    {
+     "id": "o_profit",
+     "weight": 1,
+     "expression": {
+      "add": [
+       {
+        "sum": {
+         "mul": [
+          {
+           "add": [
+            {
+             "attr": {
+              "of": "p",
+              "name": "price"
+             }
+            },
+            {
+             "mul": [
+              {
+               "const": -1
+              },
+              {
+               "attr": {
+                "of": "p",
+                "name": "unit_cost"
+               }
+              }
+             ]
+            }
+           ]
+          },
+          {
+           "var": "produce",
+           "index": [
+            "p",
+            "m",
+            "s"
+           ]
+          }
+         ]
+        },
+        "over": [
+         {
+          "set": "product",
+          "index": "p"
+         },
+         {
+          "set": "machine",
+          "index": "m"
+         },
+         {
+          "set": "shift",
+          "index": "s"
+         }
+        ]
+       },
+       {
+        "sum": {
+         "mul": [
+          {
+           "const": -1
+          },
+          {
+           "mul": [
+            {
+             "attr": {
+              "of": "p",
+              "name": "setup_cost"
+             }
+            },
+            {
+             "var": "setup",
+             "index": [
+              "p",
+              "m",
+              "s"
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        "over": [
+         {
+          "set": "product",
+          "index": "p"
+         },
+         {
+          "set": "machine",
+          "index": "m"
+         },
+         {
+          "set": "shift",
+          "index": "s"
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  },
+  "variables": {
+   "setup": {
+    "index": [
+     "product",
+     "machine",
+     "shift"
+    ],
+    "domain": "binary"
+   },
+   "produce": {
+    "index": [
+     "product",
+     "machine",
+     "shift"
+    ],
+    "lower": 0,
+    "upper": 999999,
+    "domain": "integer"
+   }
+  },
+  "parameters": {
+   "material_product_use": {
+    "index": [
+     "product",
+     "material"
+    ]
+   },
+   "machine_product_hours": {
+    "index": [
+     "product",
+     "machine"
+    ]
+   }
+  },
+  "constraints": [
+   {
+    "id": "c_machine_capacity",
+    "left": {
+     "sum": {
+      "mul": [
+       {
+        "par": "machine_product_hours",
+        "index": [
+         "p",
+         "m"
+        ]
+       },
+       {
+        "var": "produce",
+        "index": [
+         "p",
+         "m",
+         "s"
+        ]
+       }
+      ]
+     },
+     "over": [
+      {
+       "set": "product",
+       "index": "p"
+      }
+     ]
+    },
+    "note": "Machine hours used per machine and shift must not exceed capacity",
+    "right": {
+     "attr": {
+      "of": "m",
+      "name": "hours_per_shift"
+     }
+    },
+    "forall": [
+     {
+      "set": "machine",
+      "index": "m"
+     },
+     {
+      "set": "shift",
+      "index": "s"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_labour_capacity",
+    "left": {
+     "sum": {
+      "mul": [
+       {
+        "attr": {
+         "of": "p",
+         "name": "labour_hours_per_unit"
+        }
+       },
+       {
+        "var": "produce",
+        "index": [
+         "p",
+         "m",
+         "s"
+        ]
+       }
+      ]
+     },
+     "over": [
+      {
+       "set": "product",
+       "index": "p"
+      },
+      {
+       "set": "machine",
+       "index": "m"
+      }
+     ]
+    },
+    "note": "Labour hours used per shift must not exceed available hours",
+    "right": {
+     "attr": {
+      "of": "s",
+      "name": "labour_hours"
+     }
+    },
+    "forall": [
+     {
+      "set": "shift",
+      "index": "s"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_material_stock",
+    "left": {
+     "sum": {
+      "mul": [
+       {
+        "par": "material_product_use",
+        "index": [
+         "p",
+         "mat"
+        ]
+       },
+       {
+        "var": "produce",
+        "index": [
+         "p",
+         "m",
+         "s"
+        ]
+       }
+      ]
+     },
+     "over": [
+      {
+       "set": "product",
+       "index": "p"
+      },
+      {
+       "set": "machine",
+       "index": "m"
+      },
+      {
+       "set": "shift",
+       "index": "s"
+      }
+     ]
+    },
+    "note": "Total material used per material must not exceed stock",
+    "right": {
+     "attr": {
+      "of": "mat",
+      "name": "stock"
+     }
+    },
+    "forall": [
+     {
+      "set": "material",
+      "index": "mat"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_demand_min",
+    "left": {
+     "sum": {
+      "var": "produce",
+      "index": [
+       "p",
+       "m",
+       "s"
+      ]
+     },
+     "over": [
+      {
+       "set": "machine",
+       "index": "m"
+      },
+      {
+       "set": "shift",
+       "index": "s"
+      }
+     ]
+    },
+    "note": "Total production per product must meet minimum demand",
+    "right": {
+     "attr": {
+      "of": "p",
+      "name": "min_demand"
+     }
+    },
+    "forall": [
+     {
+      "set": "product",
+      "index": "p"
+     }
+    ],
+    "relation": ">=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_demand_max",
+    "left": {
+     "sum": {
+      "var": "produce",
+      "index": [
+       "p",
+       "m",
+       "s"
+      ]
+     },
+     "over": [
+      {
+       "set": "machine",
+       "index": "m"
+      },
+      {
+       "set": "shift",
+       "index": "s"
+      }
+     ]
+    },
+    "note": "Total production per product must not exceed maximum demand",
+    "right": {
+     "attr": {
+      "of": "p",
+      "name": "max_demand"
+     }
+    },
+    "forall": [
+     {
+      "set": "product",
+      "index": "p"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_setup_link",
+    "left": {
+     "var": "produce",
+     "index": [
+      "p",
+      "m",
+      "s"
+     ]
+    },
+    "note": "Setup must be 1 if any units are produced",
+    "right": {
+     "mul": [
+      {
+       "const": 999999
+      },
+      {
+       "var": "setup",
+       "index": [
+        "p",
+        "m",
+        "s"
+       ]
+      }
+     ]
+    },
+    "forall": [
+     {
+      "set": "product",
+      "index": "p"
+     },
+     {
+      "set": "machine",
+      "index": "m"
+     },
+     {
+      "set": "shift",
+      "index": "s"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_incompatibility",
+    "left": {
+     "add": [
+      {
+       "var": "setup",
+       "index": [
+        "k_p02",
+        "m",
+        "s"
+       ]
+      },
+      {
+       "var": "setup",
+       "index": [
+        "k_p04",
+        "m",
+        "s"
+       ]
+      }
+     ]
+    },
+    "note": "P02 and P04 cannot run on the same machine in the same shift",
+    "right": {
+     "const": 1
+    },
+    "forall": [
+     {
+      "set": "machine",
+      "index": "m"
+     },
+     {
+      "set": "shift",
+      "index": "s"
+     },
+     {
+      "set": "product",
+      "index": "k_p02",
+      "where": [
+       {
+        "op": "=",
+        "attr": "id",
+        "value": "P02"
+       }
+      ]
+     },
+     {
+      "set": "product",
+      "index": "k_p04",
+      "where": [
+       {
+        "op": "=",
+        "attr": "id",
+        "value": "P04"
+       }
+      ]
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   }
+  ],
+  "relationships": [
+   "machine_product",
+   "material_product"
+  ]
+ },
+ "data": {
+  "sets": {
+   "shift": [
+    {
+     "id": "EVENING",
+     "labour_hours": 25
+    },
+    {
+     "id": "MORNING",
+     "labour_hours": 22
+    }
+   ],
+   "machine": [
+    {
+     "id": "M01",
+     "hours_per_shift": 8
+    },
+    {
+     "id": "M02",
+     "hours_per_shift": 8
+    }
+   ],
+   "product": [
+    {
+     "id": "P01",
+     "price": 105,
+     "unit_cost": 68,
+     "max_demand": 109,
+     "min_demand": 10,
+     "setup_cost": 395,
+     "labour_hours_per_unit": 0.59
+    },
+    {
+     "id": "P02",
+     "price": 45,
+     "unit_cost": 22,
+     "max_demand": 173,
+     "min_demand": 19,
+     "setup_cost": 598,
+     "labour_hours_per_unit": 0.44
+    },
+    {
+     "id": "P03",
+     "price": 102,
+     "unit_cost": 66,
+     "max_demand": 210,
+     "min_demand": 22,
+     "setup_cost": 471,
+     "labour_hours_per_unit": 0.52
+    },
+    {
+     "id": "P04",
+     "price": 46,
+     "unit_cost": 26,
+     "max_demand": 92,
+     "min_demand": 7,
+     "setup_cost": 553,
+     "labour_hours_per_unit": 0.35
+    }
+   ],
+   "material": [
+    {
+     "id": "MAT1",
+     "stock": 100
+    },
+    {
+     "id": "MAT2",
+     "stock": 312
+    }
+   ]
+  },
+  "parameters": {
+   "material_product_use": [
+    {
+     "value": 0.17,
+     "product": "P01",
+     "material": "MAT1"
+    },
+    {
+     "value": 0.67,
+     "product": "P02",
+     "material": "MAT2"
+    },
+    {
+     "value": 1.01,
+     "product": "P01",
+     "material": "MAT2"
+    },
+    {
+     "value": 1.65,
+     "product": "P03",
+     "material": "MAT2"
+    },
+    {
+     "value": 1.86,
+     "product": "P04",
+     "material": "MAT1"
+    }
+   ],
+   "machine_product_hours": [
+    {
+     "value": 0.061,
+     "machine": "M02",
+     "product": "P03"
+    },
+    {
+     "value": 0.072,
+     "machine": "M02",
+     "product": "P02"
+    },
+    {
+     "value": 0.136,
+     "machine": "M02",
+     "product": "P01"
+    },
+    {
+     "value": 0.148,
+     "machine": "M02",
+     "product": "P04"
+    }
+   ]
+  },
+  "relationships": {
+   "machine_product": [
+    {
+     "to": "M02",
+     "from": "P01"
+    },
+    {
+     "to": "M02",
+     "from": "P02"
+    },
+    {
+     "to": "M02",
+     "from": "P03"
+    },
+    {
+     "to": "M02",
+     "from": "P04"
+    }
+   ],
+   "material_product": [
+    {
+     "to": "MAT1",
+     "from": "P01"
+    },
+    {
+     "to": "MAT1",
+     "from": "P04"
+    },
+    {
+     "to": "MAT2",
+     "from": "P01"
+    },
+    {
+     "to": "MAT2",
+     "from": "P02"
+    },
+    {
+     "to": "MAT2",
+     "from": "P03"
+    }
+   ]
+  },
+  "parameter_defaults": {
+   "material_product_use": 0,
+   "machine_product_hours": 999999
+  },
+  "labels": {
+   "shift": {
+    "EVENING": "Evening Shift",
+    "MORNING": "Morning Shift"
+   },
+   "machine": {
+    "M01": "Machine M01",
+    "M02": "Machine M02"
+   },
+   "product": {
+    "P01": "Product P01",
+    "P02": "Product P02",
+    "P03": "Product P03",
+    "P04": "Product P04"
+   },
+   "material": {
+    "MAT1": "Material MAT1",
+    "MAT2": "Material MAT2"
+   }
+  }
+ }
+}

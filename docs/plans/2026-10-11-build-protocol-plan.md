@@ -157,3 +157,11 @@ The neutrality plan's step 5 and step 3b measurements run on within Phase 0; the
 2. Phase 0.2: `gold.py capture` on the right runs of today (p01, p02, p09, p10 and the others as they come);
    `gold.py check` in the test image.
 3. Phase 0.3: the first five mutations and their table.
+
+## Progress
+
+- **11 Oct, 19:45 — Phase 0.2 started.** `bench/phase1/gold.py`: `capture` (a run's model version by API, its
+  frozen data from the dataset table; prints only the case id) and `check` (compile, solve, compare, in the test
+  image, no model, no database). Six tuning golds captured from right runs (p01, p02, p09 under step 5; p04,
+  p07, p10 under step 2): **6 pass of 6**, each at its reference, in about a minute. Remaining: p03 (layout:
+  no right run yet), p05, p06, p08; the hidden golds, captured blind as right runs come.

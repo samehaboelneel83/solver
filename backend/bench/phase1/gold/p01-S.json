@@ -1,0 +1,479 @@
+{
+ "case": "p01",
+ "size": "S",
+ "run": 385,
+ "objective": 83,
+ "ir": {
+  "sets": [
+   "hospital",
+   "department"
+  ],
+  "version": 2,
+  "objective": {
+   "sense": "maximize",
+   "terms": [
+    {
+     "id": "o_total_patients",
+     "weight": 1,
+     "expression": {
+      "sum": {
+       "var": "patients",
+       "index": [
+        "d"
+       ]
+      },
+      "over": [
+       {
+        "set": "department",
+        "index": "d"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  "variables": {
+   "patients": {
+    "index": [
+     "department"
+    ],
+    "lower": 0,
+    "domain": "integer"
+   },
+   "beds_alloc": {
+    "index": [
+     "department"
+    ],
+    "lower": 0,
+    "domain": "integer"
+   },
+   "nurses_alloc": {
+    "index": [
+     "department"
+    ],
+    "lower": 0,
+    "domain": "integer"
+   },
+   "doctors_alloc": {
+    "index": [
+     "department"
+    ],
+    "lower": 0,
+    "domain": "integer"
+   }
+  },
+  "parameters": {
+   "total_budget": {
+    "index": []
+   }
+  },
+  "constraints": [
+   {
+    "id": "c_patients_limit_nurse",
+    "left": {
+     "var": "patients",
+     "index": [
+      "d"
+     ]
+    },
+    "note": "Patients limited by nurses",
+    "right": {
+     "mul": [
+      {
+       "var": "nurses_alloc",
+       "index": [
+        "d"
+       ]
+      },
+      {
+       "attr": {
+        "of": "d",
+        "name": "patients_per_nurse"
+       }
+      }
+     ]
+    },
+    "forall": [
+     {
+      "set": "department",
+      "index": "d"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_patients_limit_doctor",
+    "left": {
+     "var": "patients",
+     "index": [
+      "d"
+     ]
+    },
+    "note": "Patients limited by doctors",
+    "right": {
+     "mul": [
+      {
+       "var": "doctors_alloc",
+       "index": [
+        "d"
+       ]
+      },
+      {
+       "attr": {
+        "of": "d",
+        "name": "patients_per_doctor"
+       }
+      }
+     ]
+    },
+    "forall": [
+     {
+      "set": "department",
+      "index": "d"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_patients_limit_demand",
+    "left": {
+     "var": "patients",
+     "index": [
+      "d"
+     ]
+    },
+    "note": "Patients limited by demand",
+    "right": {
+     "attr": {
+      "of": "d",
+      "name": "demand"
+     }
+    },
+    "forall": [
+     {
+      "set": "department",
+      "index": "d"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_beds_requirement",
+    "left": {
+     "var": "beds_alloc",
+     "index": [
+      "d"
+     ]
+    },
+    "note": "Beds required for patients",
+    "right": {
+     "mul": [
+      {
+       "var": "patients",
+       "index": [
+        "d"
+       ]
+      },
+      {
+       "attr": {
+        "of": "d",
+        "name": "beds_per_patient"
+       }
+      }
+     ]
+    },
+    "forall": [
+     {
+      "set": "department",
+      "index": "d"
+     }
+    ],
+    "relation": ">=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_min_nurses",
+    "left": {
+     "var": "nurses_alloc",
+     "index": [
+      "d"
+     ]
+    },
+    "note": "Minimum nurses per department",
+    "right": {
+     "attr": {
+      "of": "d",
+      "name": "min_nurses"
+     }
+    },
+    "forall": [
+     {
+      "set": "department",
+      "index": "d"
+     }
+    ],
+    "relation": ">=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_min_doctors",
+    "left": {
+     "var": "doctors_alloc",
+     "index": [
+      "d"
+     ]
+    },
+    "note": "Minimum doctors per department",
+    "right": {
+     "attr": {
+      "of": "d",
+      "name": "min_doctors"
+     }
+    },
+    "forall": [
+     {
+      "set": "department",
+      "index": "d"
+     }
+    ],
+    "relation": ">=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_total_nurses",
+    "left": {
+     "add": [
+      {
+       "sum": {
+        "var": "nurses_alloc",
+        "index": [
+         "d"
+        ]
+       },
+       "over": [
+        {
+         "set": "department",
+         "index": "d"
+        }
+       ]
+      },
+      {
+       "attr": {
+        "of": "h",
+        "name": "reserve_nurses"
+       }
+      }
+     ]
+    },
+    "note": "Total nurses within limit (including reserve)",
+    "right": {
+     "attr": {
+      "of": "h",
+      "name": "nurses"
+     }
+    },
+    "forall": [
+     {
+      "set": "hospital",
+      "index": "h"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_total_doctors",
+    "left": {
+     "sum": {
+      "var": "doctors_alloc",
+      "index": [
+       "d"
+      ]
+     },
+     "over": [
+      {
+       "set": "department",
+       "index": "d"
+      }
+     ]
+    },
+    "note": "Total doctors within limit",
+    "right": {
+     "attr": {
+      "of": "h",
+      "name": "doctors"
+     }
+    },
+    "forall": [
+     {
+      "set": "hospital",
+      "index": "h"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_total_beds",
+    "left": {
+     "add": [
+      {
+       "sum": {
+        "var": "beds_alloc",
+        "index": [
+         "d"
+        ]
+       },
+       "over": [
+        {
+         "set": "department",
+         "index": "d"
+        }
+       ]
+      },
+      {
+       "attr": {
+        "of": "h",
+        "name": "reserve_beds"
+       }
+      }
+     ]
+    },
+    "note": "Total beds within limit (including reserve)",
+    "right": {
+     "attr": {
+      "of": "h",
+      "name": "beds"
+     }
+    },
+    "forall": [
+     {
+      "set": "hospital",
+      "index": "h"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_total_cost",
+    "left": {
+     "sum": {
+      "mul": [
+       {
+        "var": "patients",
+        "index": [
+         "d"
+        ]
+       },
+       {
+        "attr": {
+         "of": "d",
+         "name": "supply_cost"
+        }
+       }
+      ]
+     },
+     "over": [
+      {
+       "set": "department",
+       "index": "d"
+      }
+     ]
+    },
+    "note": "Total supply cost within budget",
+    "right": {
+     "par": "total_budget",
+     "index": []
+    },
+    "relation": "<=",
+    "severity": "hard"
+   }
+  ]
+ },
+ "data": {
+  "sets": {
+   "hospital": [
+    {
+     "id": "MH",
+     "beds": 80,
+     "nurses": 120,
+     "doctors": 40,
+     "reserve_beds": 8,
+     "reserve_nurses": 8
+    }
+   ],
+   "department": [
+    {
+     "id": "MH-EMERGENCY",
+     "kind": "EMERGENCY",
+     "demand": 29,
+     "hospital": "MH",
+     "min_nurses": 5,
+     "min_doctors": 2,
+     "supply_cost": 857,
+     "beds_per_patient": 0.6,
+     "patients_per_nurse": 3,
+     "patients_per_doctor": 6
+    },
+    {
+     "id": "MH-GENERAL",
+     "kind": "GENERAL",
+     "demand": 27,
+     "hospital": "MH",
+     "min_nurses": 5,
+     "min_doctors": 2,
+     "supply_cost": 477,
+     "beds_per_patient": 1,
+     "patients_per_nurse": 5,
+     "patients_per_doctor": 10
+    },
+    {
+     "id": "MH-ICU",
+     "kind": "ICU",
+     "demand": 61,
+     "hospital": "MH",
+     "min_nurses": 6,
+     "min_doctors": 2,
+     "supply_cost": 2387,
+     "beds_per_patient": 1,
+     "patients_per_nurse": 1,
+     "patients_per_doctor": 3
+    },
+    {
+     "id": "MH-SURGERY",
+     "kind": "SURGERY",
+     "demand": 69,
+     "hospital": "MH",
+     "min_nurses": 5,
+     "min_doctors": 3,
+     "supply_cost": 1882,
+     "beds_per_patient": 1,
+     "patients_per_nurse": 2,
+     "patients_per_doctor": 5
+    }
+   ]
+  },
+  "parameters": {
+   "total_budget": []
+  },
+  "relationships": {},
+  "parameter_defaults": {
+   "total_budget": 172258
+  },
+  "labels": {
+   "hospital": {
+    "MH": "MH"
+   },
+   "department": {
+    "MH-ICU": "MH-ICU",
+    "MH-GENERAL": "MH-GENERAL",
+    "MH-SURGERY": "MH-SURGERY",
+    "MH-EMERGENCY": "MH-EMERGENCY"
+   }
+  }
+ }
+}

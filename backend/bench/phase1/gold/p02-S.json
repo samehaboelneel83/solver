@@ -1,0 +1,670 @@
+{
+ "case": "p02",
+ "size": "S",
+ "run": 379,
+ "objective": 16249,
+ "ir": {
+  "sets": [
+   "warehouse",
+   "customer"
+  ],
+  "version": 2,
+  "objective": {
+   "sense": "minimize",
+   "terms": [
+    {
+     "id": "o_cost",
+     "weight": 1,
+     "expression": {
+      "sum": {
+       "mul": [
+        {
+         "par": "cost",
+         "index": [
+          "w",
+          "c"
+         ]
+        },
+        {
+         "var": "ship",
+         "index": [
+          "w",
+          "c"
+         ]
+        }
+       ]
+      },
+      "over": [
+       {
+        "set": "warehouse",
+        "index": "w"
+       },
+       {
+        "set": "customer",
+        "index": "c"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  "variables": {
+   "ship": {
+    "index": [
+     "warehouse",
+     "customer"
+    ],
+    "lower": 0,
+    "domain": "integer"
+   }
+  },
+  "parameters": {
+   "cost": {
+    "index": [
+     "warehouse",
+     "customer"
+    ]
+   },
+   "stock": {
+    "index": [
+     "warehouse"
+    ]
+   },
+   "demand": {
+    "index": [
+     "customer"
+    ]
+   },
+   "is_open": {
+    "index": [
+     "warehouse",
+     "customer"
+    ]
+   },
+   "capacity": {
+    "index": [
+     "warehouse"
+    ]
+   },
+   "is_approved": {
+    "index": [
+     "customer",
+     "warehouse"
+    ]
+   },
+   "not_restricted": {
+    "index": [
+     "customer"
+    ]
+   }
+  },
+  "constraints": [
+   {
+    "id": "c_demand",
+    "left": {
+     "sum": {
+      "var": "ship",
+      "index": [
+       "w",
+       "c"
+      ]
+     },
+     "over": [
+      {
+       "set": "warehouse",
+       "index": "w"
+      }
+     ]
+    },
+    "note": "Every customer receives exactly its demand",
+    "right": {
+     "par": "demand",
+     "index": [
+      "c"
+     ]
+    },
+    "forall": [
+     {
+      "set": "customer",
+      "index": "c"
+     }
+    ],
+    "relation": "=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_stock",
+    "left": {
+     "sum": {
+      "var": "ship",
+      "index": [
+       "w",
+       "c"
+      ]
+     },
+     "over": [
+      {
+       "set": "customer",
+       "index": "c"
+      }
+     ]
+    },
+    "note": "Each warehouse ships no more than its stock",
+    "right": {
+     "par": "stock",
+     "index": [
+      "w"
+     ]
+    },
+    "forall": [
+     {
+      "set": "warehouse",
+      "index": "w"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_capacity",
+    "left": {
+     "sum": {
+      "var": "ship",
+      "index": [
+       "w",
+       "c"
+      ]
+     },
+     "over": [
+      {
+       "set": "customer",
+       "index": "c"
+      }
+     ]
+    },
+    "note": "Each warehouse ships no more than its shipping capacity",
+    "right": {
+     "par": "capacity",
+     "index": [
+      "w"
+     ]
+    },
+    "forall": [
+     {
+      "set": "warehouse",
+      "index": "w"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_open",
+    "left": {
+     "var": "ship",
+     "index": [
+      "w",
+      "c"
+     ]
+    },
+    "note": "Shipments only on open routes",
+    "right": {
+     "mul": [
+      {
+       "const": 1000
+      },
+      {
+       "par": "is_open",
+       "index": [
+        "w",
+        "c"
+       ]
+      }
+     ]
+    },
+    "forall": [
+     {
+      "set": "warehouse",
+      "index": "w"
+     },
+     {
+      "set": "customer",
+      "index": "c"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   },
+   {
+    "id": "c_approved",
+    "left": {
+     "var": "ship",
+     "index": [
+      "w",
+      "c"
+     ]
+    },
+    "note": "C004 may only be served from W03; others unrestricted",
+    "right": {
+     "mul": [
+      {
+       "const": 1000
+      },
+      {
+       "add": [
+        {
+         "par": "is_approved",
+         "index": [
+          "c",
+          "w"
+         ]
+        },
+        {
+         "par": "not_restricted",
+         "index": [
+          "c"
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "forall": [
+     {
+      "set": "warehouse",
+      "index": "w"
+     },
+     {
+      "set": "customer",
+      "index": "c"
+     }
+    ],
+    "relation": "<=",
+    "severity": "hard"
+   }
+  ]
+ },
+ "data": {
+  "sets": {
+   "customer": [
+    {
+     "id": "C001",
+     "demand_units": 118
+    },
+    {
+     "id": "C002",
+     "demand_units": 32
+    },
+    {
+     "id": "C003",
+     "demand_units": 75
+    },
+    {
+     "id": "C004",
+     "demand_units": 45
+    },
+    {
+     "id": "C005",
+     "demand_units": 22
+    },
+    {
+     "id": "C006",
+     "demand_units": 68
+    },
+    {
+     "id": "C007",
+     "demand_units": 69
+    },
+    {
+     "id": "C008",
+     "demand_units": 30
+    }
+   ],
+   "warehouse": [
+    {
+     "id": "W01",
+     "stock_units": 204,
+     "shipping_capacity_units": 233
+    },
+    {
+     "id": "W02",
+     "stock_units": 173,
+     "shipping_capacity_units": 242
+    },
+    {
+     "id": "W03",
+     "stock_units": 168,
+     "shipping_capacity_units": 244
+    }
+   ]
+  },
+  "parameters": {
+   "cost": [
+    {
+     "value": 109,
+     "customer": "C001",
+     "warehouse": "W01"
+    },
+    {
+     "value": 16,
+     "customer": "C006",
+     "warehouse": "W02"
+    },
+    {
+     "value": 24,
+     "customer": "C002",
+     "warehouse": "W03"
+    },
+    {
+     "value": 26,
+     "customer": "C004",
+     "warehouse": "W02"
+    },
+    {
+     "value": 32,
+     "customer": "C001",
+     "warehouse": "W03"
+    },
+    {
+     "value": 32,
+     "customer": "C004",
+     "warehouse": "W03"
+    },
+    {
+     "value": 35,
+     "customer": "C003",
+     "warehouse": "W02"
+    },
+    {
+     "value": 35,
+     "customer": "C007",
+     "warehouse": "W01"
+    },
+    {
+     "value": 36,
+     "customer": "C003",
+     "warehouse": "W03"
+    },
+    {
+     "value": 45,
+     "customer": "C002",
+     "warehouse": "W02"
+    },
+    {
+     "value": 46,
+     "customer": "C005",
+     "warehouse": "W02"
+    },
+    {
+     "value": 49,
+     "customer": "C005",
+     "warehouse": "W03"
+    },
+    {
+     "value": 56,
+     "customer": "C005",
+     "warehouse": "W01"
+    },
+    {
+     "value": 58,
+     "customer": "C006",
+     "warehouse": "W03"
+    },
+    {
+     "value": 61,
+     "customer": "C007",
+     "warehouse": "W03"
+    },
+    {
+     "value": 67,
+     "customer": "C008",
+     "warehouse": "W02"
+    },
+    {
+     "value": 68,
+     "customer": "C007",
+     "warehouse": "W02"
+    },
+    {
+     "value": 75,
+     "customer": "C004",
+     "warehouse": "W01"
+    },
+    {
+     "value": 79,
+     "customer": "C002",
+     "warehouse": "W01"
+    },
+    {
+     "value": 86,
+     "customer": "C008",
+     "warehouse": "W01"
+    },
+    {
+     "value": 8,
+     "customer": "C008",
+     "warehouse": "W03"
+    },
+    {
+     "value": 91,
+     "customer": "C003",
+     "warehouse": "W01"
+    }
+   ],
+   "stock": [
+    {
+     "value": 168,
+     "warehouse": "W03"
+    },
+    {
+     "value": 173,
+     "warehouse": "W02"
+    },
+    {
+     "value": 204,
+     "warehouse": "W01"
+    }
+   ],
+   "demand": [
+    {
+     "value": 118,
+     "customer": "C001"
+    },
+    {
+     "value": 22,
+     "customer": "C005"
+    },
+    {
+     "value": 30,
+     "customer": "C008"
+    },
+    {
+     "value": 32,
+     "customer": "C002"
+    },
+    {
+     "value": 45,
+     "customer": "C004"
+    },
+    {
+     "value": 68,
+     "customer": "C006"
+    },
+    {
+     "value": 69,
+     "customer": "C007"
+    },
+    {
+     "value": 75,
+     "customer": "C003"
+    }
+   ],
+   "is_open": [
+    {
+     "value": 1,
+     "customer": "C001",
+     "warehouse": "W01"
+    },
+    {
+     "value": 1,
+     "customer": "C001",
+     "warehouse": "W03"
+    },
+    {
+     "value": 1,
+     "customer": "C002",
+     "warehouse": "W01"
+    },
+    {
+     "value": 1,
+     "customer": "C002",
+     "warehouse": "W02"
+    },
+    {
+     "value": 1,
+     "customer": "C002",
+     "warehouse": "W03"
+    },
+    {
+     "value": 1,
+     "customer": "C003",
+     "warehouse": "W01"
+    },
+    {
+     "value": 1,
+     "customer": "C003",
+     "warehouse": "W02"
+    },
+    {
+     "value": 1,
+     "customer": "C003",
+     "warehouse": "W03"
+    },
+    {
+     "value": 1,
+     "customer": "C004",
+     "warehouse": "W01"
+    },
+    {
+     "value": 1,
+     "customer": "C004",
+     "warehouse": "W02"
+    },
+    {
+     "value": 1,
+     "customer": "C004",
+     "warehouse": "W03"
+    },
+    {
+     "value": 1,
+     "customer": "C005",
+     "warehouse": "W01"
+    },
+    {
+     "value": 1,
+     "customer": "C005",
+     "warehouse": "W02"
+    },
+    {
+     "value": 1,
+     "customer": "C005",
+     "warehouse": "W03"
+    },
+    {
+     "value": 1,
+     "customer": "C006",
+     "warehouse": "W02"
+    },
+    {
+     "value": 1,
+     "customer": "C006",
+     "warehouse": "W03"
+    },
+    {
+     "value": 1,
+     "customer": "C007",
+     "warehouse": "W01"
+    },
+    {
+     "value": 1,
+     "customer": "C007",
+     "warehouse": "W02"
+    },
+    {
+     "value": 1,
+     "customer": "C007",
+     "warehouse": "W03"
+    },
+    {
+     "value": 1,
+     "customer": "C008",
+     "warehouse": "W01"
+    },
+    {
+     "value": 1,
+     "customer": "C008",
+     "warehouse": "W02"
+    },
+    {
+     "value": 1,
+     "customer": "C008",
+     "warehouse": "W03"
+    }
+   ],
+   "capacity": [
+    {
+     "value": 233,
+     "warehouse": "W01"
+    },
+    {
+     "value": 242,
+     "warehouse": "W02"
+    },
+    {
+     "value": 244,
+     "warehouse": "W03"
+    }
+   ],
+   "is_approved": [
+    {
+     "value": 1,
+     "customer": "C004",
+     "warehouse": "W03"
+    }
+   ],
+   "not_restricted": [
+    {
+     "value": 0,
+     "customer": "C004"
+    }
+   ]
+  },
+  "relationships": {},
+  "parameter_defaults": {
+   "cost": 0,
+   "stock": 0,
+   "demand": 0,
+   "is_open": 0,
+   "capacity": 0,
+   "is_approved": 0,
+   "not_restricted": 1
+  },
+  "labels": {
+   "customer": {
+    "C001": "C001",
+    "C002": "C002",
+    "C003": "C003",
+    "C004": "C004",
+    "C005": "C005",
+    "C006": "C006",
+    "C007": "C007",
+    "C008": "C008"
+   },
+   "warehouse": {
+    "W01": "W01",
+    "W02": "W02",
+    "W03": "W03"
+   }
+  }
+ }
+}
