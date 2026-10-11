@@ -341,3 +341,22 @@ def test_an_aisles_middle_is_shared_by_two_and_its_ends_by_more():
     assert pl.aisle_share(10, 7) == pytest.approx(21.0)
     # 30 along, 7 deep: 16 middle cells by two, 7 at each end by three.
     assert pl.aisle_share(30, 7) == pytest.approx(7 * (16 / 2 + 14 / 3))
+
+
+def test_a_way_to_the_door_must_be_the_aisle_width_all_along():
+    """The phase 1 evaluation, 11 October 2026: beds reached the door only through gaps narrower than the 1.2 m
+    aisle asked for. A 60 x 30 cell room, the door on the left wall, an aisle of 12 cells; a wall of items leaves
+    a gap: 6 cells wide, the item behind it is cut off; 12 cells wide, it is reached."""
+    zone = np.zeros((60, 30), dtype=np.int32)
+    entrance = np.zeros((60, 30), dtype=bool)
+    entrance[0, 9:21] = True  # a 1.2 m door on the left wall
+    one = [pl.Variant(0, 0, 2, 2, None, 1.0)]
+
+    def with_gap(gap: int) -> list[int]:
+        lay = pl.Layout(zone, one, 12, entrance=entrance)
+        for j in range(0, 30 - gap, 2):  # a wall across the room at column 30, leaving `gap` cells at the top
+            lay.place(0, 30, j)
+        behind = lay.place(0, 50, 10)
+        return [behind] if behind in pl.unreachable_items(lay) else []
+
+    assert with_gap(6) and not with_gap(12)

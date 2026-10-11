@@ -203,20 +203,38 @@ def _zone_box(lay: Layout, z: int) -> tuple[int, int, int, int]:
 
 def reachable(lay: Layout, zones: set[int] | None = None) -> np.ndarray:
     """The cells a way reaches from an entrance: free cells no item covers (aisles are way), joined side to side
-    within one area, from the entrance cells. Everything is reachable when there is no access rule."""
+    within one area, from the entrance cells -- and, with an aisle width, a way is only as wide as the aisle ALL
+    the way: cells covered by a full aisle-width window whose centres join, window to window, one within half a
+    width of an entrance (the phase 1 evaluation, 11 October 2026: 34 of 50 beds reached the door only through
+    gaps narrower than the 1.2 m asked for). Everything is reachable when there is no access rule."""
     from scipy import ndimage
 
     if lay.entrance is None:
         return lay.free.copy()
     way = lay.free & (lay.owner < 0)
     out = np.zeros(way.shape, dtype=bool)
+    n = max(int(lay.n_aisle), 1)
     for z in np.unique(lay.zone_of[lay.entrance]):
         if z < 0 or (zones is not None and int(z) not in zones):
             continue
         i0, i1, j0, j1 = _zone_box(lay, int(z))
         sub = way[i0:i1, j0:j1] & (lay.zone_of[i0:i1, j0:j1] == z)
+        door = lay.entrance[i0:i1, j0:j1]
+        if n > 1:
+            # Window centres: cells with a full n x n free square around them (a separable minimum filter is
+            # the erosion by that square; outside the area counts as not free).
+            core = ndimage.minimum_filter(sub.astype(np.uint8), size=n, mode="constant", cval=0).astype(bool)
+            near_door = ndimage.maximum_filter(door.astype(np.uint8), size=n, mode="constant", cval=0).astype(bool)
+            labels, _ = ndimage.label(core)
+            doors = np.unique(labels[near_door & core])
+            doors = doors[doors > 0]
+            if len(doors):
+                kept = np.isin(labels, doors)
+                wide = ndimage.maximum_filter(kept.astype(np.uint8), size=n, mode="constant", cval=0).astype(bool)
+                out[i0:i1, j0:j1] |= wide & sub
+            continue
         labels, _ = ndimage.label(sub)
-        doors = np.unique(labels[lay.entrance[i0:i1, j0:j1] & sub])
+        doors = np.unique(labels[door & sub])
         doors = doors[doors > 0]
         if len(doors):
             out[i0:i1, j0:j1] |= np.isin(labels, doors)
@@ -236,13 +254,17 @@ def unreachable_items(lay: Layout, reach: np.ndarray | None = None, zones: set[i
             continue
         var = lay.vs[v]
         strip = var.aisle(lay.n_aisle)
-        if strip is not None:
+        # The way must come up to the item itself (a cell beside it), as the person checks it: with an aisle
+        # width, `reach` is the full-width way, so a strip merely touched by it somewhere could still leave the
+        # item half a width short of a corridor.
+        beside = any(reach[max(0, a0):a1, max(0, b0):b1].any() for a0, a1, b0, b1 in
+                     ((i - 1, i, j, j + var.h), (i + var.w, i + var.w + 1, j, j + var.h),
+                      (i, i + var.w, j - 1, j), (i, i + var.w, j + var.h, j + var.h + 1)))
+        if strip is not None and lay.n_aisle <= 1:
             si, sj = i + strip[0], j + strip[1]
             ok = reach[max(0, si):si + strip[2], max(0, sj):sj + strip[3]].any()
         else:
-            ok = any(reach[max(0, a0):a1, max(0, b0):b1].any() for a0, a1, b0, b1 in
-                     ((i - 1, i, j, j + var.h), (i + var.w, i + var.w + 1, j, j + var.h),
-                      (i, i + var.w, j - 1, j), (i, i + var.w, j + var.h, j + var.h + 1)))
+            ok = beside
         if not ok:
             out.append(ident)
     return out
