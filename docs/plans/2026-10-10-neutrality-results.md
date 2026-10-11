@@ -294,7 +294,9 @@ Built from `main` without step 3b's paragraph. On top of step 4 it holds:
   an index, or with none, reads as one number;
 - tables pasted into a message are attached as files, and the Assistant is told to load them;
 - plan E.1: with an aisle width, a way to an entrance must be that wide all along (the placement solver's
-  reachability is now the eroded free area's door components, dilated back -- the layout checker's own test).
+  reachability is now the eroded free area's door components, dilated back -- the layout checker's own test);
+- plan E.2: the answer map draws the items a place rule laid out, as rectangles with their turn and aisle side
+  (one layer per place rule).
 
 More than one change in one measurement (rule 4 relaxed): each measurement now costs three tuning runs, and
 every item above was found on the tuning set and tested there. The hidden run that follows judges them together.

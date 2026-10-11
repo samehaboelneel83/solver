@@ -191,3 +191,24 @@ def test_a_scenario_run_draws_who_is_served_from_the_scenario_s_own_reach():
     title = lambda m: next(layer["title"] for layer in m["layers"] if layer["id"] == "reach_served")  # noqa: E731
     assert title(base).endswith("3 of 3") and title(found).endswith("2 of 3")
     assert data["parameters"]["reach"][2]["value"] == 1  # the frozen data is left as it was
+
+
+def test_items_a_place_rule_laid_out_are_drawn_as_rectangles():
+    """The phase 1 evaluation, 11 October 2026: the layout's map showed the site and not one bed."""
+    from app.api.answer_map import answer_map
+
+    ir = {"variables": {"placed": {"index": ["slot"], "domain": "binary"},
+                        "x": {"index": ["slot"], "domain": "integer"}, "y": {"index": ["slot"], "domain": "integer"},
+                        "turned": {"index": ["slot"], "domain": "binary"}},
+          "constraints": [{"id": "c_layout", "place": {
+              "step": 0.1, "origin": [10.0, 20.0], "slots": {"set": "slot"}, "length": "length", "width": "width",
+              "chosen": {"var": "placed"}, "x": {"var": "x"}, "y": {"var": "y"}, "turn": {"var": "turned"}}}]}
+    data = {"sets": {"area": [{"id": "A1", "geometry": {"type": "Polygon", "coordinates": [[[10, 20], [30, 20], [30, 40], [10, 40], [10, 20]]]}}],
+                     "slot": [{"id": "b1", "length": 20, "width": 9}, {"id": "b2", "length": 20, "width": 9}]}}
+    found = answer_map(ir, data, {"placed": [["b1"]], "turned": [["b1"]]},
+                       {"x": [{"index": ["b1"], "value": 5}], "y": [{"index": ["b1"], "value": 30}]}, [])
+    beds = [f for f in found["features"] if f["properties"]["set"] == "placed"]
+    assert [b["properties"]["key"] for b in beds] == ["b1"]
+    assert beds[0]["geometry"]["coordinates"][0][0] == [10.5, 23.0] and beds[0]["geometry"]["coordinates"][0][2] == [11.4, 25.0]
+    assert beds[0]["properties"]["turned"] is True and "0.9 x 2 m at (10.5, 23)" in beds[0]["properties"]["title"]
+    assert {"id": "c_layout", "kind": "placed", "set": "placed", "title": "c_layout: 1 items placed"} in found["layers"]

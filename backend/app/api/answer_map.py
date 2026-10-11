@@ -92,7 +92,13 @@ def answer_map(ir: dict[str, Any], data: dict[str, Any], assignments: dict[str, 
                                 "data": _numbers(row)}
         if members:
             placed[set_name] = members
-    if not placed:
+    # Items a place rule laid out (beds, desks, containers): rectangles in the area's own metres, from the
+    # answer's position and turn per slot (the phase 1 evaluation, 11 October 2026: the layout's map showed the
+    # site and its zones, and not one bed -- the checker had to rebuild them from the decisions).
+    from app.solve.place_rule import placed_items, value_reader
+
+    items = placed_items(ir, data, value_reader(assignments, amounts))
+    if not placed and not items:
         return {"none": "no set of this model has records with a shape", "layers": [], "features": []}
     variables = ir.get("variables") or {}
     chosen = {name: {tuple(str(k) for k in row) for row in rows} for name, rows in (assignments or {}).items()}
@@ -279,6 +285,18 @@ def answer_map(ir: dict[str, Any], data: dict[str, Any], assignments: dict[str, 
                  "properties": {"layer": s, "set": s, "key": key, "label": member["label"], "value": None,
                                 "status": "place", "title": member["label"], "data": member["data"]}})
         layers.append({"id": s, "kind": "context", "set": s, "title": f"{_words(s)}: {len(members)}"})
+    by_rule: dict[str, int] = {}
+    for it in items:
+        x0, y0, w, h = it["min_x_m"], it["min_y_m"], it["width_m"], it["height_m"]
+        by_rule[it["rule"]] = by_rule.get(it["rule"], 0) + 1
+        add({"type": "Feature",
+             "geometry": {"type": "Polygon", "coordinates": [[[x0, y0], [x0 + w, y0], [x0 + w, y0 + h], [x0, y0 + h], [x0, y0]]]},
+             "properties": {"layer": it["rule"], "set": "placed", "key": it["slot"], "label": it["slot"], "value": 1,
+                            "status": "chosen", "kind": it.get("kind"), "turned": it["turned"], "aisle_side": it.get("aisle_side"),
+                            "title": f"{it['slot']}" + (f" ({it['kind']})" if it.get("kind") else "")
+                            + f": {w:g} x {h:g} m at ({x0:g}, {y0:g})" + (", turned" if it["turned"] else "")}})
+    for rule, n in by_rule.items():
+        layers.append({"id": rule, "kind": "placed", "set": "placed", "title": f"{rule}: {n} items placed"})
     return {"layers": layers, "features": features, "truncated": len(features) >= limit}
 
 
