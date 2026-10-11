@@ -186,3 +186,26 @@ def test_pasted_tables_survive_the_conversation_being_summarized():
     agent._attach_pasted(messages)
     assert [f["name"] for f in agent.ctx.files] == ["candidate_stations.csv", "road_travel_time_from.csv"]
     assert all("pasted" not in m and "_finish" not in m for m in core.to_wire(messages + [{"role": "assistant", "content": "k", "_finish": "stop"}], True))
+
+
+def test_an_approved_plan_builds_with_the_pasted_tables_attached():
+    """11 October 2026: on the approval turn the build ran before the tables were attached, and the Assistant
+    asked for the files it had been given."""
+    from app.agent import core
+    from app.api import agent as agent_api
+
+    agent = core.Agent(core.Settings(), agent_api._index, lambda *a, **k: {"ok": True, "body": {}}, core.Context("x"))
+    seen: list[list[str]] = []
+
+    def fake_execute(pending, messages, allow):
+        seen.append([f["name"] for f in agent.ctx.files])
+        yield {"type": "answer", "text": "done"}
+
+    agent._execute = fake_execute
+    agent.wrote = False  # run() sets it; _run is called directly here
+    messages = [{"role": "user", "content": PASTED},
+                {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "type": "function", "function": {
+                    "name": "propose_plan", "arguments": "{}"}}]}]
+    first = next(agent._run(messages, allow=True))
+    assert first["type"] == "answer"
+    assert seen == [["candidate_stations.csv", "road_travel_time_from.csv"]]

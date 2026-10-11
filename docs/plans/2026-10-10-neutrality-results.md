@@ -389,3 +389,11 @@ and the rule shape for the partial one (a 0/1 per record, amount <= most x (1 - 
 The partial run (p02 not built, p04 under way) is kept as `step5-2-aborted`; the measurement restarts on the
 fixed image, still as `step5`. Three starts for one step: each defect was in a repair added today, found on the
 tuning set, as the plan intends -- and each would have been invisible on the hidden set.
+
+## Step 5, third start stopped: pasted tables were attached after the approved build ran (11 Oct, 17:50)
+
+On the third start p02 reached its card in 2 minutes and the driver approved it; the build then said the files
+were not attached. On an approval turn the pending build runs first, and the pasted tables were attached only
+after it. They are now attached before anything runs (a test approves a pending plan and checks the files are
+there when it builds). Partial run kept as `step5-3-aborted`; fourth start, same tag. Four starts: the first
+three defects were all in the day's additions, each caught by the first tuning case.

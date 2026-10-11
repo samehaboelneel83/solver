@@ -3818,6 +3818,9 @@ class Agent:
                 messages.append({"role": "assistant", "content": text})
             yield {"type": "answer", "text": text}
             return
+        # The tables pasted into the person's messages, attached before anything runs: an approved plan's build
+        # loads from them (11 October 2026: attached after the pending build, which then asked for the files).
+        attached = self._attach_pasted(messages)
         # A turn that stopped for an OK: run (or decline) its calls first.
         last = messages[-1] if messages else None
         if last and last["role"] == "assistant" and last.get("tool_calls"):
@@ -3826,7 +3829,6 @@ class Agent:
             self.wrote |= any(self._is_write(c) and (allow or not self._needs_ok(c)) for c in pending)
             yield from self._execute(pending, messages, allow)
 
-        attached = self._attach_pasted(messages)
         if attached and last and last["role"] == "user" and not str(last.get("content") or "").startswith(PLATFORM):
             messages.append({"role": "user", "content": PLATFORM + PASTED_ATTACHED.format(files="; ".join(attached))})
         if last and last["role"] == "user" and not str(last.get("content") or "").startswith(PLATFORM):
