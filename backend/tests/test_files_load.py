@@ -160,3 +160,21 @@ def test_the_assistant_attaches_pasted_tables_once_and_says_so():
     assert said == ["candidate_stations.csv (2 rows)", "road_travel_time_from.csv (3 rows)"]
     assert [f["name"] for f in agent.ctx.files] == ["candidate_stations.csv", "road_travel_time_from.csv"]
     assert agent._attach_pasted(messages) == [] and len(agent.ctx.files) == 2
+
+
+def test_pasted_tables_survive_the_conversation_being_summarized():
+    """11 October 2026: after the first message was summarized, the Assistant asked for files it had been given."""
+    from app.agent import compact as agent_compact
+    from app.agent import core
+    from app.api import agent as agent_api
+
+    messages = [{"role": "user", "content": PASTED}] + [
+        {"role": m, "content": "x" * 400} for m in ("assistant", "user", "assistant", "user", "assistant")]
+    done = agent_compact.compact(messages, summarize=lambda piece, notes: "notes", keep_chars=1, piece_chars=100_000,
+                                 numbers=lambda ms: set(), force=True)
+    assert done and agent_compact.is_summary(messages[0])
+    assert [n for n, _ in messages[0]["pasted"]] == ["candidate_stations.csv", "road_travel_time_from.csv"]
+    agent = core.Agent(core.Settings(), agent_api._index, lambda *a, **k: {"ok": True, "body": {}}, core.Context("x"))
+    agent._attach_pasted(messages)
+    assert [f["name"] for f in agent.ctx.files] == ["candidate_stations.csv", "road_travel_time_from.csv"]
+    assert all("pasted" not in m and "_finish" not in m for m in core.to_wire(messages + [{"role": "assistant", "content": "k", "_finish": "stop"}], True))

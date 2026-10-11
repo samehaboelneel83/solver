@@ -1150,10 +1150,14 @@ def text_protocol(tools: list[dict]) -> str:
     )
 
 
+_WIRE_KEYS = ("role", "content", "name", "tool_calls", "tool_call_id", "reasoning_content")
+
+
 def to_wire(messages: list[dict], native: bool) -> list[dict]:
-    """The canonical (native-style) history in the form the server accepts."""
+    """The canonical (native-style) history in the form the server accepts: only the API's own keys (a message
+    also carries the platform's: `_finish`, a summary's `pasted` tables)."""
     if native:
-        return messages
+        return [{k: v for k, v in m.items() if k in _WIRE_KEYS} for m in messages]
     out: list[dict] = []
     pending: list[str] = []
 
@@ -1838,6 +1842,9 @@ def shape_sent_back(shape: Any) -> str:
 
 
 _LIST_MARK = re.compile(r"(?m)^\s*\(?\d+[.)]\s")
+_FOR_THE_REPORT = re.compile(r"\b(?:compar\w*|report\w*|against|versus|vs\.?|today|currently|current(?:ly)?|now|"
+                             r"as (?:it is|things are)|at present|baseline|last (?:year|month|week|time)|"
+                             r"saving\w*|improve\w* (?:on|over)|instead of)\b", re.I)
 
 
 def _model_numbers(spec: dict) -> set[float]:
@@ -1881,6 +1888,10 @@ def unused_numbers(messages: list[dict], spec: dict) -> list[str]:
     tight = re.compile(r",(?! )")
     text = "\n".join(line for line in text.splitlines()
                      if not (len(tight.findall(line)) >= 2 or (tight.search(line) and " " not in line.strip())))
+    # A number given to compare the answer with, or to report beside it ("our current plan costs 17,305",
+    # "today all 4 are on"), is for the report, not the model: a sentence that says so is left out (the
+    # evaluation, 11 October 2026: that number was flagged on three cards running, and the plan never built).
+    text = "\n".join(s for s in re.split(r"(?<=[.;!?])\s+|\n", text) if not _FOR_THE_REPORT.search(s))
     text = _LIST_MARK.sub(" ", text)
     held = _model_numbers(spec)
     missing: list[str] = []
@@ -3748,6 +3759,17 @@ class Agent:
         its own attachments); returns the ones new in the last message, as "name (n rows)"."""
         new: list[str] = []
         people = [m for m in messages if m.get("role") == "user" and not str(m.get("content") or "").startswith(PLATFORM)]
+        # A summary carries the tables of the messages it folded (compact.py): they are attached from it.
+        for m in messages:
+            if agent_compact.is_summary(m):
+                for name, text in m.get("pasted") or []:
+                    if not any(f.get("name") == name for f in self.ctx.files):
+                        try:
+                            parsed = agent_files.parse(str(name), str(text).encode("utf-8"))
+                        except agent_files.FileRefused:
+                            continue
+                        parsed["pasted"] = True
+                        self.ctx.files = list(self.ctx.files) + [parsed]
         for k, m in enumerate(people):
             for name, text in agent_files.pasted_tables(str(m.get("content") or "")):
                 if any(f.get("name") == name for f in self.ctx.files):

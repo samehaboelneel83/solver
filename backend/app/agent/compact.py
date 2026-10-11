@@ -235,6 +235,20 @@ def compact(messages: list[dict[str, Any]], *, summarize: Callable[[str, str], s
     if built:
         parts.append(BUILT_LINE + json.dumps(built, default=str))
     summary = {"role": "user", "content": "\n\n".join(parts)}
+    # Tables the person pasted into the folded messages travel on the summary (the message's text is clipped):
+    # the Assistant attaches them again each turn (11 October 2026: after a summary the Assistant asked for
+    # files that were in the first message).
+    from app.agent.files import pasted_tables
+
+    pasted = [list(t) for m in earlier for t in (m.get("pasted") or [])]
+    seen = {name for name, _ in pasted}
+    for m in real_users:
+        for name, text in pasted_tables(str(m.get("content") or "")):
+            if name not in seen:
+                pasted.append([name, text])
+                seen.add(name)
+    if pasted:
+        summary["pasted"] = pasted
     head = [summary] + ([{"role": "assistant", "content": ACK}] if tail and tail[0].get("role") == "user" else [])
     before = len(messages)
     before_chars = size(messages)

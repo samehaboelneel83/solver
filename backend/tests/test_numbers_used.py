@@ -60,3 +60,12 @@ def test_a_plan_that_does_nothing_goes_back_to_the_model_before_the_person_sees_
     assert back.startswith("The plan was NOT shown to the user: solved once on its real data, it does nothing -- open, ship")
     assert "only unmet is used" in back
     assert trial_sent_back({"status": "optimal", "used": {"open": {"non_zero": 2, "cells": 3}, "ship": {"non_zero": 9, "cells": 54}}}) == ""
+
+
+def test_a_number_given_to_compare_or_report_against_is_not_flagged():
+    """The evaluation, 11 October 2026: "compare that cost with our current plan, whose cost is 17,305" was
+    flagged on three cards running, and the plan never built."""
+    messages = [{"role": "user", "content": "Sizes 40 and 25, limit 500. Goal: the lowest cost. Then compare that "
+                                            "cost with our current plan, whose cost is 17,305, and report the "
+                                            "saving against today, when all 4 are on. Also at most 70 a day."}]
+    assert unused_numbers(messages, _spec()) == ["70"]

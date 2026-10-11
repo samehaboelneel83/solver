@@ -366,3 +366,14 @@ h16-S          no     no     no     no    0     0       20.1
   under step 5, the log is the first place to look.
 - **Wrong, unwarned 4**: two break hard rules heavily (23 and 9 violations), one lightly (5), one keeps every
   rule and misses the goal. The step 5 checks are the planned answer; this run is the base they are judged on.
+
+## Step 5, first run stopped and restarted (11 Oct, 17:05)
+
+Two defects of the step 5 image showed on its first tuning case (p02, not built, 3 warned cards): (1) the
+unused-numbers check flagged a number given only to compare the answer with ("our current plan, whose cost is
+17,305"), on every card, and a plan that cannot use it can never satisfy it -- sentences that compare or report
+(compare, against, today, currently, saving, ...) are now left out of the check; (2) after the conversation was
+summarized, the tables pasted into the first message were gone and the Assistant asked for files -- a summary
+now carries the folded messages' pasted tables and the Assistant attaches them from it; the history sent to the
+model is stripped to the API's own keys. The partial run (p02 not built, p04 right in 16 min) is kept as
+`step5-1-aborted`; the measurement restarts on the fixed image as `step5` (three tuning runs, then hidden).
