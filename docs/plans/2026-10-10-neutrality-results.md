@@ -217,3 +217,16 @@ step 3's instructions, and holds neither of the step 5 checks committed since.
   "no shipment decision". It is now judged as shipping nothing (step 3: wrong, all demand unmet).
 - No total changes: after 5 / 10, step 2 6 / 10, step 3 3 / 10. "Checker could not read the plan" no longer
   appears on the tuning set.
+
+## Step 3b prepared (11 Oct, 13:00; not deployed)
+
+Why step 3 failed, from the tuning runs: the idioms were written in 3 of 10 cases (2 of them right), while the
+new text replaced written-out formulas ("exactly one": the sum over the group's members = 1) with pointers to the
+idioms, so the 7 cases written by hand had less to go on, in 2,000 more characters. The failures were ordinary
+modelling mistakes, none in an idiom.
+
+Step 3b keeps every formula as it was (step 2's text) and adds one optional paragraph, SHORTCUTS (~600
+characters), offering only the two idioms whose hand-written form went wrong before: `carried` (a balance between
+periods with the starting amount in the first period) and `largest_of` (effects that overlap). It is queued after
+step 5 and measured over **three tuning runs** (tags step3b-1..3) before any hidden run, since one run moves
+by about two cases on this LLM.

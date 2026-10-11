@@ -1619,6 +1619,12 @@ instead); one binary visit[vehicle, stop, stop] and ONE rule {{"id":"c_routes","
 field>"}}}} (time windows add "travel":"<a time parameter>","earliest","latest","service": stop fields). Goal:
 minimise the sum over v, i, j of distance[i, j] * visit[v, i, j]. Never write the visiting, sub-tour or load rules
 yourself: the route rule holds them.
+SHORTCUTS (optional; the formulas above stay right): two of the idioms may instead be ONE rule the platform writes
+out for you -- {{"id":"c_bal","carried":{{"periods":{{"index":"p","set":"period","by":"#row"}},"level":{{"var":
+"carried","index":["p"]}},"in":[<terms>],"out":[<terms>],"initial":<the starting amount>,"owed":<optional>}}}}
+(the period links, the first period and the starting amount are made for you) and {{"id":"c_lvl","largest_of":
+{{"for":[<bindings>],"level":{{"var":...}},"options":{{"index":"o","set":"<options>"}},"value":<term>,"chosen":
+{{"var":"pick","index":["o"]}}}}}}.
 
 TOOL CALLS: only through the tool interface, never as text in your reply; valid JSON with unique keys (each list,
 e.g. entity_types or constraints, once, with all its items); keep each call small (load rows from files, never
