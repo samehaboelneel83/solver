@@ -87,7 +87,9 @@ and confirm:
 - [ ] Frontend loads (nginx static assets are local).
 - [ ] API `/api/health` returns postgres (and clickhouse if required).
 - [ ] FastAPI docs, if enabled, use only local assets or are disabled.
-- [ ] Basemap / terrain / vector / font requests stay on the internal tile server.
+- [ ] Basemap / terrain / vector / font requests stay on the internal tile server; `spatial.internet_basemaps`
+      is false (the default since migration 0122), so no built-in internet map is offered.
+- [ ] `LLM_BASE_URL` points inside the network and the egress check prints `OK: model reachable`.
 - [ ] UI webfonts are bundled via `@fontsource/archivo` and
       `@fontsource/source-serif-4` (no Google Fonts link in `index.html`).
 - [ ] Telemetry exporters are off or pointed at an internal endpoint.
@@ -95,11 +97,18 @@ and confirm:
 
 ## ClickHouse dependency
 
-Compose currently waits for ClickHouse health before starting the backend.
-For an install that only needs planning (not analytics), operators may use a
-documented override that makes ClickHouse optional — prefer degrading reporting
-over blocking planning. Until that override is published as supported, treat
-ClickHouse as required for the reference compose file.
+ClickHouse is optional for planning (OAAS S01): compose waits only for the container to be started, the
+backend serves without it, and `/api/health` reports it separately. Analytics degrade; planning does not block.
+
+## The language model (the Assistant)
+
+The Assistant talks to an OpenAI-compatible chat server named by `LLM_BASE_URL` and `LLM_MODEL` in `.env`
+(today vLLM serving `qwen3.5` on the LAN). It is **not in the bundle**: run it on the same host or inside the
+network, never on the public internet. Everything else — the editor, the solvers, maps, exports, the API — works
+without it; the Assistant alone then answers "cannot reach the model at …" and the person uses the editor.
+`bash scripts/egress-check.sh` probes the model from inside the backend container and prints OK or WARN.
+One slow reply is cut at `LLM_REPLY_SECONDS` (420 s) and asked again shorter; a model that never answers ends
+the turn with that message, never the platform.
 
 ## What is not yet done
 

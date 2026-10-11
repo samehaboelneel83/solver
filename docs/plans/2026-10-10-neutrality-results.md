@@ -312,3 +312,14 @@ inputs, the messages built at run time: the shape and data checks (`unread`, `as
 card and its model-facing line, the unused-numbers line, the repair notes and the file load line. Any word from
 a particular field fails the build. Everything added today passes: each check and repair reads the model's or
 the data's shape, never a name.
+
+## Stand-alone, isolated (11 Oct, 15:55; the owner's requirement)
+
+The platform runs isolated from the internet, with its language model inside the network. Audit of what it
+reaches for: no package downloads at run time; UI fonts bundled (tested); the tile server local; ClickHouse
+optional; the only outbound references are the two built-in internet map backgrounds, which were ON by default.
+Changes: migration 0122 turns `spatial.internet_basemaps` off by default (an organization's own setting is
+kept); the offline manifest and runbook now list the model as operator-supplied inside the network and say what
+works without it (everything but the Assistant); `scripts/egress-check.sh` probes the model from the backend
+container (OK / WARN). The migration ships in the step 5 image and is applied at its deploy
+(`alembic upgrade head`), not during the hidden run.

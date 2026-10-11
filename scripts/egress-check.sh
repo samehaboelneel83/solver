@@ -14,6 +14,22 @@ curl -fsS "$API_URL/api/health" | tee /tmp/solver-health.json
 web_code="$(curl -fsS -w '%{http_code}' "$WEB_URL/" | tail -c 3)"
 printf 'frontend HTTP %s\n' "$web_code"
 
+echo "==> The Assistant's model (LLM_BASE_URL, inside the network; a warning only: the rest serves without it)"
+if docker compose exec -T backend python - <<'PY' 2>/dev/null; then
+import os, sys, urllib.request
+url = os.environ.get("LLM_BASE_URL", "").rstrip("/") + "/models"
+req = urllib.request.Request(url, headers={"Authorization": "Bearer " + os.environ.get("LLM_API_KEY", "x")})
+try:
+    with urllib.request.urlopen(req, timeout=5) as r:
+        sys.exit(0 if r.status < 300 else 1)
+except Exception:
+    sys.exit(1)
+PY
+  echo "OK: model reachable"
+else
+  echo "WARN: the model at LLM_BASE_URL did not answer; the Assistant will say so, everything else works" >&2
+fi
+
 if [[ "${EGRESS_BLOCKED:-0}" != "1" ]]; then
   echo "EGRESS_BLOCKED not set; skipping outbound probe (set EGRESS_BLOCKED=1 on an isolated host)."
   exit 0

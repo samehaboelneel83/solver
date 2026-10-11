@@ -9,7 +9,8 @@ during image build), **external** (operator-supplied), **optional**.
 | Service | Image / build | Status | Notes |
 |---|---|---|---|
 | postgres | `postgis/postgis:16-3.4` | pull-at-build / bundle | Pin digest in customer release |
-| clickhouse | `clickhouse/clickhouse-server:24.8` | pull-at-build / bundle | Health-gated backend start today |
+| clickhouse | `clickhouse/clickhouse-server:24.8` | pull-at-build / bundle, **optional** | The backend starts without it (compose waits only for it to be started); analytics degrade, planning serves |
+| language model (the Assistant) | an OpenAI-compatible chat server **inside the network** (today vLLM serving `qwen3.5` at `LLM_BASE_URL`) | **external** (operator-supplied) | Not in the bundle: the operator runs it on the same host or the LAN and sets `LLM_BASE_URL` / `LLM_MODEL` in `.env`. Without it the editor, solvers, maps and exports work; the Assistant answers "cannot reach the model at …". Nothing else calls a model; no model weights are fetched by the platform |
 | backend / worker | `solver-backend:latest` from `backend/Dockerfile` | pull-at-build | `pip install -r requirements.txt` in Dockerfile |
 | frontend | `solver-frontend:latest` from `frontend/Dockerfile` | pull-at-build | `npm install` then nginx alpine |
 
@@ -41,7 +42,9 @@ nginx — no Node at serve time. UI fonts (`@fontsource/archivo`,
 ## Maps / tiles
 
 Local tile configuration and Egypt basemap assets (see `frontend/src/lib/tiles.ts`,
-`useBasemaps`). Must not fall back to a public CDN when offline.
+`useBasemaps`). Must not fall back to a public CDN when offline. The two built-in internet backgrounds
+(Esri World Imagery, OpenStreetMap) are **off by default** since migration 0122 (`spatial.internet_basemaps`
+false); an organization with internet turns them on in Settings. The run-report export honours the same setting.
 
 ## Identity
 
