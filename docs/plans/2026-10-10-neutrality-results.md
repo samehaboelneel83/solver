@@ -205,3 +205,15 @@ right, and the Assistant wrote an idiom in 3 of 10 cases. They are withdrawn (e5
 after two cases (both at the 20-minute limit) -- the tuning result decided it, and the rest would have measured
 instructions that are no longer in. Step 4 is now measured on step 2 alone: the live image is a37829d without
 step 3's instructions, and holds neither of the step 5 checks committed since.
+
+## Harness: the last two tuning checkers read every plan (11 Oct, 11:10)
+
+- **p03 (layout):** the answer map carries no placed items yet, so the checker could not read any plan. It now
+  rebuilds the beds from the run's decisions (placed, x, y, turned; the placement solver's 0.1 m cells from the
+  lower-left, length along x when not turned). Checked on the generator's own layout (23 beds, no violation).
+  Read this way, p03 is wrong in every run (after, step 2, step 3): 50 beds placed, 34 with no 1.2 m way to an
+  entrance -- the corridor-width gap already known.
+- **p10 (relief):** a plan that ships nothing exports no shipment (zeros are not exported) and was read as
+  "no shipment decision". It is now judged as shipping nothing (step 3: wrong, all demand unmet).
+- No total changes: after 5 / 10, step 2 6 / 10, step 3 3 / 10. "Checker could not read the plan" no longer
+  appears on the tuning set.

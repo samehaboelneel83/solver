@@ -197,8 +197,9 @@ def check(folder: Path, export_csv: str) -> list[str]:
             ship[tuple(keys)] = ship.get(tuple(keys), 0.0) + float(r["value"])
         elif keys[0] in wh and not keys[1] and float(r["value"]) > 0.5 and "open" in r["decision"].lower():
             opened.add(keys[0])
-    if not ship:
+    if not ship and not export_rows(export_csv):
         return ["no shipment decision over (warehouse, location, day, good) in the export"]
+    # Other decisions but no shipment: the plan ships nothing (zeros are not exported) -- judged as such.
     bad: list[str] = []
     opened |= {w for (w, _, _, _), q in ship.items() if q > 1e-6}
     if len(opened) > k:

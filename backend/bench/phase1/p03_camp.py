@@ -159,11 +159,40 @@ def write(size: str) -> Path:
     return folder
 
 
+CHECK_FILE = "export.csv"
+GRID = 0.1  # the placement solver's cell (app/solve/placement.py): positions are lower-left cells
+
+
+def _beds_from_export(export_csv: str) -> list:
+    """The placed beds from the run's decisions: placed[s], x[s], y[s] in cells, turned[s] (the placement solver's
+    convention: unturned, the length lies along x). Zeros are not exported."""
+    from shapely.geometry import box
+
+    from bench.phase1.common import export_rows
+
+    got: dict[str, dict[str, float]] = {}
+    for r in export_rows(export_csv):
+        got.setdefault(r.get("key1") or "", {})[r["decision"]] = float(r["value"])
+    beds = []
+    for v in got.values():
+        if v.get("placed", 0) > 0.5:
+            w, h = (BED[1], BED[0]) if v.get("turned", 0) > 0.5 else (BED[0], BED[1])
+            x, y = v.get("x", 0) * GRID, v.get("y", 0) * GRID
+            beds.append(box(x, y, x + w, y + h))
+    return beds
+
+
 def check(folder: Path, answer_map: str) -> list[str]:
-    """The placed beds from the run's answer map: polygons of about 2.0 x 0.9 m."""
+    """The placed beds from the run's decisions (export.csv), or from an answer map's polygons of about
+    2.0 x 0.9 m (the answer map does not carry placed items yet)."""
     from shapely.geometry import shape
 
     d = json.loads((folder / "site.json").read_text())
+    if answer_map.lstrip().startswith("decision,"):
+        beds = _beds_from_export(answer_map)
+        if not beds:
+            return ["no placed bed in the export"]
+        return check_beds(d, beds)[:40] + [f"COST {len(beds)}"]
     try:
         fc = json.loads(answer_map)
     except ValueError:
