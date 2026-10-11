@@ -436,3 +436,25 @@ p10-S          yes    yes    yes    no    0     0       7.1
 - p08: the "does nothing" send-back caught a wrong model before the person saw it; the retry ran out of time.
 - p07: refused six times for a term written with "over" and no "sum" (repair queued). p06: one long reply.
 - Run 2 from 19:53; run 3 and the hidden set follow.
+
+## step5 — tuning run 2 of 3 (finished 21:38, 11 Oct; same image)
+
+```
+case           built  first  solved right  viol  warned  min
+p01-S          yes    yes    yes    yes   0     0       3.1
+p02-S          yes    yes    yes    yes   0     0       2.8
+p03-S          yes    no     yes    yes   0     2       16
+p04-S          yes    yes    yes    no    2     0       4.4
+p05-S          yes    yes    yes    no    0     0       9.7
+p06-S          yes    no     yes    yes   0     1       19
+p07-S          yes    yes    yes    no    1     0       4.5
+p08-S          no     no     no     no    0     1       20.1
+p09-S          yes    no     yes    yes   0     0       3.4
+p10-S          no     no     no     no    0     1       20.1
+
+5 right of 10; built 8; wrong but solved 3 (of them warned on the card 0)
+```
+
+- **p03 right for the first time in any run** (the corridor-width fix), even after two cards declined for the
+  cells-as-metres false warning (fixed, queued). p06 right after one warned card.
+- The two runs so far: 3 and 5 right; built 7 and 8; wrong unwarned 3 and 3. Run 3 from 21:38, then hidden.
