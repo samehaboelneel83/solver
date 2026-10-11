@@ -89,3 +89,8 @@ corpus before the browser.
   send-back now ends with how to patch instead of rewriting. 115 tests pass. Queued for the next image.
 - **12 Oct, 00:00 — 1.2 built.** The reply cap's default is 240 s (was 420); a cut reply is asked again at
   half the room, as before. `LLM_REPLY_SECONDS` in `.env` still overrides. Queued for the next image.
+- **12 Oct, 01:10 — lever 2's new check built.** A goal one term decides (its contribution ten times the
+  others' combined) is a CHECK THIS on the card naming the term and its share, and a flag to the model; from the
+  trial's own goal breakdown. 100 tests pass. Queued for the next image, which now holds: the no-data check,
+  the `over`-without-`sum` repair, the cells-as-metres and attachment-count rules for unused numbers, the
+  goal-sense check, the patch send-back (1.1), the 4-minute cap (1.2), and this.

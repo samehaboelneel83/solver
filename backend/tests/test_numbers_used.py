@@ -128,3 +128,19 @@ def test_the_sizes_of_what_was_attached_count_as_held():
     assert attachment_counts(files) == {3.0, 14.0, 63.0}
     messages = [{"role": "user", "content": "layer PROTECTED holds 14 areas and 3 layers; 63 rows; at most 70 beds."}]
     assert numbers_for_person(messages, {"seed": {}, "ir": {}}, files).endswith("anywhere: 70 -- each should be a limit, a value or a goal weight, or the model answers a different question")
+
+
+def test_a_goal_one_term_decides_is_named():
+    """11 October 2026: a goal of -5,000,000 against a reference of 3,400,000, a penalty swamping the value."""
+    from app.agent.core import trial_for_person, trial_said
+    from app.api.model_spec import swamped_goal
+
+    terms = [{"id": "o_value", "contribution": 300000.0}, {"id": "o_penalty", "contribution": -4800000.0},
+             {"id": "o_cost", "contribution": -20000.0}]
+    found = swamped_goal(terms)
+    assert found == {"term": "o_penalty", "share": 0.9375, "others": ["o_value", "o_cost"]}
+    assert swamped_goal([{"id": "a", "contribution": 10}, {"id": "b", "contribution": 5}]) is None
+    assert swamped_goal([{"id": "a", "contribution": 10}]) is None
+    trial = {"status": "optimal", "objective": -4520000, "used": {"pick": {"non_zero": 2, "cells": 8}}, "swamped": found, "seconds": 1}
+    assert "CHECK THIS: one goal term decides the goal: o_penalty is 94% of it and o_value, o_cost barely count" in trial_for_person(trial)
+    assert "one goal term decides the goal: o_penalty is 94%" in trial_said(trial)

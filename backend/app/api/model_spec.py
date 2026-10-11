@@ -310,6 +310,24 @@ TRIAL_CELLS = 200_000
 TRIAL_LISTED = 12
 
 
+SWAMPED_RATIO = 10.0
+
+
+def swamped_goal(terms: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """A goal one term decides: its contribution is ten times the others' combined (the evaluation, 11 October
+    2026: a plan whose goal read -5,000,000 against a reference of 3,400,000, a penalty swamping the value it
+    was meant to protect; every rule held and nothing said so)."""
+    sized = [(str(t.get("id")), abs(float(t.get("contribution") or 0))) for t in terms if isinstance(t, dict)]
+    if len(sized) < 2:
+        return None
+    top = max(sized, key=lambda kv: kv[1])
+    rest = sum(v for _, v in sized) - top[1]
+    if top[1] > 0 and top[1] >= SWAMPED_RATIO * rest:
+        return {"term": top[0], "share": round(top[1] / (top[1] + rest), 4),
+                "others": [n for n, _ in sized if n != top[0]]}
+    return None
+
+
 def used_without_data(ir: dict[str, Any], data: dict[str, Any], assignments: dict) -> list[dict[str, Any]]:
     """Decisions the trial uses on cells where a parameter over the same records gives no value, so its default
     applied there (the phase 1 evaluation, 11 October 2026: a product made on a machine the times file never
@@ -410,8 +428,17 @@ def _trial(db: Session, domain_id: int, ir: dict[str, Any], keep: dict[str, Any]
     if result.status == "infeasible":
         conflict = _trial_conflict(backend.name, compiled, ir)
     no_data = used_without_data(ir, data, result.assignments or {})
+    swamped = None
+    try:
+        from app.solve.breakdown import objective_breakdown
+
+        parts = objective_breakdown(ir, compiled, result.assignments or {})
+        swamped = swamped_goal((parts or {}).get("terms") or [])
+    except Exception:  # noqa: BLE001 -- a breakdown that fails says nothing; the trial still informs
+        swamped = None
     return {"status": result.status, "objective": result.objective, "solver": backend.name,
             "seconds": TRIAL_SECONDS, **conflict, **({"no_data": no_data} if no_data else {}),
+            **({"swamped": swamped} if swamped else {}),
             "used": {k: {"non_zero": v[0], "cells": v[1],
                          **({"chosen": chosen.get(k, [])} if v[0] <= TRIAL_LISTED else {})} for k, v in used.items()}}
 

@@ -1773,6 +1773,11 @@ def trial_said(trial: Any) -> str:
         flags.append("the goal can grow without limit: a bound or a rule is missing")
     elif used and all(not u.get("non_zero") for u in used.values()):
         flags.append("every decision is 0: the plan chooses or makes nothing -- check the goal's sense and the rules")
+    sw = trial.get("swamped")
+    if isinstance(sw, dict) and sw.get("term"):
+        flags.append(f"one goal term decides the goal: {sw['term']} is {sw.get('share', 0) * 100:.0f}% of it and the "
+                     f"others ({', '.join(sw.get('others') or [])}) barely count; check its weight or the penalty's "
+                     "size against what the person values, so the goal weighs what they described")
     for nd in trial.get("no_data") or []:
         flags.append(f"{nd.get('var')} is used on {nd.get('cells')} cell(s) where {nd.get('parameter')} gives no value "
                      f"({', '.join(nd.get('examples') or [])}), so its default {_num(nd.get('default'))} applied there; "
@@ -2032,6 +2037,11 @@ def trial_for_person(trial: Any) -> str:
         line += (f"\n- CHECK THIS: the plan does nothing with {', '.join(idle)} (0 everywhere); only "
                  f"{', '.join(v for v in used if v not in idle)} is used -- a plan that does nothing may be what the "
                  "rules allow, not what you meant")
+    sw = trial.get("swamped")
+    if isinstance(sw, dict) and sw.get("term"):
+        line += (f"\n- CHECK THIS: one goal term decides the goal: {sw['term']} is {sw.get('share', 0) * 100:.0f}% of it and "
+                 f"{', '.join(sw.get('others') or [])} barely count -- a penalty or weight out of scale with the rest "
+                 "gives a plan that only avoids that term")
     for nd in trial.get("no_data") or []:
         line += (f"\n- CHECK THIS: {nd.get('var')} is used on {nd.get('cells')} cell(s) where {nd.get('parameter')} "
                  f"gives no value ({', '.join(nd.get('examples') or [])}): its default {_num(nd.get('default'))} "
