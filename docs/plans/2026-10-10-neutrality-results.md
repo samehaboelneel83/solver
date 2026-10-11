@@ -14,9 +14,9 @@ warning on the plan card — the number that must reach 0.
 |---|---|---|---|---|---|---|
 | after | 70004a0 (fixes of 10 Oct) | tuning, 10 small | 5 / 10 | 7 | 1 (p03) | from `2026-10-10-phase1-results.md` |
 | base | 531fb9e (before step 2) | hidden, 16 small | 6 / 16 | 12 | 6 | re-scored after two checkers were fixed (rule 5); first read 5 / 16 |
-| step2 | b9f3943 (step 2 alone) | tuning, 10 small | 5 / 10 | 7 | 2 (p03, p07) | exit met: the tuning score did not drop |
+| step2 | b9f3943 (step 2 alone) | tuning, 10 small | 6 / 10 | 7 | 1 (p03) | exit met; re-scored: p07 was scored on a what-if run (first read 5 / 10) |
 | step2 | b9f3943 (step 2 alone) | hidden, 16 small | 4 / 16 | 9 | 3 | down from 6 / 16: more cases hit the 20-minute limit |
-| step3 | image `solver-backend:step3`, built from 10dc21e (backend = fa738c9: step 3 + the step 4 card) | tuning, 10 small | 2 / 10 | 9 | 7 | exit not met: down from 5 |
+| step3 | image `solver-backend:step3`, built from 10dc21e (backend = fa738c9: step 3 + the step 4 card) | tuning, 10 small | 3 / 10 | 9 | 6 | exit not met: down from 6; re-scored: p08 was scored on a what-if run (first read 2 / 10) |
 | step3 | same | hidden, 16 small | running (from 09:58) | | | |
 | step4 | the rest of step 4 (wide tables, units, the load report), committed after 10dc21e | both | after step3 | | | |
 
@@ -177,3 +177,21 @@ p10-S          yes    no     yes    no    0     0       19.7  (checker could not
   - p10: the export has no shipment decision over (warehouse, location, day, good) -- the model's decision has
     another shape; the checker cannot judge it.
 - The step 3 hidden run follows now on the same image; step 4 (rest) and step 5 wait for it.
+
+## Harness fix: the plan as asked, not a what-if run (11 Oct, 10:50)
+
+The browser driver scored the newest run made during a case. When the Assistant also solved what-if scenarios
+after the plan ("Budget 400k", "Solar +10%"), the newest run was one of those. Found on p08 under step 3: the
+scored run broke the budget, but it was the "Budget 400k" scenario; the base plan reached the reference goal
+exactly (620,380). `drive_case.mjs` now takes the newest run of a scenario that changes nothing (patch `{}`), and
+`rebase_runs.py` re-scores finished runs the same way, printing only which folders moved. Over every run so far
+(tuning after / step2 / step3, hidden base / step2) two moved, both tuning: p07 under step 2 (now right, goal
+26,803.94 = reference) and p08 under step 3 (now right). No hidden run moved. Corrected totals:
+
+| Tag | Tuning right | Wrong, unwarned |
+|---|---|---|
+| after | 5 / 10 | 2 |
+| step2 | 6 / 10 | 1 |
+| step3 | 3 / 10 | 6 |
+
+The step 3 drop stands (6 to 3 right on the tuning set).

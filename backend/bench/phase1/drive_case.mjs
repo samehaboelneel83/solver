@@ -50,6 +50,17 @@ const result = { case: caseDir, workspace, approved: 0, continues: 0, built: fal
 // Runs made after this point are this case's (one case at a time): found through the API, not the panel's links.
 const newestRun = async () => { const [, t] = await api("/api/v1/runs?limit=1"); const items = JSON.parse(t).items || []; return items.length ? items[0].id : 0; };
 const startRun = await newestRun();
+// The plan as asked is the newest run of a scenario that changes nothing (patch {}); what-if runs the Assistant
+// solved after it ("Budget 400k") are not the answer (11 October 2026: p08 and p07 were scored on a what-if run).
+const baseRun = async (ids) => {
+  for (const id of [...new Set(ids)].sort((a, b) => b - a)) {
+    const [s, r] = await api(`/api/v1/runs/${id}`);
+    if (s >= 300) continue;
+    const [s2, sc] = await api(`/api/v1/scenarios/${JSON.parse(r).scenario_id}`);
+    if (s2 < 300 && Object.keys(JSON.parse(sc).patch || {}).length === 0) return id;
+  }
+  return Math.max(...ids);
+};
 try {
   await page.goto(BASE + "/");
   await page.getByRole("button", { name: /Assistant \(Ctrl J\)/ }).click();
@@ -110,7 +121,7 @@ try {
     const links = await page.locator('[aria-label="Assistant"] a[href*="/runs/"]').evaluateAll((as) => as.map((a) => a.getAttribute("href")));
     for (const h of links) { const m = /\/runs\/(\d+)/.exec(h || ""); if (m) runs.push(Number(m[1])); }
     const mine = runs.filter((r) => r > startRun);  // only runs made during this case
-    if (result.approved > 0 && (mine.length || /Built/.test(text))) { result.run = mine.length ? Math.max(...mine) : null; break; }
+    if (result.approved > 0 && (mine.length || /Built/.test(text))) { result.run = mine.length ? await baseRun(mine) : null; break; }
     if (result.continues >= NUDGES) { log("no more continues; stopping"); break; }
     result.continues += 1;
     await page.getByLabel("Message to the assistant").fill("continue");
