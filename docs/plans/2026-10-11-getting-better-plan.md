@@ -87,3 +87,5 @@ corpus before the browser.
   `{"id", "drop": true}` to remove, a goal, a decision) is completed from the last plan proposed, folded from
   the conversation's own calls (nothing held between turns; the browser's round trip carries it); every
   send-back now ends with how to patch instead of rewriting. 115 tests pass. Queued for the next image.
+- **12 Oct, 00:00 — 1.2 built.** The reply cap's default is 240 s (was 420); a cut reply is asked again at
+  half the room, as before. `LLM_REPLY_SECONDS` in `.env` still overrides. Queued for the next image.

@@ -35,7 +35,7 @@ Settings (environment):
     LLM_API_KEY          EMPTY
     LLM_CONTEXT          32768      the model's max_model_len (vLLM's own value is read when it reports one)
     LLM_TIMEOUT          1800       seconds to wait for one model reply (the connection)
-    LLM_REPLY_SECONDS    420        the longest one reply may take; past it the step is asked again, shorter
+    LLM_REPLY_SECONDS    240        the longest one reply may take; past it the step is asked again, shorter
     LLM_WORKING_TOKENS   48000      summarize the older conversation past this many tokens (whichever comes first)
     LLM_COMPACT_AT       0.6        summarize the older conversation past this share of the context
     LLM_MAX_TOKENS       4096       per reply
@@ -96,7 +96,9 @@ class Settings:
     timeout: float = field(default_factory=lambda: float(_env("LLM_TIMEOUT", "1800")))
     #: The longest one reply may take (0: only LLM_TIMEOUT). A planning reply of up to 32,768 tokens ran
     #: 10-15 minutes and twice ended a job-shop turn with nothing (evaluation, October 2026).
-    reply_seconds: float = field(default_factory=lambda: float(_env("LLM_REPLY_SECONDS", "420")))
+    #: 240 since 11 October 2026 (getting-better plan, lever 1.2): at this model's rate 4 minutes is 12,000
+    #: tokens, more than any right plan needed, and one 7-minute reply already cost a case its 20 minutes.
+    reply_seconds: float = field(default_factory=lambda: float(_env("LLM_REPLY_SECONDS", "240")))
     #: Past this share of the context, the older conversation is summarized (app.agent.compact).
     compact_at: float = field(default_factory=lambda: float(_env("LLM_COMPACT_AT", "0.6")))
     #: The most a model call carries before the older conversation is summarized, whatever the context:
