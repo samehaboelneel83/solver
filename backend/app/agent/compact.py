@@ -249,6 +249,14 @@ def compact(messages: list[dict[str, Any]], *, summarize: Callable[[str, str], s
                 seen.add(name)
     if pasted:
         summary["pasted"] = pasted
+    # The plan as last proposed travels on the summary too: the folded propose_plan calls are gone, and a
+    # patch sent after the summary must still complete from them (12 October 2026: "the spec has no ir",
+    # three times, after a long conversation was summarized).
+    from app.agent.draft import draft_from
+
+    folded_draft = draft_from(old + [{"role": "assistant", "tool_calls": [{"function": {"name": "propose_plan", "arguments": "{}"}}]}])
+    if folded_draft is not None:
+        summary["draft"] = folded_draft
     head = [summary] + ([{"role": "assistant", "content": ACK}] if tail and tail[0].get("role") == "user" else [])
     before = len(messages)
     before_chars = size(messages)

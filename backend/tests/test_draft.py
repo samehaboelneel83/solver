@@ -87,3 +87,26 @@ def test_a_repeated_refusal_after_a_patch_names_the_rules_and_then_asks_for_the_
     spec, note = draft.complete({"ir": {"constraints": []}}, messages)
     assert spec == {"ir": {"constraints": []}} and note is None
     assert draft.WHOLE_MARK in core.WHOLE_HINT
+
+
+def test_the_draft_survives_the_conversation_being_summarized():
+    """12 October 2026: after a summary the folded propose_plan calls were gone and every patch had no draft."""
+    from app.agent import compact as agent_compact
+
+    patch = {"summary": "s", "spec": {"ir": {"constraints": [{"id": "c_two", "drop": True}]}}}
+    messages = [{"role": "user", "content": "plan it " + "x" * 300}, _call({"summary": "s", "spec": FULL}),
+                {"role": "tool", "name": "propose_plan", "content": "sent back"}, _call(patch),
+                {"role": "tool", "name": "propose_plan", "content": "sent back"}, {"role": "assistant", "content": "y" * 300},
+                {"role": "user", "content": "go on"}, {"role": "assistant", "content": "z" * 300}]
+    done = agent_compact.compact(messages, summarize=lambda piece, notes: "notes", keep_chars=1, piece_chars=100_000,
+                                 numbers=lambda ms: set(), force=True)
+    assert done and agent_compact.is_summary(messages[0])
+    folded = messages[0]["draft"]
+    assert [c["id"] for c in folded["ir"]["constraints"]] == ["c_one"] and folded["seed"] == FULL["seed"]
+    # A patch after the summary completes from it.
+    later = {"ir": {"variables": {"y": {"index": [], "domain": "binary"}}}}
+    messages.append(_call({"summary": "s", "spec": later}))
+    spec, note = draft.complete(later, messages)
+    assert "y" in spec["ir"]["variables"] and [c["id"] for c in spec["ir"]["constraints"]] == ["c_one"]
+    from app.agent import core
+    assert all("draft" not in m for m in core.to_wire(messages, True))

@@ -105,8 +105,12 @@ def draft_from(messages: list[dict[str, Any]]) -> dict[str, Any] | None:
     each merged onto the one before (a chain of patches resolves to one plan)."""
     from app.agent import repair
 
-    calls: list[dict[str, Any]] = []
+    # A summary carries the draft of the calls it folded (compact.py): the fold starts from the latest one.
+    calls: list[Any] = []
     for m in messages:
+        if m.get("role") == "user" and isinstance(m.get("draft"), dict):
+            calls = [m["draft"]]
+            continue
         if m.get("role") != "assistant":
             continue
         for c in m.get("tool_calls") or []:
@@ -116,6 +120,9 @@ def draft_from(messages: list[dict[str, Any]]) -> dict[str, Any] | None:
         return None  # nothing before the call being checked
     draft: dict[str, Any] | None = None
     for c in calls[:-1]:
+        if "function" not in c:  # a summary's draft, already whole
+            draft = c
+            continue
         raw = (c.get("function") or {}).get("arguments")
         try:
             args = json.loads(raw) if isinstance(raw, str) else (raw or {})

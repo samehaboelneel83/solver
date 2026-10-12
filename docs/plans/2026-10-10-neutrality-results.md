@@ -581,3 +581,11 @@ send-backs on the name or answers from the stale workspace (p04 on the third sta
 aborted run's result without building). Every first run after a restart carried this: step 5 run 1 (four
 starts) and step 6 runs 1 (three starts). The runners now add the clock time to the name. This third start
 is kept as `step6b-1-aborted`; the fourth start, same tag, with unique names.
+
+## Step 6, fourth start stopped: the draft did not survive a summary (12 Oct, 09:05)
+
+With unique workspace names, p02 was right (7.2 min, three warned cards); p04 ran out of time on a path the
+send-back log shows in full: refusals, then the conversation summarized, then every patch refused as "the spec
+has no ir" -- the folded propose_plan calls were gone and a patch had no draft to complete from. The draft now
+travels on the summary (like the pasted tables) and the fold starts from it; the history sent to the model
+carries neither. This start is kept as `step6c-1-aborted`; fifth start, same tag.
