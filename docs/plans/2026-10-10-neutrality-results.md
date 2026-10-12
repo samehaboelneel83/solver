@@ -20,7 +20,9 @@ warning on the plan card — the number that must reach 0.
 | step3 | same | hidden, 16 small | stopped after 2 (0 / 2) | | | stopped: step 3 withdrawn on the tuning result |
 | step4 | image `solver-backend:step4`: a37829d without step 3's instructions (step 2 + step 4; the idiom expansion is in, inert) | tuning, 10 small | 3 / 10 | 6 | 2 (+1 warned) | below step 2's 6; three not built in 20 minutes |
 | step4 | same | hidden, 16 small | 7 / 16 | 11 | 4 | the best hidden reading so far (base 6, step 2 4); 5 at the limit, all slow or lost replies |
-| step5 | image `solver-backend:step5` (main at 655ec70 without step 3b): the checks, repairs, send-back, pasted tables, corridor, map items, 0122 | tuning x3 + hidden | running (from 16:20) | | | read with `three.py runs step5` and `blind runs/hidden step5` |
+| step5 | image `solver-backend:step5` (fourth start; the checks, repairs, send-backs, pasted tables, corridor, map items, 0122) | tuning x3 | mean 3.7 (3, 5, 3) | 21 of 30 | 7 of 30 | the three-run reading |
+| step5 | same | hidden, 16 small | 4 / 16 | 8 | 3 | below step 4's 7: eight cases at the limit |
+| step6 | image `solver-backend:step6` (main at 0f85231 without 3b): + no-data, swamped-goal and goal-sense checks, `over` repair, unused-number rules, patch send-back, 4-minute cap | tuning x3 + hidden | running (from 04:25, 12 Oct) | | | |
 
 ## base — hidden set, before step 2 (finished 02:29, 11 Oct)
 
@@ -488,3 +490,41 @@ right per run: [3, 5, 3] -> mean 3.7 of 10, range 3-5; wrong unwarned (case-runs
 - **Time:** 9 of 30 not built, every one slow replies or a rewrite after a send-back -- lever 1.1 (patch, not
   rewrite) and 1.2 (a 4-minute cap) are built and queued for the next image.
 - p05 run 3: the checker could not read the export (a tuning checker gap, to fix separately).
+
+## step5 — hidden set (finished 04:20, 12 Oct)
+
+```
+case           built  first  solved right  viol  warned  min
+h01-S          no     no     no     no    0     0       20.1
+h02-S          no     no     no     no    0     0       20.1
+h03-S          yes    no     yes    yes   0     3       3.9
+h04-S          yes    yes    yes    no    4     0       4.3
+h05-S          no     no     no     no    0     0       20.1
+h06-S          yes    no     yes    yes   0     0       18.4
+h07-S          yes    no     yes    yes   0     3       19.5
+h08-S          yes    yes    yes    no    14    0       4.1
+h09-S          yes    yes    yes    yes   0     0       6.6
+h10-S          no     no     no     no    0     0       20.1
+h11-S          no     no     no     no    0     0       14
+h12-S          yes    no     no     no    0     0       20.1
+h13-S          no     no     no     no    0     0       20
+h14-S          no     no     no     no    0     0       20.1
+h15-S          no     no     no     no    0     0       20.1
+h16-S          yes    yes    yes    no    0     0       18.2
+
+4 right of 16; built 8; wrong but solved 3 (of them warned on the card 0)
+```
+
+- **4 right, from step 4's 7; built 8, from 11.** The checks and send-backs of step 5 cost time on problems
+  the model finds hard: eight cases at the limit (five under step 4), one built and never solved. Two right
+  cases carried three warnings each (declined by the harness as a cautious person would, and still right).
+- **Three wrong without a warning** (4 and 14 violations, one goal miss): none of today's checks spoke.
+- By the causes table: of the eight at the limit, five are slow or lost replies, one is five refusals of
+  five different kinds, two are turns that never returned. 
+- **A fault of mine:** three backend errors were logged during this run; I counted them and deployed before
+  reading them, and the log went with the container. The rule stands: read, then deploy.
+- A record key leaked through the causes template (an upper-case bare word); the template now masks those.
+
+**Reading:** step 5 is a loss on the hidden set on time, a draw on wrong-unwarned. The next image (step 6)
+carries the time levers (patch instead of rewrite, a 4-minute cap) and the three checks that would have spoken
+on p04, p05 and p07; its three tuning runs and hidden run started 04:25.
