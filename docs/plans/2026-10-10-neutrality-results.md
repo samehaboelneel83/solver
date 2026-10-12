@@ -767,3 +767,24 @@ p10-S          no     no     no     no    0     0       20
 - **5 right of 10, 5 built, 0 wrong**: every model built was right (p03 and p04 after one true warning each);
   five cases at the limit. The first run with no wrong answer at all. Runs 2 and 3, then the hidden set,
   overnight.
+
+## step7 — tuning run 2 of 3 (finished 23:46, 12 Oct; same image)
+
+```
+case           built  first  solved right  viol  warned  min
+p01-S          yes    yes    yes    yes   0     0       3
+p02-S          yes    yes    yes    yes   0     0       2.7
+p03-S          yes    no     yes    yes   0     3       9.9
+p04-S          yes    no     yes    no    0     3       18.8  (checker could not read the plan)
+p05-S          no     no     no     no    0     0       20
+p06-S          no     no     no     no    0     0       20.1
+p07-S          no     no     no     no    0     1       20
+p08-S          yes    no     yes    no    1     3       15
+p09-S          yes    yes    yes    yes   0     0       5.1
+p10-S          yes    yes    yes    no    0     0       4.6
+
+4 right of 10; built 7; wrong but solved 3 (of them warned on the card 2)
+```
+
+- **4 right of 10, 7 built, 3 wrong of which 2 warned**; the unwarned one keeps every rule and misses the goal
+  (p10, 4.6 min: the weaker-model class, nothing warns on it yet). Run 3 from 00:02, then the hidden set.
