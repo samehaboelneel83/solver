@@ -144,3 +144,10 @@ def test_a_goal_one_term_decides_is_named():
     trial = {"status": "optimal", "objective": -4520000, "used": {"pick": {"non_zero": 2, "cells": 8}}, "swamped": found, "seconds": 1}
     assert "CHECK THIS: one goal term decides the goal: o_penalty is 94% of it and o_value, o_cost barely count" in trial_for_person(trial)
     assert "one goal term decides the goal: o_penalty is 94%" in trial_said(trial)
+
+
+def test_a_number_inside_a_quoted_name_is_not_data():
+    """12 October 2026: the workspace name carried the clock ("P1 p02 S step6-1 0935") and 0935 was flagged."""
+    messages = [{"role": "user", "content": 'Please build this in a new workspace called "P1 p02 S step6-1 0935". '
+                                            'Call the problem "Plan 7". Sizes 40 and 25, limit 500, at most 70 a day.'}]
+    assert unused_numbers(messages, _spec()) == ["70"]

@@ -596,3 +596,10 @@ p02 right (13.4 min); p04 in refusals, among them "the spec has no ir" twice: a 
 no ir was taken whole and refused for having no model. A seed alone is a patch now. Kept as
 `step6d-1-aborted`; sixth start, same tag. The send-back log reads each of these in one look; before it, each
 cost a run.
+
+## Step 6, sixth start stopped: the clock in the workspace name was flagged as an unused number (12 Oct, 09:55)
+
+p02 and p04 right (4 and 8 min) but each with two cards declined for "0935" / "0940": the time the runners now
+put in the workspace name. A number inside a quoted name is not data; the check skips quoted text. p04's
+other warning was the no-data check naming two unlisted machine pairs, which the model then fixed: the first
+time that check turned a wrong plan right before the person saw it. Kept as `step6e-1-aborted`; seventh start.

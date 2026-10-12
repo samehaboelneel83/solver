@@ -1939,6 +1939,8 @@ def unused_numbers(messages: list[dict], spec: dict, held_too: set[float] | None
     of unread data covers (app/solve/lint.py)."""
     text = "\n".join(str(m.get("content") or "") for m in messages
                      if m.get("role") == "user" and not str(m.get("content") or "").startswith(PLATFORM))
+    # A number inside a quoted name ("call the workspace \\"Plan 0935\\"") names, it does not count.
+    text = re.sub(r"\"[^\"\n]{0,80}\"|“[^”\n]{0,80}”", " ", text)
     tight = re.compile(r",(?! )")
     text = "\n".join(line for line in text.splitlines()
                      if not (len(tight.findall(line)) >= 2 or (tight.search(line) and " " not in line.strip())))
