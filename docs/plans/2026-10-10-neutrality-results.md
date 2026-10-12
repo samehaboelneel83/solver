@@ -823,7 +823,8 @@ p10         3     0     2      1       11.8
 right per run: [5, 4, 5] -> mean 4.7 of 10, range 4-5; wrong unwarned (case-runs): 2 of 30
 ```
 
-- Three runs of this image: 5, 4, 5. Against step 6 (5, 3, 5) and step 5 (3, 5, 3): the mean edges up, the
-  range narrows to 4–5, and the wrong-unwarned count keeps falling. p01, p02, p09 right in every run; p04 right
-  in every run once the no-data check reads its pair table; p03 right in all three.
+- **Mean 4.7 of 10 (5, 4, 5), range 4–5; built 20 of 30; wrong unwarned 2 of 30.** Against step 6 (4.3: 5, 3, 5;
+  22 built; 5 unwarned) and step 5 (3.7: 3, 5, 3; 21; 7): the mean edges up, the range narrows, and the
+  wrong-unwarned count keeps falling (7 → 5 → 2). p01, p02, p03, p09 right in every run; p04 in two of three.
+  Never right: p05, p06, p07, p08, p10 -- the slow cases, lost to the limit more often than to a wrong model.
 - The hidden run follows (from 01:42).
