@@ -660,3 +660,47 @@ showed, so the driver's fallback took the newest. The driver now walks from any 
 scenario and its newest answered run; `rebase_runs.py` re-scored the finished folders (p08 run 3 right, goal
 620,380 = reference; p07 run 1 moved to a wrong base plan with one violation). The run 1 and run 2 tables above
 are read with that in mind; the three-run reading is computed after it.
+
+## step6 — tuning run 3 of 3 (finished 15:28, 12 Oct) and the three-run reading
+
+```
+case           built  first  solved right  viol  warned  min
+p01-S          yes    yes    yes    yes   0     0       2
+p02-S          yes    yes    yes    yes   0     0       3.6
+p03-S          yes    yes    yes    yes   0     0       7.5
+p04-S          yes    yes    no     no    0     0       20.1
+p05-S          no     no     no     no    0     0       20.1
+p06-S          yes    yes    yes    no    0     0       7.7
+p07-S          yes    yes    yes    no    1     0       5.1
+p08-S          yes    no     yes    yes   0     0       14.3
+p09-S          yes    no     yes    yes   0     0       4.6
+p10-S          no     no     no     no    0     0       13.3
+
+5 right of 10; built 8; wrong but solved 2 (of them warned on the card 0)
+```
+
+```
+case     runs right built warned min (mean)
+p01         3     3     3      0        4.0
+p02         3     2     2      1        9.6
+p03         3     3     3      2        7.0
+p04         3     1     3      1       13.2
+p05         3     0     1      2       19.1
+p06         3     0     1      0       16.0
+p07         3     0     3      0        5.6
+p08         3     1     2      2       17.9
+p09         3     3     3      0        5.4
+p10         3     0     1      1       12.0
+
+right per run: [5, 3, 5] -> mean 4.3 of 10, range 3-5; wrong unwarned (case-runs): 5 of 30
+```
+
+- **Mean 4.3 of 10 (5, 3, 5), range 3–5; built 22 of 30; wrong unwarned 8 of 30 case-runs** (after the base-run
+  re-scoring). Against the step 5 image (mean 3.7: 3, 5, 3; built 21; wrong unwarned 7): about one case better
+  on the mean, the same range, one more built, and the wrong-unwarned count about level -- the new checks
+  caught more (p04, p02's closed routes) and the model's variance gave some back (p06, p10).
+- **Always right on this image:** p01, p02 (in two of three), p09; **p03 right twice**; **p08 right once** (first
+  ever); **p05 built in two of three** (never before step 5).
+- **Still never right:** p04 (right once, then the record-kind shape, now covered in the queued check), p06
+  (a weaker model, nothing warns), p07 (the rule left out, Phase 3.2), p10.
+- The hidden run follows (from 15:28); the next image (the pair-table check) after it.
