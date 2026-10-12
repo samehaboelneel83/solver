@@ -788,3 +788,42 @@ p10-S          yes    yes    yes    no    0     0       4.6
 
 - **4 right of 10, 7 built, 3 wrong of which 2 warned**; the unwarned one keeps every rule and misses the goal
   (p10, 4.6 min: the weaker-model class, nothing warns on it yet). Run 3 from 00:02, then the hidden set.
+
+## step7 — tuning run 3 of 3 (finished 01:42, 13 Oct) and the three-run reading
+
+```
+case           built  first  solved right  viol  warned  min
+p01-S          yes    yes    yes    yes   0     0       4.2
+p02-S          yes    yes    yes    yes   0     0       4.6
+p03-S          yes    no     yes    yes   0     3       6.5
+p04-S          yes    yes    yes    yes   0     0       10.6
+p05-S          yes    no     no     no    0     4       20.1
+p06-S          no     no     no     no    0     0       20.1
+p07-S          yes    yes    yes    no    68    0       9.2
+p08-S          no     no     no     no    0     1       20
+p09-S          yes    no     yes    yes   0     0       6.3
+p10-S          yes    no     yes    no    0     1       10.7
+
+5 right of 10; built 8; wrong but solved 2 (of them warned on the card 1)
+```
+
+```
+case     runs right built warned min (mean)
+p01         3     3     3      0        3.7
+p02         3     3     3      0        3.6
+p03         3     3     3      3        7.7
+p04         3     2     3      2       13.6
+p05         3     0     1      2       20.1
+p06         3     0     0      0       20.1
+p07         3     0     1      1       16.4
+p08         3     0     1      2       18.3
+p09         3     3     3      0        6.8
+p10         3     0     2      1       11.8
+
+right per run: [5, 4, 5] -> mean 4.7 of 10, range 4-5; wrong unwarned (case-runs): 2 of 30
+```
+
+- Three runs of this image: 5, 4, 5. Against step 6 (5, 3, 5) and step 5 (3, 5, 3): the mean edges up, the
+  range narrows to 4–5, and the wrong-unwarned count keeps falling. p01, p02, p09 right in every run; p04 right
+  in every run once the no-data check reads its pair table; p03 right in all three.
+- The hidden run follows (from 01:42).
