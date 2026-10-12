@@ -628,3 +628,27 @@ p10-S          no     no     no     no    0     0       14.8
   draft lost at a summary, a seed-only patch taken whole), one harness fault (workspace names colliding across
   restarts), one false warning (the clock in the name) -- each read in one look from the send-back log, each
   fixed on the tuning set before it reached the hidden one.
+
+## step6 — tuning run 2 of 3 (finished 13:47, 12 Oct; same image)
+
+```
+case           built  first  solved right  viol  warned  min
+p01-S          yes    yes    yes    yes   0     0       5.3
+p02-S          no     no     no     no    0     1       20.1
+p03-S          yes    no     yes    yes   0     1       5.3
+p04-S          yes    yes    yes    no    1     0       13.2
+p05-S          yes    no     yes    no    0     3       17
+p06-S          no     no     no     no    0     0       20.1
+p07-S          yes    no     yes    no    1     0       7.7
+p08-S          no     no     no     no    0     1       20.1
+p09-S          yes    yes    yes    yes   0     0       7.5
+p10-S          yes    no     yes    no    0     1       8
+
+3 right of 10; built 7; wrong but solved 4 (of them warned on the card 2)
+```
+
+- **3 right of 10, 7 built, 4 wrong of which 2 warned.** p05 built and solved for the second time ever (wrong,
+  warned three times); p03 right again. Wrong unwarned: p04 (the allowed pairs loaded as a record kind, a shape
+  the queued check now reads) and p07 (the rule left out).
+- p02's declined warning was a true one (two closed routes shipped on at zero cost, named exactly); the retry
+  ran past the limit. Runs so far on this image: 5 and 3. Run 3 from 13:47, then the hidden set.
