@@ -1788,6 +1788,12 @@ def trial_said(trial: Any) -> str:
                      f"others ({', '.join(sw.get('others') or [])}) barely count; check its weight or the penalty's "
                      "size against what the person values, so the goal weighs what they described")
     for nd in trial.get("no_data") or []:
+        if nd.get("kind") == "set":
+            flags.append(f"{nd.get('var')} is used on {nd.get('cells')} cell(s) that no record of {nd.get('parameter')} "
+                         f"pairs ({', '.join(nd.get('examples') or [])}); if those records are the only pairs allowed, add "
+                         "the rule that keeps the decision to them (sum the decision over the pairs no record names = 0, "
+                         "or bind the decision's pair indices through that record kind)")
+            continue
         flags.append(f"{nd.get('var')} is used on {nd.get('cells')} cell(s) where {nd.get('parameter')} gives no value "
                      f"({', '.join(nd.get('examples') or [])}), so its default {_num(nd.get('default'))} applied there; "
                      "if the data lists the only pairs allowed, add the rule that keeps the decision to them "
@@ -2054,6 +2060,11 @@ def trial_for_person(trial: Any) -> str:
                  f"{', '.join(sw.get('others') or [])} barely count -- a penalty or weight out of scale with the rest "
                  "gives a plan that only avoids that term")
     for nd in trial.get("no_data") or []:
+        if nd.get("kind") == "set":
+            line += (f"\n- CHECK THIS: {nd.get('var')} is used on {nd.get('cells')} cell(s) that no record of "
+                     f"{nd.get('parameter')} pairs ({', '.join(nd.get('examples') or [])}) -- if those records list "
+                     "the pairs allowed, restrict the decision to them")
+            continue
         line += (f"\n- CHECK THIS: {nd.get('var')} is used on {nd.get('cells')} cell(s) where {nd.get('parameter')} "
                  f"gives no value ({', '.join(nd.get('examples') or [])}): its default {_num(nd.get('default'))} "
                  "applies there -- if those pairs are not allowed, restrict the decision to the pairs the data gives")

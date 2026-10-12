@@ -84,7 +84,7 @@ def test_a_decision_used_where_a_pair_parameter_gives_no_value_is_named():
     assignments = {("produce", ("P1", "M2", "S1")): 4, ("produce", ("P2", "M1", "S1")): 19, ("produce", ("P2", "M2", "S2")): 0,
                    ("on", ("M1",)): 1}
     found = used_without_data(ir, data, assignments)
-    assert found == [{"var": "produce", "parameter": "time", "cells": 1, "default": 0, "examples": ["P2 · M1"]}]
+    assert found == [{"var": "produce", "parameter": "time", "kind": "parameter", "cells": 1, "default": 0, "examples": ["P2 · M1"]}]
     trial = {"status": "optimal", "objective": 980, "used": {"produce": {"non_zero": 2, "cells": 12}}, "no_data": found, "seconds": 1}
     assert "CHECK THIS: produce is used on 1 cell(s) where time gives no value (P2 · M1): its default 0 applies" in trial_for_person(trial)
     assert "produce is used on 1 cell(s) where time gives no value" in trial_said(trial)
@@ -151,3 +151,22 @@ def test_a_number_inside_a_quoted_name_is_not_data():
     messages = [{"role": "user", "content": 'Please build this in a new workspace called "P1 p02 S step6-1 0935". '
                                             'Call the problem "Plan 7". Sizes 40 and 25, limit 500, at most 70 a day.'}]
     assert unused_numbers(messages, _spec()) == ["70"]
+
+
+def test_a_record_kind_that_pairs_two_others_is_a_pair_table_for_the_no_data_check():
+    """12 October 2026: the allowed product-machine pairs loaded as records, and a product made on a machine no
+    record pairs it with -- no pair parameter, so nothing spoke."""
+    from app.agent.core import trial_for_person
+    from app.api.model_spec import used_without_data
+
+    ir = {"variables": {"produce": {"index": ["product", "machine", "shift"]}}, "parameters": {}}
+    data = {"sets": {"product": [{"id": "P1"}, {"id": "P2"}], "machine": [{"id": "M1"}, {"id": "M2"}],
+                     "shift": [{"id": "S1"}],
+                     "product_machine": [{"id": "pm1", "product": "P1", "machine": "M2", "hours": 0.1},
+                                         {"id": "pm2", "product": "P2", "machine": "M2", "hours": 0.2}]},
+            "parameters": {}, "parameter_defaults": {}}
+    found = used_without_data(ir, data, {("produce", ("P1", "M2", "S1")): 4, ("produce", ("P2", "M1", "S1")): 19})
+    assert found == [{"var": "produce", "parameter": "product_machine", "kind": "set", "cells": 1, "default": 0, "examples": ["P2 · M1"]}]
+    card = trial_for_person({"status": "optimal", "used": {"produce": {"non_zero": 2, "cells": 4}}, "no_data": found})
+    assert "CHECK THIS: produce is used on 1 cell(s) that no record of product_machine pairs (P2 · M1)" in card
+    assert used_without_data(ir, data, {("produce", ("P1", "M2", "S1")): 4}) == []

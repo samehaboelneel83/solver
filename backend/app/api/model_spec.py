@@ -352,9 +352,32 @@ def used_without_data(ir: dict[str, Any], data: dict[str, Any], assignments: dic
             continue
         keys = {tuple(str(r.get(t, r.get(str(i)))) for i, t in enumerate(index)) for r in rows}
         given[name] = (index, keys)
-    if not given:
+    # A record kind that is a pair table: its rows name a key of two other kinds (12 October 2026: the allowed
+    # product-machine pairs loaded as records "product_machine", and a product made on a machine no record
+    # pairs it with). Read from the rows' fields, whatever they are called.
+    sets = data.get("sets") if isinstance(data.get("sets"), dict) else {}
+    ids = {name: {str(r.get("id")) for r in rows if isinstance(r, dict)} for name, rows in sets.items() if isinstance(rows, list)}
+    tables: dict[str, tuple[list[str], set[tuple[str, ...]]]] = {}
+    for name, rows in sets.items():
+        rows = [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+        if len(rows) < 2:
+            continue
+        fields = [f for f in rows[0] if f not in ("id", "label", "geometry")]
+        kinds_of: dict[str, str] = {}
+        for f in fields:
+            values = {str(r.get(f)) for r in rows if r.get(f) not in (None, "")}
+            if not values or len(values) < len(rows) / 2 and len(values) == 1 and len(rows) > 4:
+                continue  # one value over many rows is a flag or a text, not a key
+            for other, keys in ids.items():
+                if other != name and keys and values <= keys and other not in kinds_of.values():
+                    kinds_of[f] = other
+                    break
+        if len(kinds_of) >= 2:
+            fs = list(kinds_of)[:2]
+            tables[name] = ([kinds_of[f] for f in fs], {tuple(str(r.get(f)) for f in fs) for r in rows})
+    if not given and not tables:
         return []
-    used: dict[tuple[str, str], list[tuple[str, ...]]] = {}
+    used: dict[tuple[str, str, str], list[tuple[str, ...]]] = {}
     for key, value in assignments.items():
         var = str(key[0])
         spec = variables.get(var)
@@ -369,9 +392,15 @@ def used_without_data(ir: dict[str, Any], data: dict[str, Any], assignments: dic
                 continue
             projected = tuple(cell[types.index(t)] for t in index)
             if projected not in keys:
-                used.setdefault((var, name), []).append(projected)
-    return [{"var": var, "parameter": name, "cells": len(cells), "default": defaults.get(name, 0),
-             "examples": [" · ".join(c) for c in cells[:3]]} for (var, name), cells in used.items()]
+                used.setdefault((var, name, "parameter"), []).append(projected)
+        for name, (index, keys) in tables.items():
+            if name in types or not all(types.count(t) == 1 for t in index):
+                continue
+            projected = tuple(cell[types.index(t)] for t in index)
+            if projected not in keys:
+                used.setdefault((var, name, "set"), []).append(projected)
+    return [{"var": var, "parameter": name, "kind": kind, "cells": len(cells), "default": defaults.get(name, 0),
+             "examples": [" · ".join(c) for c in cells[:3]]} for (var, name, kind), cells in used.items()]
 
 
 def _trial(db: Session, domain_id: int, ir: dict[str, Any], keep: dict[str, Any] | None = None) -> dict[str, Any]:

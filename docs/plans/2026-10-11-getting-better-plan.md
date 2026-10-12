@@ -94,3 +94,6 @@ corpus before the browser.
   trial's own goal breakdown. 100 tests pass. Queued for the next image, which now holds: the no-data check,
   the `over`-without-`sum` repair, the cells-as-metres and attachment-count rules for unused numbers, the
   goal-sense check, the patch send-back (1.1), the 4-minute cap (1.2), and this.
+- **12 Oct, 12:40 — lever 2 widened.** The no-data check also reads a record kind that pairs two others (the
+  allowed pairs loaded as records rather than a pair parameter: p04 under step 6 run 2 slipped past with that
+  shape). Card and model wording for the record form. 97 tests, no new false alarm on the golds. Queued.
