@@ -17,7 +17,7 @@ from pathlib import Path
 _QUOTED = re.compile(r"\\?\"[^\"]*\\?\"|'[^']*'|\[[^\]]*\]")
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 _MSG = re.compile(r'"msg":\s*"((?:[^"\\]|\\.)*)"')
-_SNAKE = re.compile(r"\b[A-Za-z]+_\w*\b")
+_SNAKE = re.compile(r"\b[A-Za-z]+_\w*\b|\b[A-Z][A-Z0-9]{2,}\b")  # snake_case names and ALL-CAPS keys are the problem's
 
 
 def template(text: str) -> str:
