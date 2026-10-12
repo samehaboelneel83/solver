@@ -26,14 +26,55 @@ def is_partial(spec: dict[str, Any]) -> bool:
     return "seed" not in spec or (isinstance(ir, dict) and "variables" not in ir)
 
 
+#: How each seed list is keyed, so a patch replaces its own entries and leaves the others.
+SEED_KEYS = {"entity_types": ("name",), "relationship_types": ("name",), "parameters": ("name",),
+             "entities": ("type", "key"), "relationships": ("type", "from", "to"),
+             "parameter_values": ("parameter", "entities"), "entities_from_file": ("type",),
+             "parameter_values_from_file": ("parameter",), "relationships_from_file": ("type",),
+             "relationships_in_order": ("type",), "distances_from_fields": ("name",)}
+
+
+def _key(row: Any, fields: tuple[str, ...]) -> str:
+    return json.dumps([row.get(f) for f in fields] if isinstance(row, dict) else row, sort_keys=True, default=str)
+
+
+def _merge_seed(previous: dict[str, Any], partial: dict[str, Any]) -> dict[str, Any]:
+    """A seed part sent alone (a new parameter and its file entry, a record kind) joins the draft's seed: each
+    list by its entries' keys (12 October 2026: a partial seed replaced the whole one, and the next refusal was
+    "no value loaded" for everything else, eleven times)."""
+    out = copy.deepcopy(previous)
+    for key, value in partial.items():
+        if key in SEED_KEYS and isinstance(value, list) and isinstance(out.get(key), list):
+            fields = SEED_KEYS[key]
+            kept = list(out[key])
+            index = {_key(r, fields): i for i, r in enumerate(kept)}
+            for row in value:
+                k = _key(row, fields)
+                if isinstance(row, dict) and row.get("drop"):
+                    kept = [r for r in kept if _key(r, fields) != k]
+                    index = {_key(r, fields): i for i, r in enumerate(kept)}
+                elif k in index:
+                    kept[index[k]] = row
+                else:
+                    index[k] = len(kept)
+                    kept.append(row)
+            out[key] = kept
+        else:
+            out[key] = value
+    return out
+
+
 def merge(previous: dict[str, Any] | None, partial: dict[str, Any]) -> dict[str, Any]:
     """The partial spec on the previous one: what the patch names replaces, what it leaves out stays; rules by
-    id (`{"id": "c_x", "drop": true}` removes one; a new id is added); decisions and parameters by name."""
+    id (`{"id": "c_x", "drop": true}` removes one; a new id is added); decisions and parameters by name; the
+    seed's lists by their entries' keys."""
     if not isinstance(previous, dict):
         return partial
     out = copy.deepcopy(previous)
     for key, value in partial.items():
-        if key == "ir" and isinstance(value, dict) and isinstance(out.get("ir"), dict):
+        if key == "seed" and isinstance(value, dict) and isinstance(out.get("seed"), dict):
+            out["seed"] = _merge_seed(out["seed"], value)
+        elif key == "ir" and isinstance(value, dict) and isinstance(out.get("ir"), dict):
             ir = out["ir"]
             for k, v in value.items():
                 if k == "constraints" and isinstance(v, list) and isinstance(ir.get("constraints"), list):

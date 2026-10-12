@@ -46,3 +46,24 @@ def test_the_draft_is_folded_from_the_conversations_own_calls_and_completes_a_pa
     assert "y" in spec["ir"]["variables"] and spec["seed"] == FULL["seed"]
     assert note == "the plan was completed from your last one: variables changed, everything else kept"
     assert draft.complete(FULL, messages) == (FULL, None)
+
+
+def test_a_seed_part_sent_alone_joins_the_drafts_seed_by_key():
+    """12 October 2026: a partial seed replaced the whole one; "no value loaded" for everything else, eleven times."""
+    previous = {"seed": {"entity_types": [{"name": "a", "attributes": []}],
+                         "entities": [{"type": "a", "key": "a1"}, {"type": "a", "key": "a2"}],
+                         "parameters": [{"name": "p", "index": ["a"], "default_value": 0}],
+                         "parameter_values_from_file": [{"file": "f.csv", "parameter": "p", "entities": [["a", "id"]], "value": "p"}]},
+                "ir": {"version": 2, "variables": {"x": {"index": ["a"]}}, "constraints": []}}
+    patch = {"seed": {"parameters": [{"name": "q", "index": ["a"], "default_value": 1}],
+                      "parameter_values_from_file": [{"file": "f.csv", "parameter": "q", "entities": [["a", "id"]], "value": "q"}],
+                      "entities": [{"type": "a", "key": "a2", "drop": True}, {"type": "a", "key": "a3"}]},
+             "ir": {"parameters": {"q": {"index": ["a"]}}}}
+    assert draft.is_partial(patch)
+    merged = draft.merge(previous, patch)
+    seed = merged["seed"]
+    assert [p["name"] for p in seed["parameters"]] == ["p", "q"]
+    assert [e["parameter"] for e in seed["parameter_values_from_file"]] == ["p", "q"]
+    assert [e["key"] for e in seed["entities"]] == ["a1", "a3"] and seed["entity_types"] == previous["seed"]["entity_types"]
+    assert merged["ir"]["variables"] == previous["ir"]["variables"] and merged["ir"]["parameters"] == {"q": {"index": ["a"]}}
+    assert len(previous["seed"]["parameters"]) == 1  # the draft is never changed in place

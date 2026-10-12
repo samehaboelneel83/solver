@@ -443,8 +443,11 @@ _NEW_WORKSPACE = re.compile(r"\b(?:new|fresh|separate|another) (?:workspace|doma
 _SAME_WORKSPACE = re.compile(r"\b(?:existing|same|this|selected|current|old) (?:workspace|domain)\b", re.I)
 PATCH_HINT = (" Send propose_plan again with the summary and, in spec, ONLY what changes: {\"ir\": {\"constraints\": "
               "[the rules you fixed or added]}} (to remove a rule: {\"id\": \"...\", \"drop\": true}; a changed goal "
-              "under \"objective\"; a changed decision under \"variables\"). Everything else is kept from your last "
-              "plan: do not resend the seed or the rules that stand.")
+              "under \"objective\"; a changed decision under \"variables\"; a parameter to declare under "
+              "\"parameters\"). Data that changes goes the same way: {\"seed\": {\"parameters\": [the new one], "
+              "\"parameter_values_from_file\": [its entry]}} -- each seed list is merged by name, type or key, so "
+              "send only the entries that change. Everything else is kept from your last plan: do not resend the "
+              "rules, records or files that stand.")
 PASTED_ATTACHED = ("The tables pasted in that message are attached as files: {files}. Load their rows with "
                    "entities_from_file / parameter_values_from_file (and query_file to add up), never by typing the "
                    "rows into the plan.")

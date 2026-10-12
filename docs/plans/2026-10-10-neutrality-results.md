@@ -528,3 +528,12 @@ h16-S          yes    yes    yes    no    0     0       18.2
 **Reading:** step 5 is a loss on the hidden set on time, a draw on wrong-unwarned. The next image (step 6)
 carries the time levers (patch instead of rewrite, a 4-minute cap) and the three checks that would have spoken
 on p04, p05 and p07; its three tuning runs and hidden run started 04:25.
+
+## Step 6, first start stopped: a partial seed replaced the whole seed (12 Oct, 05:25)
+
+p02 and p04 both unbuilt at the limit on the new image, p04 after eleven refusals of "a parameter is used but
+no value is loaded". The patch send-back told the model to send only what changes and never the seed; a fix
+that needs new data must touch the seed, and when the model sent a partial seed the merge replaced the whole
+seed with it, so the next refusal was about everything else. The seed is now merged list by list and entry by
+key (a parameter by name, a record by type and key, a file entry by what it loads; `"drop": true` removes), and
+the hint says so. Partial run kept as `step6-1-aborted`; second start, same tag.
