@@ -178,3 +178,7 @@ The neutrality plan's step 5 and step 3b measurements run on within Phase 0; the
   harmless, 4 missed -- all dropped rules on the timetable, the Phase 3.2 gap. The harness now counts a refused
   solve as a catch, and the platform's unused-numbers check counts an attachment's sizes (a drawing's layers and
   features, a sheet's rows) as held: "layer PROTECTED holds 14 areas" is not a number of the model.
+- **12 Oct, 16:20 — Phase 1.1 done.** `docs/plans/canonical-form.md`: every repair inventoried with its
+  incident and class. Almost all are canonicalisations (one spelling, one meaning); three are inferences the
+  spec determines; no silent heuristic remains. The order of the single pass is written down; Phase 1.2
+  (`app/agent/canon.py`, one function, one note list, one test file, the fixed-point test on the golds) follows.
