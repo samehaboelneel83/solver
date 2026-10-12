@@ -126,9 +126,31 @@ def draft_from(messages: list[dict[str, Any]]) -> dict[str, Any] | None:
     return draft
 
 
+WHOLE_MARK = "[whole plan next]"
+
+
+def _plan_results(messages: list[dict[str, Any]]) -> list[str]:
+    """What propose_plan answered so far, oldest first (the tool messages of the conversation)."""
+    return [str(m.get("content") or "") for m in messages
+            if m.get("role") == "tool" and m.get("name") == "propose_plan"]
+
+
+def repeated(verdict: str, messages: list[dict[str, Any]]) -> int:
+    """How many earlier propose_plan answers began as this one does (the first 160 characters, numbers aside):
+    the same refusal coming back after a patch."""
+    import re
+
+    head = re.sub(r"\d+", "#", verdict[:160])
+    return sum(1 for r in _plan_results(messages) if re.sub(r"\d+", "#", r)[:len(head)] == head)
+
+
 def complete(spec: dict[str, Any], messages: list[dict[str, Any]]) -> tuple[dict[str, Any], str | None]:
-    """`spec` whole, or the patch on the draft; the note says what was kept."""
+    """`spec` whole, or the patch on the draft; the note says what was kept. After a send-back that asked for
+    the whole plan (WHOLE_MARK in the last propose_plan answer), the spec is taken as it is, no merge."""
     if not is_partial(spec):
+        return spec, None
+    results = _plan_results(messages)
+    if results and WHOLE_MARK in results[-1]:
         return spec, None
     draft = draft_from(messages)
     if draft is None:

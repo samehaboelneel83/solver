@@ -562,3 +562,13 @@ p10-S          no     no     no     no    0     0       20.1
 - **Not built: 4**, all at the limit: p05 and p08 after two warned cards each (declined by the harness), p06
   and p10 on long replies. The time levers are in this image; the cap is 4 minutes; what remains is the
   model's own pace on hard cases. Runs 2 and 3 follow, then the hidden set.
+
+## Step 6, second start stopped: a refusal that a patch cannot clear (12 Oct, 08:30)
+
+Run 2 opened with p02 and p04 unbuilt (3 and 14 refusals of one kind each) after both built first time in
+run 1. A rule left out of a patch stays, so a model that removes a rule by resending without it gets the same
+refusal back, as often as it tries. Now: every send-back is logged (`assistant.sent_back`, the panel keeps only
+a clipped preview); the same refusal a second time after a patch names the rules the plan still holds and how
+to drop one; a third time asks for the whole plan, and the next plan is taken whole, no merge. Run 1 (5 of 10)
+stands as the reading of the image before this rule, kept as `step6a-1`; the partial run 2 as
+`step6a-2-aborted`; the three runs restart as `step6`.

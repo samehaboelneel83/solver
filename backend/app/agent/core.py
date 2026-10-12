@@ -448,6 +448,12 @@ PATCH_HINT = (" Send propose_plan again with the summary and, in spec, ONLY what
               "\"parameter_values_from_file\": [its entry]}} -- each seed list is merged by name, type or key, so "
               "send only the entries that change. Everything else is kept from your last plan: do not resend the "
               "rules, records or files that stand.")
+REPEATED_HINT = (" This is the same problem as before your patch, so the patch did not change what it names. Your plan "
+                 "still holds these rules: {rules}. A rule left out of a patch STAYS: to remove one send "
+                 "{{\"id\": \"...\", \"drop\": true}} in \"constraints\"; to change one, send it under its id. "
+                 "Or resend the whole spec (seed and ir) and it replaces the plan.")
+WHOLE_HINT = (" The same problem came back twice after patches. Resend the WHOLE spec now (seed and ir, complete): "
+              "it replaces the plan; nothing from the last plan is kept. " + "[whole plan next]")
 PASTED_ATTACHED = ("The tables pasted in that message are attached as files: {files}. Load their rows with "
                    "entities_from_file / parameter_values_from_file (and query_file to add up), never by typing the "
                    "rows into the plan.")
@@ -3409,8 +3415,23 @@ class Agent:
         """The dry run. "PLAN_OK" lets the plan through to the person; anything else goes back to the model --
         with, once a plan exists, the way to patch it instead of rewriting it (app/agent/draft.py)."""
         verdict = self._check_plan_whole(args)
-        if verdict.startswith("PLAN_OK") or agent_draft.draft_from(self.messages) is None:
+        if verdict.startswith("PLAN_OK"):
             return verdict
+        # Every send-back in the log: the panel keeps a clipped preview only, and a run's losses could not be
+        # read back (12 October 2026).
+        logging.getLogger("solver.assistant").info("assistant.sent_back %s", verdict[:600].replace("\n", " "))
+        draft = agent_draft.draft_from(self.messages)
+        if draft is None:
+            return verdict
+        # The same refusal after a patch: the patch did not touch what it names, most often because removing a
+        # rule needs "drop" (a rule left out of a patch stays). Twice: name the rules the plan still holds;
+        # three times: the next plan is taken whole, no merge (the marker is read by draft.complete).
+        repeats = agent_draft.repeated(verdict, self.messages)
+        if repeats >= 2:
+            return verdict + WHOLE_HINT
+        if repeats == 1:
+            ids = [str(c.get("id")) for c in ((draft.get("ir") or {}).get("constraints") or []) if isinstance(c, dict)]
+            return verdict + REPEATED_HINT.format(rules=", ".join(ids) or "none")
         return verdict + PATCH_HINT
 
     def _check_plan_whole(self, args: dict) -> str:

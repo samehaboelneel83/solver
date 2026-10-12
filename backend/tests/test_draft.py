@@ -67,3 +67,23 @@ def test_a_seed_part_sent_alone_joins_the_drafts_seed_by_key():
     assert [e["key"] for e in seed["entities"]] == ["a1", "a3"] and seed["entity_types"] == previous["seed"]["entity_types"]
     assert merged["ir"]["variables"] == previous["ir"]["variables"] and merged["ir"]["parameters"] == {"q": {"index": ["a"]}}
     assert len(previous["seed"]["parameters"]) == 1  # the draft is never changed in place
+
+
+def test_a_repeated_refusal_after_a_patch_names_the_rules_and_then_asks_for_the_whole_plan():
+    """12 October 2026: the same refusal fourteen times -- a rule left out of a patch stays."""
+    from app.agent import core
+
+    refusal = "The spec does not build yet; fix these: Parameter p[a] is used by the model but no value is loaded"
+    messages = [_call({"summary": "s", "spec": FULL}), {"role": "tool", "name": "propose_plan", "content": refusal},
+                _call({"summary": "s", "spec": {"ir": {"constraints": [FULL["ir"]["constraints"][0]]}}})]
+    assert draft.repeated(refusal, messages) == 1
+    assert draft.repeated("Another problem entirely", messages) == 0
+    messages += [{"role": "tool", "name": "propose_plan", "content": refusal + core.REPEATED_HINT.format(rules="c_one, c_two")},
+                 _call({"summary": "s", "spec": {"ir": {"constraints": [FULL["ir"]["constraints"][1]]}}})]
+    assert draft.repeated(refusal, messages) == 2
+    # After the whole-plan hint, a partial spec is taken as it is, no merge.
+    messages += [{"role": "tool", "name": "propose_plan", "content": refusal + core.WHOLE_HINT},
+                 _call({"summary": "s", "spec": {"ir": {"constraints": []}}})]
+    spec, note = draft.complete({"ir": {"constraints": []}}, messages)
+    assert spec == {"ir": {"constraints": []}} and note is None
+    assert draft.WHOLE_MARK in core.WHOLE_HINT
