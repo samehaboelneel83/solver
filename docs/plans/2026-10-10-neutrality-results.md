@@ -22,7 +22,9 @@ warning on the plan card — the number that must reach 0.
 | step4 | same | hidden, 16 small | 7 / 16 | 11 | 4 | the best hidden reading so far (base 6, step 2 4); 5 at the limit, all slow or lost replies |
 | step5 | image `solver-backend:step5` (fourth start; the checks, repairs, send-backs, pasted tables, corridor, map items, 0122) | tuning x3 | mean 3.7 (3, 5, 3) | 21 of 30 | 7 of 30 | the three-run reading |
 | step5 | same | hidden, 16 small | 4 / 16 | 8 | 3 | below step 4's 7: eight cases at the limit |
-| step6 | image `solver-backend:step6` (main at 0f85231 without 3b): + no-data, swamped-goal and goal-sense checks, `over` repair, unused-number rules, patch send-back, 4-minute cap | tuning x3 + hidden | running (from 04:25, 12 Oct) | | | |
+| step6 | image `solver-backend:step6` (seventh start; main at bb05f11 without 3b): + no-data, swamped-goal and goal-sense checks, `over` repair, unused-number rules, patch send-back (four defects fixed on the way), 4-minute cap, send-back log | tuning x3 | mean 4.3 (5, 3, 5) | 22 of 30 | 5 of 30 | |
+| step6 | same | hidden, 16 small | 6 / 16 | 7 | 1 | six of the seven built are right; nine at the limit, all slow replies |
+| step7 | image `solver-backend:step7` (main at 384549a without 3b): + the pair-table form of the no-data check | tuning x3 + hidden | running (from 19:30, 12 Oct) | | | |
 
 ## base — hidden set, before step 2 (finished 02:29, 11 Oct)
 
@@ -704,3 +706,42 @@ right per run: [5, 3, 5] -> mean 4.3 of 10, range 3-5; wrong unwarned (case-runs
 - **Still never right:** p04 (right once, then the record-kind shape, now covered in the queued check), p06
   (a weaker model, nothing warns), p07 (the rule left out, Phase 3.2), p10.
 - The hidden run follows (from 15:28); the next image (the pair-table check) after it.
+
+## step6 — hidden set (finished 19:20, 12 Oct)
+
+```
+case           built  first  solved right  viol  warned  min
+h01-S          no     no     no     no    0     0       20.1
+h02-S          no     no     no     no    0     0       20
+h03-S          yes    yes    yes    yes   0     0       2.6
+h04-S          yes    yes    yes    yes   0     0       9.7
+h05-S          no     no     no     no    0     0       20
+h06-S          yes    yes    yes    yes   0     0       2.7
+h07-S          yes    yes    yes    yes   0     0       14.5
+h08-S          yes    yes    yes    yes   0     0       4.2
+h09-S          yes    no     yes    yes   0     3       11.2
+h10-S          no     no     no     no    0     0       20
+h11-S          no     no     no     no    0     0       20
+h12-S          yes    yes    yes    no    23    0       7.5
+h13-S          no     no     no     no    0     0       20
+h14-S          no     no     no     no    0     0       20.1
+h15-S          no     no     no     no    0     0       20
+h16-S          no     no     no     no    0     0       20
+
+6 right of 16; built 7; wrong but solved 1 (of them warned on the card 0)
+```
+
+| Hidden reading | base | step 2 | step 4 | step 5 | step 6 |
+|---|---|---|---|---|---|
+| right of 16 | 6 | 4 | 7 | 4 | 6 |
+| built | 12 | 9 | 11 | 8 | 7 |
+| wrong, unwarned | 6 | 3 | 4 | 3 | 1 |
+
+- **Six of the seven built are right** (five first time, one after three warned cards declined). One wrong
+  unwarned (23 violations: rules left out, the Phase 3.2 class). The checks are now doing on the hidden set
+  what they do on the tuning set: a built model is nearly always right or warned.
+- **Nine at the limit, every one a slow reply** (the 4-minute cap cut it, the shorter re-ask did not finish);
+  no refusals, no backend errors (read before the deploy this time). The loss is the model's own pace on the
+  problems it finds hard; the staged protocol (Phase 3) is the structural answer, the patch send-back its
+  first half.
+- The next image (step 7: the pair-table form of the no-data check) measures overnight.
