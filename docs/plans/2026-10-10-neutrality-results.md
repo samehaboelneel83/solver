@@ -695,12 +695,12 @@ p10         3     0     1      1       12.0
 right per run: [5, 3, 5] -> mean 4.3 of 10, range 3-5; wrong unwarned (case-runs): 5 of 30
 ```
 
-- **Mean 4.3 of 10 (5, 3, 5), range 3–5; built 22 of 30; wrong unwarned 8 of 30 case-runs** (after the base-run
-  re-scoring). Against the step 5 image (mean 3.7: 3, 5, 3; built 21; wrong unwarned 7): about one case better
-  on the mean, the same range, one more built, and the wrong-unwarned count about level -- the new checks
-  caught more (p04, p02's closed routes) and the model's variance gave some back (p06, p10).
-- **Always right on this image:** p01, p02 (in two of three), p09; **p03 right twice**; **p08 right once** (first
-  ever); **p05 built in two of three** (never before step 5).
+- **Mean 4.3 of 10 (5, 3, 5), range 3–5; built 22 of 30; wrong unwarned 5 of 30 case-runs** (after the base-run
+  re-scoring; `three.py`'s tally). Against the step 5 image (mean 3.7: 3, 5, 3; built 21; wrong unwarned 7 of
+  30): about one case better on the mean, the same range, one more built, two fewer wrong unwarned -- the new
+  checks caught more (p04, p02's closed routes), and the model's variance gave some back (p06, p10).
+- **Always right on this image:** p01, p03 (the corridor fix holds), p09; p02 in two of three; **p08 right once**
+  (first ever); p05 built, though not right.
 - **Still never right:** p04 (right once, then the record-kind shape, now covered in the queued check), p06
   (a weaker model, nothing warns), p07 (the rule left out, Phase 3.2), p10.
 - The hidden run follows (from 15:28); the next image (the pair-table check) after it.
