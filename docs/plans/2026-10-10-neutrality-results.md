@@ -603,3 +603,28 @@ p02 and p04 right (4 and 8 min) but each with two cards declined for "0935" / "0
 put in the workspace name. A number inside a quoted name is not data; the check skips quoted text. p04's
 other warning was the no-data check naming two unlisted machine pairs, which the model then fixed: the first
 time that check turned a wrong plan right before the person saw it. Kept as `step6e-1-aborted`; seventh start.
+
+## step6 — tuning run 1 of 3 (finished 11:40, 12 Oct; seventh start, image of bb05f11 without 3b)
+
+```
+case           built  first  solved right  viol  warned  min
+p01-S          yes    yes    yes    yes   0     0       4.8
+p02-S          yes    yes    yes    yes   0     0       5
+p03-S          yes    no     yes    yes   0     3       8.3
+p04-S          yes    no     yes    yes   0     1       6.2
+p05-S          no     no     no     no    0     1       20.1
+p06-S          no     no     no     no    0     0       20.1
+p07-S          yes    yes    yes    no    1     0       4.1
+p08-S          yes    no     yes    no    2     3       19.2
+p09-S          yes    yes    yes    yes   0     0       4.1
+p10-S          no     no     no     no    0     0       14.8
+
+5 right of 10; built 7; wrong but solved 2 (of them warned on the card 1)
+```
+
+- **5 right of 10, 7 built, 2 wrong of which 1 warned** (p08, built for the first time in any run and warned on
+  the card; p07 wrong unwarned, the rule-left-out class). Three cases at the limit.
+- The seven starts: four defects of the patch send-back (a whole seed swapped in, an un-droppable rule, the
+  draft lost at a summary, a seed-only patch taken whole), one harness fault (workspace names colliding across
+  restarts), one false warning (the clock in the name) -- each read in one look from the send-back log, each
+  fixed on the tuning set before it reached the hidden one.
