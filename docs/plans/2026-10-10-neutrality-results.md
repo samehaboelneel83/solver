@@ -537,3 +537,28 @@ that needs new data must touch the seed, and when the model sent a partial seed 
 seed with it, so the next refusal was about everything else. The seed is now merged list by list and entry by
 key (a parameter by name, a record by type and key, a file entry by what it loads; `"drop": true` removes), and
 the hint says so. Partial run kept as `step6-1-aborted`; second start, same tag.
+
+## step6 — tuning run 1 of 3 (finished 07:27, 12 Oct; second start, image of 6721f5b without 3b)
+
+```
+case           built  first  solved right  viol  warned  min
+p01-S          yes    yes    yes    yes   0     0       7.5
+p02-S          yes    yes    yes    yes   0     0       3.7
+p03-S          yes    yes    yes    yes   0     0       8.4
+p04-S          yes    yes    yes    yes   0     0       6.8
+p05-S          no     no     no     no    0     2       20.1
+p06-S          no     no     no     no    0     0       20.1
+p07-S          yes    no     yes    no    44    0       16.1
+p08-S          no     no     no     no    0     2       20
+p09-S          yes    yes    yes    yes   0     0       4
+p10-S          no     no     no     no    0     0       20.1
+
+5 right of 10; built 6; wrong but solved 1 (of them warned on the card 0)
+```
+
+- **Every built case but one is right, and every right case came first time with no warning.** p04 right for
+  the first time in any run (the no-data check on the trial); p03 right again (the corridor fix).
+- **Wrong unwarned: 1** (p07, 44 violations: the rule-left-out class, Phase 3.2's).
+- **Not built: 4**, all at the limit: p05 and p08 after two warned cards each (declined by the harness), p06
+  and p10 on long replies. The time levers are in this image; the cap is 4 minutes; what remains is the
+  model's own pace on hard cases. Runs 2 and 3 follow, then the hidden set.
