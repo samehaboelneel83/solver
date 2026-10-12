@@ -14,7 +14,7 @@ for f in ../hidden/h[0-9][0-9]_*.py; do
   [ -d "$case_dir" ] || continue
   out="runs/hidden/${p}-${size}-${tag}"
   echo "$(date +%T) start ${p} ${size}" >> "runs/hidden-${tag}.log"
-  node drive_case.mjs "$case_dir" "$out" "H ${p} ${size} ${tag}" > "${out}.out" 2>&1
+  node drive_case.mjs "$case_dir" "$out" "H ${p} ${size} ${tag} $(date +%H%M)" > "${out}.out" 2>&1
   MSYS_NO_PATHCONV=1 docker run --rm -v "D:/solver/backend:/app" -w /app solver-backend-test \
     python -m bench.phase1.score "bench.hidden.${m}" "bench/hidden/cases/${p}/${size}" "bench/phase1/${out}" > "${out}/score.json" 2>/dev/null
   echo "$(date +%T) done ${p} ${size}" >> "runs/hidden-${tag}.log"

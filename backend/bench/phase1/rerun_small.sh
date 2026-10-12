@@ -9,7 +9,7 @@ for m in p02_supply_chain p04_factory p06_timetable p01_hospital p08_cyber p07_g
   p="${m%%_*}"
   out="runs/${p}-S-${tag}"
   echo "$(date +%T) start $p" >> "runs-${tag}.log"
-  node drive_case.mjs "cases/${p}/S" "$out" "P1 ${p} S ${tag}" > "${out}.out" 2>&1
+  node drive_case.mjs "cases/${p}/S" "$out" "P1 ${p} S ${tag} $(date +%H%M)" > "${out}.out" 2>&1
   MSYS_NO_PATHCONV=1 docker run --rm -v "D:/solver/backend:/app" -w /app solver-backend-test \
     python -m bench.phase1.score "$m" "bench/phase1/cases/${p}/S" "bench/phase1/${out}" > "${out}/score.json" 2>&1
   echo "$(date +%T) done $p" >> "runs-${tag}.log"

@@ -572,3 +572,12 @@ a clipped preview); the same refusal a second time after a patch names the rules
 to drop one; a third time asks for the whole plan, and the next plan is taken whole, no merge. Run 1 (5 of 10)
 stands as the reading of the image before this rule, kept as `step6a-1`; the partial run 2 as
 `step6a-2-aborted`; the three runs restart as `step6`.
+
+## Harness: workspace names collided across restarts (12 Oct, 08:30; found by the new send-back log)
+
+Each case's workspace is named "P1 <case> S <tag>"; a restart reuses the tag, so the name already exists from
+the aborted start, the plan is refused ("a domain named ... already exists"), and the Assistant spends
+send-backs on the name or answers from the stale workspace (p04 on the third start of step 6 reported the
+aborted run's result without building). Every first run after a restart carried this: step 5 run 1 (four
+starts) and step 6 runs 1 (three starts). The runners now add the clock time to the name. This third start
+is kept as `step6b-1-aborted`; the fourth start, same tag, with unique names.
