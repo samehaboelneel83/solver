@@ -53,11 +53,24 @@ const startRun = await newestRun();
 // The plan as asked is the newest run of a scenario that changes nothing (patch {}); what-if runs the Assistant
 // solved after it ("Budget 400k") are not the answer (11 October 2026: p08 and p07 were scored on a what-if run).
 const baseRun = async (ids) => {
+  // From any run seen, walk to its problem's base scenario (patch {}) and take that scenario's newest answered
+  // run: the base run is often not among the ids the page showed (12 October 2026: a what-if run scored again).
   for (const id of [...new Set(ids)].sort((a, b) => b - a)) {
     const [s, r] = await api(`/api/v1/runs/${id}`);
     if (s >= 300) continue;
     const [s2, sc] = await api(`/api/v1/scenarios/${JSON.parse(r).scenario_id}`);
-    if (s2 < 300 && Object.keys(JSON.parse(sc).patch || {}).length === 0) return id;
+    if (s2 >= 300) continue;
+    const scen = JSON.parse(sc);
+    if (Object.keys(scen.patch || {}).length === 0) return id;
+    const [s3, list] = await api(`/api/v1/scenarios?problem_id=${scen.problem_id}&limit=100`);
+    if (s3 >= 300) continue;
+    const items = JSON.parse(list).items || JSON.parse(list);
+    const base = (Array.isArray(items) ? items : []).find((x) => Object.keys(x.patch || {}).length === 0);
+    if (!base) continue;
+    const [s4, runs] = await api(`/api/v1/runs?scenario_id=${base.id}&limit=50`);
+    if (s4 >= 300) continue;
+    const answered = ((JSON.parse(runs).items || []).filter((x) => ["optimal", "feasible"].includes(x.status)).map((x) => x.id));
+    if (answered.length) return Math.max(...answered);
   }
   return Math.max(...ids);
 };

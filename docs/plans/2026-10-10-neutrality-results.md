@@ -652,3 +652,11 @@ p10-S          yes    no     yes    no    0     1       8
   the queued check now reads) and p07 (the rule left out).
 - p02's declined warning was a true one (two closed routes shipped on at zero cost, named exactly); the retry
   ran past the limit. Runs so far on this image: 5 and 3. Run 3 from 13:47, then the hidden set.
+
+## Harness: the base run found through the problem, not the page (12 Oct, 14:50)
+
+p08 in step 6 run 3 was scored on its "Budget 400k" what-if again: the base run was not among the ids the page
+showed, so the driver's fallback took the newest. The driver now walks from any run to the problem's base
+scenario and its newest answered run; `rebase_runs.py` re-scored the finished folders (p08 run 3 right, goal
+620,380 = reference; p07 run 1 moved to a wrong base plan with one violation). The run 1 and run 2 tables above
+are read with that in mind; the three-run reading is computed after it.
