@@ -110,3 +110,14 @@ def test_the_draft_survives_the_conversation_being_summarized():
     assert "y" in spec["ir"]["variables"] and [c["id"] for c in spec["ir"]["constraints"]] == ["c_one"]
     from app.agent import core
     assert all("draft" not in m for m in core.to_wire(messages, True))
+
+
+def test_a_seed_alone_is_a_patch():
+    """12 October 2026: a patch carrying new data and no ir was taken whole and refused for having no model."""
+    seed_only = {"seed": {"parameters": [{"name": "q", "index": ["a"], "default_value": 0}]}}
+    assert draft.is_partial(seed_only)
+    messages = [_call({"summary": "s", "spec": FULL}), {"role": "tool", "name": "propose_plan", "content": "sent back"},
+                _call({"summary": "s", "spec": seed_only})]
+    spec, note = draft.complete(seed_only, messages)
+    assert spec["ir"] == FULL["ir"] and [p["name"] for p in spec["seed"]["parameters"]] == ["q"]
+    assert note == "the plan was completed from your last one: the seed changed, everything else kept"

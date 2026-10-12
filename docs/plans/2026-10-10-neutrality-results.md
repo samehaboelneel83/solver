@@ -589,3 +589,10 @@ send-back log shows in full: refusals, then the conversation summarized, then ev
 has no ir" -- the folded propose_plan calls were gone and a patch had no draft to complete from. The draft now
 travels on the summary (like the pasted tables) and the fold starts from it; the history sent to the model
 carries neither. This start is kept as `step6c-1-aborted`; fifth start, same tag.
+
+## Step 6, fifth start stopped: a seed-only patch was not a patch (12 Oct, 09:40)
+
+p02 right (13.4 min); p04 in refusals, among them "the spec has no ir" twice: a patch carrying new data and
+no ir was taken whole and refused for having no model. A seed alone is a patch now. Kept as
+`step6d-1-aborted`; sixth start, same tag. The send-back log reads each of these in one look; before it, each
+cost a run.

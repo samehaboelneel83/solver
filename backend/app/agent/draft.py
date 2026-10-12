@@ -23,7 +23,9 @@ def is_partial(spec: dict[str, Any]) -> bool:
     if not isinstance(spec, dict):
         return False
     ir = spec.get("ir")
-    return "seed" not in spec or (isinstance(ir, dict) and "variables" not in ir)
+    # A seed alone (new data for a refused plan) is a patch too (12 October 2026: taken whole, refused for
+    # having no model, twice on one case).
+    return "seed" not in spec or not isinstance(ir, dict) or "variables" not in ir
 
 
 #: How each seed list is keyed, so a patch replaces its own entries and leaves the others.
