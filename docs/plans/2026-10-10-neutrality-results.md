@@ -745,3 +745,25 @@ h16-S          no     no     no     no    0     0       20
   problems it finds hard; the staged protocol (Phase 3) is the structural answer, the patch send-back its
   first half.
 - The next image (step 7: the pair-table form of the no-data check) measures overnight.
+
+## step7 — tuning run 1 of 3 (finished 21:44, 12 Oct; image of 384549a without 3b)
+
+```
+case           built  first  solved right  viol  warned  min
+p01-S          yes    yes    yes    yes   0     0       3.8
+p02-S          yes    yes    yes    yes   0     0       3.6
+p03-S          yes    no     yes    yes   0     1       6.8
+p04-S          yes    no     yes    yes   0     1       11.3
+p05-S          no     no     no     no    0     1       20.1
+p06-S          no     no     no     no    0     0       20.1
+p07-S          no     no     no     no    0     0       20.1
+p08-S          no     no     no     no    0     0       20
+p09-S          yes    yes    yes    yes   0     0       8.9
+p10-S          no     no     no     no    0     0       20
+
+5 right of 10; built 5; wrong but solved 0 (of them warned on the card 0)
+```
+
+- **5 right of 10, 5 built, 0 wrong**: every model built was right (p03 and p04 after one true warning each);
+  five cases at the limit. The first run with no wrong answer at all. Runs 2 and 3, then the hidden set,
+  overnight.
