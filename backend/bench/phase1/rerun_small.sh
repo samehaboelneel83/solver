@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Every small case through the browser again, one after another, then scored (phase 1, after the fixes).
-#   bash rerun_small.sh <tag>      -> runs/<problem>-S-<tag>/ and runs-<tag>.log
+#   bash rerun_small.sh <tag> [p04,p06]   -> runs/<problem>-S-<tag>/ and runs-<tag>.log (only those cases, when given)
 cd "$(dirname "$0")"
 tag="${1:-after}"
+only="${2:-}"   # optional: a comma-separated list of case ids (p04,p06) to run only those, e.g. after a crash
 export PW_DIR="C:/Users/user/AppData/Local/Temp/claude/D--solver/3932906e-32f9-4d3f-b0fb-ac43eb061e80/scratchpad/pw"
 export LIMIT_MIN=20
 for m in p02_supply_chain p04_factory p06_timetable p01_hospital p08_cyber p07_grid p09_cloud p05_ambulance p03_camp p10_disaster; do
   p="${m%%_*}"
+  if [ -n "$only" ] && ! echo ",$only," | grep -q ",$p,"; then continue; fi
   out="runs/${p}-S-${tag}"
   echo "$(date +%T) start $p" >> "runs-${tag}.log"
   node drive_case.mjs "cases/${p}/S" "$out" "P1 ${p} S ${tag} $(date +%H%M)" > "${out}.out" 2>&1

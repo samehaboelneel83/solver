@@ -897,3 +897,9 @@ blind). The push to GitHub waits for the reading.
 (6ae679) on backend and the three workers; verified in the container: `canon.py`, `stages.py`, `sentences.py`
 present, the always-yes check and step 3b's SHORTCUTS lines in, migration 0122, health 200, a clean start log.
 `rerun_three.sh step8` started at 20:52: runs `step8-1`, `-2`, `-3`, then the hidden set.
+
+**Incident, 13-14 Oct.** Run 1 began at 23:51 (p02 done in 2.8 min, built). At 00:39 the backend and worker
+containers were recreated (the deploy command run a second time from the owner's side: same image, restart
+count 0), which cut p04's turn; the driver exited and the three-run script with it. Resumed at 01:42 with
+`run_step8_rest.sh`, launched detached (a tool's own timeout can end a script it started): the rest of run
+1 (`rerun_small.sh` now takes a case list, as `run_hidden.sh` does), then runs 2 and 3, then the hidden set.
