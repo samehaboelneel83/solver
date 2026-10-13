@@ -224,3 +224,18 @@ The neutrality plan's step 5 and step 3b measurements run on within Phase 0; the
   `level >= value x pick`, a missing `most`, the division written as is) and counts whether the construct
   refuses or the checks warn; it is written with the first new construct (2.2 allowed pairs). Then 2.5, 2.7,
   2.9, one per tick, each with its hand-worked optimum.
+- **13 Oct, 11:00 — construct 2.2 `allowed_pairs`.** `app/agent/constructs/allowed_pairs.py`: the list's
+  0/1 parameter, the pair's bindings, the amount, `most` (defaulting to the decision's bound), and the reading
+  the data decides -- a list naming every record of the first index is complete (`amount <= most x allowed`),
+  one naming some restricts those alone (`amount <= most x (1 - listed + allowed)`, `listed` made from the
+  list); `"partial"` fixes the reading by hand; the list's default is set to 0 either way and the rule's note
+  says which reading was taken. Hand-worked example in the module (`EXAMPLE`: three records, two options, the
+  list naming one record: 8; complete 9; forced complete: infeasible) and the mistake written by hand
+  (`WRONG`: the partial list on a default of 1, goal 4). The construct mutation class is in
+  `bench.phase1.mutate` (`constructs_table`, with `bench/phase1/seed_data.py` turning a seed into the frozen
+  dataset shape without the database): each construct's example through its expansion must reach its optimum,
+  and its `WRONG` must be refused, warned or give the same goal; the canonical pass's notes on the seed count
+  as warnings there. **Table: allowed_pairs example right (8); by hand caught (the pass's list-default
+  note); golds unchanged -- 53 caught, 27 same goal, 19 missed.** 26 construct, neutrality and canonical-form
+  tests pass. Next: 2.5 covering, 2.7 share_of_total, 2.9 used_only_where_given, and EXAMPLE/WRONG pairs for
+  the four moved constructs so the table shows every construct.

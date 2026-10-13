@@ -8,6 +8,8 @@ Mutations (each applied alone to the gold):
   reverse_goal    the goal's sense reversed
   drop_values     one parameter's given cells removed (its default applies everywhere)
   list_default    a 0/1 parameter's default set to 1 (a list that changes nothing)
+  construct       each construct's example (app/agent/constructs/<name>.EXAMPLE) through its expansion, then
+                  the mistake it makes impossible written by hand (its WRONG): refused, warned or same goal
 Checks consulted (the platform's own, as the plan card would show them):
   trial           infeasible / unbounded / does nothing / used where no data (app.api.model_spec, app.agent.core)
   shape           never helps / idle (app.solve.lint.never_helps on the compiled model)
@@ -26,9 +28,10 @@ from pathlib import Path
 HERE = Path(__file__).parent
 
 
-def _signals(ir: dict, data: dict, request: str) -> tuple[set[str], float | None, str]:
+def _signals(ir: dict, data: dict, request: str, seed: dict | None = None) -> tuple[set[str], float | None, str]:
     """What the checks say of (ir, data): a set of signal names, the goal, the status. The IR goes through the
-    canonical form first, as a plan does (app/agent/canon.py): a mutation must still be warned after it."""
+    canonical form first, as a plan does (app/agent/canon.py): a mutation must still be warned after it. With a
+    `seed` (the construct examples), what the pass notes of the seed counts as a signal too."""
     from app.agent.canon import canonical
     from app.agent.core import idle_decisions, unused_numbers
     from app.api.model_spec import used_without_data
@@ -39,7 +42,10 @@ def _signals(ir: dict, data: dict, request: str) -> tuple[set[str], float | None
     from app.solve.convexity import refine
 
     out: set[str] = set()
-    ir = canonical({"spec": {"ir": ir, "seed": {}}})[0]["ir"]
+    spec, notes = canonical({"spec": {"ir": ir, "seed": seed if seed is not None else {}}})
+    ir = spec["ir"]
+    for note in notes:
+        out.add("canon:" + " ".join(note.split()[:4]))
     try:
         compiled = compile_model(ir, data)
     except Exception as exc:  # noqa: BLE001
@@ -117,6 +123,50 @@ def _mutations(gold: dict):
                 yield f"list_default:{name}", ir, d
 
 
+def constructs_table() -> tuple[int, int]:
+    """Each construct's hand-worked example (its EXAMPLE) reaches its optimum through the expansion, and the
+    mistake it makes impossible (its WRONG, the rules written by hand) is caught: refused, warned, or given
+    the same goal. Returns (caught, missed)."""
+    from app.agent import constructs
+    from app.agent.constructs._common import ConstructRefused
+    from bench.phase1.seed_data import data_of
+
+    caught = missed = 0
+    print("\nconstructs (each example through its expansion; then the mistake written by hand):")
+    for module in constructs.MODULES:
+        example = getattr(module, "EXAMPLE", None)
+        if not example:
+            continue
+        name = module.__name__.rsplit(".", 1)[-1]
+        reference = float(example["objective"])
+        spec = {"seed": copy.deepcopy(example["seed"]), "ir": copy.deepcopy(example["ir"])}
+        constructs.expand(spec)
+        base, goal, status = _signals(spec["ir"], data_of(spec["seed"]), "", spec["seed"])
+        right = goal is not None and abs(float(goal) - reference) <= 1e-6 * max(1.0, abs(reference))
+        print(f"   {name:14} example {'right' if right else 'WRONG'}   goal {goal} {status}"
+              + (f", says {sorted(base)}" if base else ""))
+        wrong = getattr(module, "WRONG", None)
+        if not wrong:
+            continue
+        spec = {"seed": copy.deepcopy(example["seed"]), "ir": copy.deepcopy(example["ir"])}
+        replaced = {c.get("id") for c in wrong["constraints"]}
+        spec["ir"]["constraints"] = [c for c in spec["ir"]["constraints"] if c.get("id") not in replaced] \
+            + copy.deepcopy(wrong["constraints"])
+        try:
+            constructs.expand(spec)
+            got, obj, status = _signals(spec["ir"], data_of(spec["seed"]), "", spec["seed"])
+        except ConstructRefused as exc:
+            got, obj, status = {f"refused:{type(exc).__name__}"}, None, "refused"
+        new = got - base
+        same = obj is not None and abs(float(obj) - reference) <= 1e-6 * max(1.0, abs(reference))
+        verdict = "caught" if new else ("same" if same else "MISSED")
+        caught += verdict != "MISSED"
+        missed += verdict == "MISSED"
+        print(f"   {name:14} by hand {verdict:7} {('by ' + ', '.join(sorted(new))) if new else ('goal ' + str(obj) + ' ' + status)}"
+              f"  ({wrong['why']})")
+    return caught, missed
+
+
 def main(size: str, cases: list[str]) -> int:
     roots = [HERE / "gold", HERE.parent / "hidden" / "gold"]
     paths = sorted(p for r in roots if r.exists() for p in r.glob(f"*-{size}.json"))
@@ -140,6 +190,11 @@ def main(size: str, cases: list[str]) -> int:
             gaps += verdict == "MISSED"
             kind = name.split(":")[0]
             print(f"   {kind:13} {verdict:7} {('by ' + ', '.join(sorted(new))) if new else ('goal ' + str(obj) + ' ' + status)}")
+    if not cases:
+        c, m = constructs_table()
+        totals["caught"] += c
+        totals["missed"] += m
+        gaps += m
     print(f"\ncaught {totals['caught']}, same goal {totals['same']}, missed {totals['missed']}")
     return gaps
 

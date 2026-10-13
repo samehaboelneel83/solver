@@ -129,7 +129,7 @@ def test_the_plan_card_shows_what_each_parameter_holds_as_loaded():
 def test_every_construct_is_described_and_refuses_a_body_that_is_not_an_object():
     """The registry: each construct names its keys, its fields and a neutral paragraph for the instructions; a
     body that is not an object is refused with what to write."""
-    assert set(constructs.KEYS) == {"carried", "only_if", "largest_of", "at_most_one", "exactly_one"}
+    assert set(constructs.KEYS) == {"carried", "only_if", "allowed_pairs", "largest_of", "at_most_one", "exactly_one"}
     for module in constructs.MODULES:
         assert module.KEYS and module.FIELDS and len(module.DESCRIPTION) > 100, module.__name__
         for key in module.KEYS:
@@ -138,3 +138,54 @@ def test_every_construct_is_described_and_refuses_a_body_that_is_not_an_object()
             with pytest.raises(constructs.ConstructRefused, match=rf'rule c_x \("{key}"\): write it as an object'):
                 constructs.expand(spec)
     assert len(constructs.describe()) == len(constructs.MODULES)
+
+
+def _pairs_case(partial_list: bool):
+    """The construct's own example (allowed_pairs.EXAMPLE: three records, two options, each record takes exactly
+    one option, a list naming a1 alone), or the same with a list naming every record."""
+    from app.agent.constructs import allowed_pairs
+
+    seed, ir = copy.deepcopy(allowed_pairs.EXAMPLE["seed"]), copy.deepcopy(allowed_pairs.EXAMPLE["ir"])
+    if not partial_list:
+        seed["parameter_values"] += [{"parameter": "allowed", "entities": [["record", r], ["option", o]], "value": 1}
+                                     for r, o in (("a2", "o2"), ("a3", "o2"))]
+    return seed, ir
+
+
+def test_allowed_pairs_reads_a_partial_list_as_restricting_only_the_records_it_names(tenants):
+    """The list names a1 alone (a1 -> o1): a1 is held to o1 at 5, a2 and a3 are free (2 + 1): 8. Read as a complete
+    list it would leave a2 and a3 with no pair (infeasible); read on its default of 1 it would change nothing (4)."""
+    from app.agent.constructs import allowed_pairs
+
+    seed, ir = _pairs_case(partial_list=True)
+    trial, expanded, notes = _trial(tenants["b"], seed, ir)
+    assert trial["status"] == "optimal" and abs(trial["objective"] - allowed_pairs.EXAMPLE["objective"]) < 1e-6, trial
+    rule = next(c for c in expanded["ir"]["constraints"] if c["id"] == "c_pairs")
+    assert "names 1 of 3 record" in rule["note"] and "(1 - listed + allowed)" in rule["note"]
+    assert any(p["name"] == "c_pairs_listed" for p in expanded["seed"]["parameters"])
+    assert next(p for p in expanded["seed"]["parameters"] if p["name"] == "allowed")["default_value"] == 0
+    # The reading fixed by hand: complete, so a2 and a3 have no allowed option.
+    seed, ir = _pairs_case(partial_list=True)
+    ir["constraints"][0]["allowed_pairs"]["partial"] = False
+    trial, _, _ = _trial(tenants["b"], seed, ir)
+    assert trial["status"] == "infeasible", trial
+
+
+def test_allowed_pairs_reads_a_complete_list_as_the_only_pairs(tenants):
+    """The list names every record (a1 -> o1, a2 -> o2, a3 -> o2): 5 + 3 + 1 = 9, on a list typed with default 1."""
+    seed, ir = _pairs_case(partial_list=False)
+    trial, expanded, _ = _trial(tenants["b"], seed, ir)
+    assert trial["status"] == "optimal" and abs(trial["objective"] - 9) < 1e-6, trial
+    rule = next(c for c in expanded["ir"]["constraints"] if c["id"] == "c_pairs")
+    assert "names every record" in rule["note"] and "(1 - listed + allowed)" not in rule["note"]
+
+
+def test_allowed_pairs_written_without_its_list_is_refused_with_what_to_write():
+    seed, ir = _pairs_case(partial_list=True)
+    seed["parameter_values"] = [v for v in seed["parameter_values"] if v["parameter"] != "allowed"]
+    with pytest.raises(constructs.ConstructRefused, match=r'rule c_pairs \("allowed_pairs"\): the list "allowed" has no cells'):
+        constructs.expand({"seed": seed, "ir": ir})
+    seed, ir = _pairs_case(partial_list=True)
+    ir["constraints"][0]["allowed_pairs"]["for"] = [{"index": "r", "set": "record"}]
+    with pytest.raises(constructs.ConstructRefused, match='"for" is the pair'):
+        constructs.expand({"seed": seed, "ir": ir})
