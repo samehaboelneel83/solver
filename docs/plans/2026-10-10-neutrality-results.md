@@ -879,3 +879,16 @@ h16-S          no     no     no     no    0     1       20
   inside the one-shot design (the patch send-back, the 4-minute cap) did not recover the slow hidden cases.
   The next gain is structural: the staged protocol (Phase 3), where a stage is a small reply by construction.
   No new image is queued; the measurement loop pauses here and the work moves to Phases 1.2–3.
+
+## Step 8 image (13 Oct, 18:10): main as it is, step 3b included -- "evaluate before pushing"
+
+The owner's instruction on 13 October: evaluate before pushing. So the queued step 3b (fe687b8, the six
+instruction lines never measured) is measured now, on the image built from main at 1ddf630, which also carries
+the Phase 1-3 work of 13 October: the canonical form (`app/agent/canon.py`, every repair in one pass, the
+fixed point on the golds), refusals that name the fix, the constructs library (nine constructs with their
+examples), the always-yes warning on the trial card, and the build protocol's stages wired as tools -- but
+**not told to the model** (3.3 is after this measurement), so the model takes the old path with step 3b's
+lines on top. What this step measures against step 7 is therefore: step 3b + the pass + the new refusal texts
++ the always-yes warning. Procedure as before: the backend log read (no errors in 6 h), the whole suite on
+main, the image from a clean worktree, `rerun_three.sh step8` (three tuning runs, then the hidden set, read
+blind). The push to GitHub waits for the reading.
