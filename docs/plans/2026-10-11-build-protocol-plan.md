@@ -285,3 +285,15 @@ The neutrality plan's step 5 and step 3b measurements run on within Phase 0; the
   is plain linear or `place` (none hand-writes a construct's algebra); all construct tests pass; the table
   shows each construct's refusal or warning, with the two misses named. Phase 2 is complete but for the
   all-one decision warning (a lever for covering's miss), which comes next; then Phase 3.
+- **13 Oct, 14:00 — the always-yes warning; Phase 2 complete.** A probe of the eight golds' optima found no
+  yes/no decision at 1 on every cell (the nearest: 45 of 48), so the warning is safe on the corpus. The trial
+  now counts a yes/no decision's cells at 1 (`used[...].ones`, app/api/model_spec.py); the card says "CHECK
+  THIS: open is yes on every one of its 3 cells -- a yes/no decision that is always yes decides nothing; a
+  rule may force every one on, or nothing holds it down" (`core.always_yes_decisions`, two cells or more;
+  the model's line names the per-pair cover as the usual cause); `bench.phase1.mutate` reads it as
+  `trial:always yes`. Table: covering's hand-written form is now caught, and one gold's dropped rule that
+  was missed before is caught by the same signal; no gold's own base changed. **60 caught, 27 same goal, 19
+  missed**; the construct table reads 7 caught, 1 harmless, 1 missed (the share against the part alone, the
+  Phase 3.2 case). 36 tests pass across the card, neutrality, construct and numbers tests. `core.py` was
+  edited (the card lines, far from the instructions): the step-3b reverse patch still applies. Not deployed.
+  **Phase 2 is complete.** Next: Phase 3, the staged build protocol.

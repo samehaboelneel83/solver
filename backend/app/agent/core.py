@@ -1748,6 +1748,10 @@ def trial_said(trial: Any) -> str:
                      f"{', '.join(v for v in used if v not in idle_decisions(used))} is used: the plan does nothing; "
                      "if the person asked for something to be done, a rule that forces it is missing, or the goal "
                      "lets doing nothing win (a penalty for what is left undone)")
+    for v in always_yes_decisions(used):
+        flags.append(f"{v} is 1 on every one of its {used[v].get('cells')} cells: a yes/no decision that is always yes "
+                     "decides nothing; a rule forces every one on (a cover or a link written per pair instead of as a "
+                     "sum over the pairs), or nothing holds it down")
     if flags:
         line += " WARNING: " + "; ".join(flags) + "."
     if any(u.get("chosen") for u in used.values()):
@@ -1966,6 +1970,16 @@ def shape_for_person(shape: Any) -> str:
     return "".join(f"\n- CHECK THIS: {s}" for s in said)
 
 
+def always_yes_decisions(used: dict) -> list[str]:
+    """Yes/no decisions the trial set to 1 on every cell (two or more): a decision that is always yes decides
+    nothing, as one that is always no does (the covering construct's mistake written by hand, 13 October 2026:
+    chosen >= covers for every pair forced every covering option on, and no check said a word)."""
+    if not isinstance(used, dict):
+        return []
+    return [v for v, u in used.items() if isinstance(u, dict) and isinstance(u.get("ones"), int)
+            and u["ones"] >= 2 and u["ones"] == u.get("cells")]
+
+
 def idle_decisions(used: dict) -> list[str]:
     """Decisions the trial left at zero everywhere when the plan has several and only one (or none) is used: a
     plan that does nothing (the evaluation, 11 October 2026: open 0 of 3, ship 0 of 54, stock 0 of 9, unmet 18 of
@@ -1999,6 +2013,9 @@ def trial_for_person(trial: Any) -> str:
         line += (f"\n- CHECK THIS: the plan does nothing with {', '.join(idle)} (0 everywhere); only "
                  f"{', '.join(v for v in used if v not in idle)} is used -- a plan that does nothing may be what the "
                  "rules allow, not what you meant")
+    for v in always_yes_decisions(used):
+        line += (f"\n- CHECK THIS: {v} is yes on every one of its {used[v].get('cells')} cells -- a yes/no decision "
+                 "that is always yes decides nothing; a rule may force every one on, or nothing holds it down")
     sw = trial.get("swamped")
     if isinstance(sw, dict) and sw.get("term"):
         line += (f"\n- CHECK THIS: one goal term decides the goal: {sw['term']} is {sw.get('share', 0) * 100:.0f}% of it and "

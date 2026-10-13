@@ -65,17 +65,24 @@ def _signals(ir: dict, data: dict, request: str, seed: dict | None = None) -> tu
     status = str(result.status)
     if status in ("infeasible", "unbounded"):
         out.add(f"trial:{status}")
+    from app.agent.core import always_yes_decisions
+
+    binary = {n for n, v in (ir.get("variables") or {}).items() if isinstance(v, dict) and v.get("domain") == "binary"}
     used: dict[str, dict] = {}
     for key in compiled.variables:
         if not str(key[0]).startswith("__"):
-            used.setdefault(str(key[0]), {"non_zero": 0, "cells": 0})["cells"] += 1
+            used.setdefault(str(key[0]), {"non_zero": 0, "cells": 0, **({"ones": 0} if str(key[0]) in binary else {})})["cells"] += 1
     for key, value in (result.assignments or {}).items():
         if str(key[0]) in used and abs(float(value)) > 1e-9:
             used[str(key[0])]["non_zero"] += 1
+            if str(key[0]) in binary and abs(float(value) - 1) < 1e-9:
+                used[str(key[0])]["ones"] += 1
     if used and all(not u["non_zero"] for u in used.values()):
         out.add("trial:nothing")
     elif idle_decisions(used):
         out.add("trial:does nothing")
+    if always_yes_decisions(used):
+        out.add("trial:always yes")
     if used_without_data(ir, data, result.assignments or {}):
         out.add("trial:no data")
     # The Assistant's own order check refuses a parameter the model reads with no value loaded; the same here.

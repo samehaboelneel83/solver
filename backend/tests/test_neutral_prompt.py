@@ -70,7 +70,8 @@ def test_the_platforms_own_messages_name_no_domain():
     texts["lint.as_default"] = " ".join(f["said"] for f in lint.as_default(seed))
     texts["lint.one_way"] = " ".join(f["said"] for f in lint.one_way(seed))
     texts["lint.unread"] = " ".join(f["said"] for f in lint.unread({}, seed))
-    used = {"open": {"non_zero": 0, "cells": 3}, "amount": {"non_zero": 0, "cells": 9}, "left": {"non_zero": 5, "cells": 9}}
+    used = {"open": {"non_zero": 0, "cells": 3}, "amount": {"non_zero": 0, "cells": 9}, "left": {"non_zero": 5, "cells": 9},
+            "on": {"non_zero": 4, "cells": 4, "ones": 4}}
     texts["trial.card"] = core.trial_for_person({"status": "optimal", "objective": 1, "used": used}) \
         + core.trial_for_person({"status": "optimal", "used": {"x": {"non_zero": 0, "cells": 2}}}) \
         + core.trial_for_person({"status": "infeasible", "used": used})

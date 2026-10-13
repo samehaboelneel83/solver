@@ -441,13 +441,18 @@ def _trial(db: Session, domain_id: int, ir: dict[str, Any], keep: dict[str, Any]
     used: dict[str, list[int]] = {}
     for key in compiled.variables:
         if not str(key[0]).startswith("__"):
-            used.setdefault(str(key[0]), [0, 0])[1] += 1
+            used.setdefault(str(key[0]), [0, 0, 0])[1] += 1
+    # A yes/no decision's cells at 1 (the "ones"): one that is 1 everywhere decides nothing, as one that is 0
+    # everywhere does (build-protocol plan, Phase 2: a cover written per pair forces every option on).
+    binary = {n for n, v in (ir.get("variables") or {}).items() if isinstance(v, dict) and v.get("domain") == "binary"}
     # Which cells are used, by their records' keys, while that is short enough to read (the file-source test,
     # October 2026: given only "3 of 5", the Assistant named three projects the trial had not chosen).
     chosen: dict[str, list[str]] = {}
     for key, value in (result.assignments or {}).items():
         if str(key[0]) in used and abs(float(value)) > 1e-9:
             used[str(key[0])][0] += 1
+            if str(key[0]) in binary and abs(float(value) - 1) < 1e-9:
+                used[str(key[0])][2] += 1
             index = key[1] if len(key) > 1 and isinstance(key[1], (tuple, list)) else key[1:]
             cell = " · ".join(map(str, index))
             amount = float(value)
@@ -468,7 +473,7 @@ def _trial(db: Session, domain_id: int, ir: dict[str, Any], keep: dict[str, Any]
     return {"status": result.status, "objective": result.objective, "solver": backend.name,
             "seconds": TRIAL_SECONDS, **conflict, **({"no_data": no_data} if no_data else {}),
             **({"swamped": swamped} if swamped else {}),
-            "used": {k: {"non_zero": v[0], "cells": v[1],
+            "used": {k: {"non_zero": v[0], "cells": v[1], **({"ones": v[2]} if k in binary else {}),
                          **({"chosen": chosen.get(k, [])} if v[0] <= TRIAL_LISTED else {})} for k, v in used.items()}}
 
 
