@@ -249,3 +249,14 @@ The neutrality plan's step 5 and step 3b measurements run on within Phase 0; the
   with every cell at 0 does (the trial's "does nothing" card has the all-zero half only); whether a warning on
   the all-one half is safe on the golds is the test. 15 construct and neutrality tests pass. Next: 2.7
   share_of_total, 2.9 used_only_where_given, then EXAMPLE/WRONG pairs for the four moved constructs.
+- **13 Oct, 12:10 — construct 2.7 `share_of_total`.** `app/agent/constructs/share_of_total.py`: the part,
+  the whole (a sum over the parts), `<=` or `>=`, the share as a fraction (30 is refused: "30% is 0.3"); the
+  platform writes part <= share x total. A record named by its key in the part is bound by the canonical pass
+  after the expansion (the test checks the order). Example (three parts at 2, 5, 8 making 10; the third at
+  least 30%, the first at most 50%: 44). The mistake written by hand -- the share compared to the part alone,
+  `amount >= 0.3`, the whole left out (49.4) -- **is MISSED by every check**, like covering's: a hand-written
+  rule that is linear and feasible has nothing for a shape check to see. The table: 53 caught, 27 same goal,
+  21 missed (golds unchanged); 17 construct and neutrality tests pass. The reading: the two misses are the
+  Phase 3.2 case exactly -- the sentence "at least 30% of the total" selects the construct, and a plain rule
+  for such a sentence is what the staged protocol refuses. Next: 2.9 used_only_where_given, then
+  EXAMPLE/WRONG pairs for the four moved constructs, then the all-one decision warning.

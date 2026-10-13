@@ -129,7 +129,7 @@ def test_the_plan_card_shows_what_each_parameter_holds_as_loaded():
 def test_every_construct_is_described_and_refuses_a_body_that_is_not_an_object():
     """The registry: each construct names its keys, its fields and a neutral paragraph for the instructions; a
     body that is not an object is refused with what to write."""
-    assert set(constructs.KEYS) == {"carried", "only_if", "allowed_pairs", "largest_of", "at_most_one", "exactly_one", "covering"}
+    assert set(constructs.KEYS) == {"carried", "only_if", "allowed_pairs", "largest_of", "at_most_one", "exactly_one", "covering", "share_of_total"}
     for module in constructs.MODULES:
         assert module.KEYS and module.FIELDS and len(module.DESCRIPTION) > 100, module.__name__
         for key in module.KEYS:
@@ -229,4 +229,40 @@ def test_covering_written_wrong_is_refused_with_what_to_write():
         constructs.expand({"seed": seed, "ir": ir})
     ir["constraints"][0]["covering"]["covers"] = {"rel": "nothing"}
     with pytest.raises(constructs.ConstructRefused, match='does not list in "relationships"'):
+        constructs.expand({"seed": seed, "ir": ir})
+
+
+def test_share_of_total_writes_the_linear_form(tenants):
+    """share_of_total.EXAMPLE: the third part at least 30% of the whole, the first at most 50%: 44. The part named
+    by its key in the construct's term is bound by the canonical pass after the expansion."""
+    from app.agent import canon
+    from app.agent.constructs import share_of_total
+
+    spec = {"domain_name": f"Share {uuid.uuid4().hex[:6]}", "problem_name": "T",
+            "seed": copy.deepcopy(share_of_total.EXAMPLE["seed"]), "ir": copy.deepcopy(share_of_total.EXAMPLE["ir"])}
+    spec, notes = canon.canonical({"spec": spec}, load=lambda seed: seed)
+    third = next(c for c in spec["ir"]["constraints"] if c["id"] == "c_third")
+    assert third["relation"] == ">=" and third["right"]["mul"][0] == {"const": 0.3} and "sum" in third["right"]["mul"][1]
+    assert third["forall"][0]["index"] == "k_p3"  # the key bound by the pass
+    got = TestClient(app).post("/api/v1/problems/from-spec", json={**spec, "dry_run": True, "trial": True},
+                               headers=tenants["b"])
+    assert got.status_code == 200, got.text
+    trial = got.json()["trial"]
+    assert trial["status"] == "optimal" and abs(trial["objective"] - 44) < 1e-6, trial
+
+
+def test_share_of_total_written_wrong_is_refused_with_what_to_write():
+    from app.agent.constructs import share_of_total
+
+    seed, ir = copy.deepcopy(share_of_total.EXAMPLE["seed"]), copy.deepcopy(share_of_total.EXAMPLE["ir"])
+    ir["constraints"][1]["share_of_total"]["share"] = 30
+    with pytest.raises(constructs.ConstructRefused, match=r'rule c_third \("share_of_total"\): "share" is a fraction'):
+        constructs.expand({"seed": seed, "ir": ir})
+    ir["constraints"][1]["share_of_total"]["share"] = 0.3
+    ir["constraints"][1]["share_of_total"]["relation"] = "="
+    with pytest.raises(constructs.ConstructRefused, match='"relation" is "<="'):
+        constructs.expand({"seed": seed, "ir": ir})
+    ir["constraints"][1]["share_of_total"]["relation"] = ">="
+    ir["constraints"][1]["share_of_total"]["part"] = 3
+    with pytest.raises(constructs.ConstructRefused, match='"part" is the part of the mix'):
         constructs.expand({"seed": seed, "ir": ir})
