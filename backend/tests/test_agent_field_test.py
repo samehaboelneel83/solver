@@ -779,15 +779,17 @@ def test_a_drawing_far_too_big_for_metres_gets_a_scale_check():
 def test_the_same_refusal_three_times_stops_the_turn_and_shows_the_error(tenants, monkeypatch):
     bad = _roster_spec("stuck")
     bad["ir"]["constraints"][0]["relation"] = "=<"
-    model = _install(monkeypatch, [("native", "check_spec", json.dumps({"spec": bad}))] * 5 + [("text", "never")])
+    model = _install(monkeypatch, [("native", "check_spec", json.dumps({"spec": bad}))] * (core.MAX_SAME_ERROR + 2) + [("text", "never")])
     events = _chat(tenants["b"], mode="model", text="check; night pays 1.3", files=_roster_files())
     answer = next(e for e in events if e["type"] == "answer")["text"]
     # In plain words first (the blend test: the person was shown raw JSON and said "I don't understand"),
     # the check's own message and the part of the plan under "Technical detail".
     assert answer.startswith("I could not write one part of the model the way the platform needs it: in a rule")
-    assert "came back 3 times" in answer and "**continue**" in answer
+    assert f"came back {core.MAX_SAME_ERROR} times" in answer and "**continue**" in answer
     assert "Technical detail" in answer and "The part of the plan it is about:" in answer
     assert sum(1 for e in events if e["type"] == "tool" and e["name"] == "check_spec") == core.MAX_SAME_ERROR
+    # From the third time the platform itself asks for that part another way -- what "continue" used to.
+    assert any("Write that part a DIFFERENT way" in str(m.get("content")) for r in model.requests for m in r["messages"])
     # Only the latest attempt stays whole in the history.
     history = events[-1]["messages"]
     specs = [c["function"]["arguments"] for m in history for c in m.get("tool_calls") or []]

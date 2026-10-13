@@ -449,7 +449,11 @@ TOOL_NAMES = {t["function"]["name"] for t in MODEL_TOOLS} | {sandbox.SCHEMA["fun
 # Messages the platform adds to the conversation (not the person): not counted as the person's turns.
 PLATFORM = "[Platform] "
 MAX_NUDGES = 3  # per kind of correction, per turn
-MAX_SAME_ERROR = 3  # the same spec refusal this many times ends the turn, shown to the person
+#: The same spec refusal this many times ends the turn, shown to the person. Before that, from DIFFERENT_WAY_AT
+#: on, the platform itself asks for that part another way -- what the person's "continue" did (the production-
+#: planning trace: the person had to type "continue" after three refusals; they asked never to see that stop).
+MAX_SAME_ERROR = 6
+DIFFERENT_WAY_AT = 3
 MAX_API_REJECTIONS = 3  # a write endpoint rejecting the request is not a reason to loop all turn
 MAX_TOTAL_API_REJECTIONS = 8  # endpoint-hopping cannot evade the per-endpoint limit
 MAX_TOOL_FAILURES = 3  # an unavailable file or failed tool is surfaced instead of retried all turn
@@ -3289,7 +3293,7 @@ class Agent:
         try:
             expanded = self._spec(args if isinstance(args, dict) else {"spec": args})
         except agent_files.FileRefused as e:
-            return f"Not valid yet: {e}"
+            return self._again(f"Not valid yet: {e}")
         faults = self._order_faults(expanded)
         if faults:
             return "Not valid yet; fix these: " + " ".join(faults)
@@ -3300,9 +3304,20 @@ class Agent:
                     + "\n\n" + agent_readback.readback(expanded, self.loaded)
                     + trial_said((res.get("body") or {}).get("trial")) + "\n\n" + READBACK_CHECK)
         refused = "Not valid yet; fix these: " + clip(res.get("body"), 4000)
+        return self._again(refused)
+
+    def _again(self, refused: str) -> str:
+        """A refusal, with what to do when it is the same one again."""
         key = re.sub(r"\d+", "#", refused)[:400]
         self._spec_seen[key] = self._spec_seen.get(key, 0) + 1
-        if self._spec_seen[key] >= 2:
+        seen = self._spec_seen[key]
+        if seen >= DIFFERENT_WAY_AT:
+            # Rewriting the same part the same way has failed: another way, as a person's "continue" asked.
+            refused += (SAME_AGAIN + f"this is the SAME refusal for the {seen}th time. Write that part a DIFFERENT "
+                        "way: rebuild it from the matching pattern in your instructions rather than editing your "
+                        "last version; if it is one long rule, split it into two simpler ones; send the spec as "
+                        "an object under \"spec\", with \"ir\" beside \"seed\". Leave every other part as it is.")
+        elif seen >= 2:
             # The blend test: the same sum refused four times -- the model rewrote everything else and kept
             # that part. Say so, and point at the part.
             refused += (SAME_AGAIN + "this is the SAME refusal as your previous attempt, so that part did not "

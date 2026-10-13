@@ -1194,7 +1194,10 @@ def _execute(
         probe_answer, probe_record, steps_wanted = None, None, True
         # Only where the run would hand the model to its solver as it is: a lane of its own (a network, a
         # pairing, a spanning tree, a horizon, a decomposition, sampled futures, a search) is left to run.
-        own_lane = (any(params.get(k) for k in ("rolling_horizon", "lagrangian", "lns", "robust", "alternatives"))
+        own_lane = (any(params.get(k) for k in ("rolling_horizon", "lagrangian", "robust", "alternatives"))
+                    # A setting on is not a lane taken: LNS only where it applies (the production-planning trace:
+                    # `solve.lns` on for the organization kept every run from the probe, LNS not taking the model).
+                    or (bool(params.get("lns")) and lns_rows.applies(backend.name, solving_model) is None)
                     or (bool(params.get("stochastic_samples")) and stochastic_rows.wanted(ir))
                     or (bool(params.get("decompose")) and allocation_rows.applies(solving_model) is None)
                     or (bool(params.get("network")) and _graph_lane(solving_model)))
