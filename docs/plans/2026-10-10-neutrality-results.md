@@ -903,3 +903,5 @@ containers were recreated (the deploy command run a second time from the owner's
 count 0), which cut p04's turn; the driver exited and the three-run script with it. Resumed at 01:42 with
 `run_step8_rest.sh`, launched detached (a tool's own timeout can end a script it started): the rest of run
 1 (`rerun_small.sh` now takes a case list, as `run_hidden.sh` does), then runs 2 and 3, then the hidden set.
+Note: main gained 4ab2959 at 01:01 on 14 Oct from another session (the Assistant asks for another way before
+giving up; a probe-first lane check for LNS). The step 8 image is from 1ddf630 and does not carry it.
