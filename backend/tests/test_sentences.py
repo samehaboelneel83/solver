@@ -65,3 +65,27 @@ def test_nothing_is_said_off_the_protocol_path():
                 _call("p", "propose_plan", {"summary": "s", "spec": {"seed": {}, "ir": {"variables": {}}}})]
     assert sentences.unmatched(messages) == {"rules": [], "goal": []}
     assert sentences.sentences_for_person(messages) == ""
+
+
+def test_the_card_shows_the_request_beside_the_rule_that_holds_it():
+    messages = [{"role": "user", "content": REQUEST},
+                _call("r1", "add_rule", {"sentence": "Each site must take at most 40 units a day.", "rule": {"id": "c_cap"}})]
+    spec = {"ir": {"constraints": [{"id": "c_cap", "note": "Each site must take at most 40 units a day."}]}}
+    table = sentences.table_for_person(messages, spec)
+    assert table.startswith("\n- WHAT YOU WROTE -> THE RULE THAT HOLDS IT:")
+    assert '"Each site must take at most 40 units a day." -> c_cap' in table
+    assert '"No site may be left without a supervisor." -> --' in table
+    assert '"We run three sites and want the cheapest plan." -> --' in table
+    assert sentences.table_for_person([{"role": "user", "content": REQUEST}], spec) == ""
+
+
+def test_the_reply_cap_is_the_stage_cap_on_the_build_protocol():
+    from app.agent import core
+
+    settings = core.Settings()
+    assert settings.stage_reply_seconds == 120 and settings.reply_seconds == 240
+    stage = [{"role": "user", "content": "x"}, _call("v", "stage_decisions", {"variables": {}})]
+    assert core.on_protocol(stage) and core.reply_cap(settings, stage) == 120
+    after = stage + [_call("p", "propose_plan", {"summary": "s"})]
+    assert not core.on_protocol(after) and core.reply_cap(settings, after) == 240
+    assert not core.on_protocol([{"role": "user", "content": "x"}])

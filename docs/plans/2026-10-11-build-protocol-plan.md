@@ -348,3 +348,14 @@ The neutrality plan's step 5 and step 3b measurements run on within Phase 0; the
   word lists find 3-9 rule sentences and 1-4 goal sentences each (the golds hold 5-14 rules), a proportionate
   first reading. 22 sentence, neutrality and stage tests pass; the neutrality scan reads the new modules'
   constants and card lines. Next: 3.3, the instructions (the step-3b decision), then 3.4-3.6.
+- **13 Oct, 17:40 — 3.4 and 3.5.** The card (3.5): on the protocol path, after the CHECK THIS lines, the
+  table "WHAT YOU WROTE -> THE RULE THAT HOLDS IT": each rule or goal sentence of the person's with the rule
+  id whose note holds it, or "--" (`sentences.table_for_person`, at most 24 rows). The reply cap (3.4):
+  `LLM_STAGE_REPLY_SECONDS` (120) applies when the model's last tool calls were stage calls and no
+  propose_plan followed (`core.on_protocol`, `core.reply_cap`); the plan cap (`LLM_REPLY_SECONDS`, 240) stays
+  for the old path, and the slow-reply message names the cap that applied. 103 tests pass (sentences,
+  neutrality, stages, the Assistant's blend suite). The step-3b reverse patch still applies. **3.3 is next and
+  is the owner's call**: the instructions rewrite lands on the lines fe687b8 (step 3b) changed, so from there
+  the deploy recipe cannot exclude 3b. Either measure 3b first (three tuning runs on an image built from main
+  as it is, which includes 3b) or drop it (`git revert fe687b8`, then 3.3 on top). Until then the model is not
+  told the protocol and the live path is unchanged.

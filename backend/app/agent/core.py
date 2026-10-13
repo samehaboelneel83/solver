@@ -36,6 +36,8 @@ Settings (environment):
     LLM_CONTEXT          32768      the model's max_model_len (vLLM's own value is read when it reports one)
     LLM_TIMEOUT          1800       seconds to wait for one model reply (the connection)
     LLM_REPLY_SECONDS    240        the longest one reply may take; past it the step is asked again, shorter
+    LLM_STAGE_REPLY_SECONDS 120     the same for a reply on the build protocol (a stage is small; a slow model
+                                    loses one stage, not the whole model)
     LLM_WORKING_TOKENS   48000      summarize the older conversation past this many tokens (whichever comes first)
     LLM_COMPACT_AT       0.6        summarize the older conversation past this share of the context
     LLM_MAX_TOKENS       4096       per reply
@@ -100,6 +102,9 @@ class Settings:
     #: 240 since 11 October 2026 (getting-better plan, lever 1.2): at this model's rate 4 minutes is 12,000
     #: tokens, more than any right plan needed, and one 7-minute reply already cost a case its 20 minutes.
     reply_seconds: float = field(default_factory=lambda: float(_env("LLM_REPLY_SECONDS", "240")))
+    #: The same on the build protocol (build-protocol plan, 3.4): a stage call is small, so a reply that runs
+    #: longer is asked for again, shorter -- a slow model loses one stage, not the whole model.
+    stage_reply_seconds: float = field(default_factory=lambda: float(_env("LLM_STAGE_REPLY_SECONDS", "120")))
     #: Past this share of the context, the older conversation is summarized (app.agent.compact).
     compact_at: float = field(default_factory=lambda: float(_env("LLM_COMPACT_AT", "0.6")))
     #: The most a model call carries before the older conversation is summarized, whatever the context:
@@ -1004,11 +1009,29 @@ class LlmError(Exception):
         self.body = body
 
 
-def _slow_or_down(settings: Settings, started: float) -> LlmError:
+def _slow_or_down(settings: Settings, started: float, reply_seconds: float | None = None) -> LlmError:
     """A reply cut at LLM_REPLY_SECONDS is slow, not down: it is asked again, shorter."""
-    if settings.reply_seconds > 0 and settings.reply_seconds < settings.timeout:
-        return ReplyTooSlow(settings.reply_seconds)
+    seconds = settings.reply_seconds if reply_seconds is None else reply_seconds
+    if seconds > 0 and seconds < settings.timeout:
+        return ReplyTooSlow(seconds)
     return _llm_timeout(settings)
+
+
+def on_protocol(messages: list[dict]) -> bool:
+    """Whether the conversation is building a plan in stages: the last tool calls the model made were stage
+    calls (app/agent/draft.STAGE_TOOLS) and no propose_plan came after them."""
+    for m in reversed(messages):
+        if m.get("role") != "assistant" or not m.get("tool_calls"):
+            continue
+        names = {(c.get("function") or {}).get("name") for c in m["tool_calls"]}
+        return bool(names & set(agent_draft.STAGE_TOOLS)) and "propose_plan" not in names
+    return False
+
+
+def reply_cap(settings: Settings, messages: list[dict]) -> float:
+    """The longest this reply may take: the stage cap on the build protocol, the plan cap otherwise."""
+    seconds = settings.stage_reply_seconds if on_protocol(messages) else settings.reply_seconds
+    return min(settings.timeout, seconds) if seconds > 0 else settings.timeout
 
 
 def _llm_timeout(settings: Settings) -> LlmError:
@@ -1047,7 +1070,7 @@ def llm_chat(settings: Settings, messages: list[dict], native: bool | None,
     try:
         # A 32,768-token reply at the Qwen3.5 server's ~50 tokens a second takes about 11 minutes: the wait
         # outlasts the longest reply allowed (LLM_TIMEOUT, seconds), or a turn would end on "timed out".
-        cap = min(settings.timeout, settings.reply_seconds) if settings.reply_seconds > 0 else settings.timeout
+        cap = reply_cap(settings, messages)
         started = time.monotonic()
         with urllib.request.urlopen(req, timeout=cap) as r:
             data = json.loads(r.read())
@@ -1058,10 +1081,10 @@ def llm_chat(settings: Settings, messages: list[dict], native: bool | None,
             raise ToolModeChanged() from e
         raise LlmError(e.code, body) from e
     except TimeoutError as e:
-        raise _slow_or_down(settings, started) from e
+        raise _slow_or_down(settings, started, cap) from e
     except urllib.error.URLError as e:
         if isinstance(e.reason, TimeoutError):
-            raise _slow_or_down(settings, started) from e
+            raise _slow_or_down(settings, started, cap) from e
         raise LlmError(0, f"cannot reach the model at {settings.base_url}: {e.reason}") from e
     if native is None:
         _NATIVE_TOOLS[settings.base_url] = True
@@ -4283,7 +4306,8 @@ class Agent:
                     built_as = agent_readback.readback(built, self.loaded).split("\n", 1)[-1] + trial_for_person(
                         body.get("trial")) + shape_for_person(body.get("shape")) + numbers_for_person(messages, built, self.ctx.files) \
                         + goal_sense_for_person(messages, built.get("ir") or {}) \
-                        + agent_sentences.sentences_for_person(messages, built)
+                        + agent_sentences.sentences_for_person(messages, built) \
+                        + agent_sentences.table_for_person(messages, built)
                     yield {"type": "plan", "summary": str(args.get("summary")) + "\n\n**As built** (read back "
                            "from the spec by the platform; check it says what you meant)\n```\n" + built_as + "\n```",
                            "counts": counts, "spec": self._spec(args, expand=False), "readback": built_as}

@@ -148,6 +148,18 @@ def sentences_for_person(messages: list[dict[str, Any]], spec: dict[str, Any] | 
     return "".join(lines)
 
 
+def table_for_person(messages: list[dict[str, Any]], spec: dict[str, Any] | None = None) -> str:
+    """The card's table (Phase 3.5): the request on the left, the model on the right -- each rule or goal
+    sentence of the person's with the rule that holds it, or "--"; on the protocol path only."""
+    if not staged(messages):
+        return ""
+    rows = mapping(messages, spec)
+    if not rows:
+        return ""
+    return "\n- WHAT YOU WROTE -> THE RULE THAT HOLDS IT:" + "".join(
+        f'\n    "{s[:120]}" -> {held}' for s, held in rows[:24]) + (f"\n    ... and {len(rows) - 24} more" if len(rows) > 24 else "")
+
+
 def mapping(messages: list[dict[str, Any]], spec: dict[str, Any] | None = None) -> list[tuple[str, str]]:
     """The request on the left, the model on the right: each of the person's rule or goal sentences with the
     rule id that claims it, or "--" (for the card's table, Phase 3.5)."""
