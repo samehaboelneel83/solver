@@ -181,14 +181,35 @@ def _is_name(value: Any) -> bool:
     return isinstance(value, str) and NAME_RE.fullmatch(value) is not None
 
 
+#: The canonical spelling of each node a key can be unknown on, for the refusal to name (the build-protocol
+#: plan, Phase 1.3: a refusal says what to write, not only what was wrong).
+_SHAPES = {
+    "model": '{"version": 2, "sets": [...], "relationships": [...], "parameters": {...}, "variables": {...}, '
+             '"constraints": [...], "objective": {...}}',
+    "constraint": '{"id": ..., "forall": [...], "left": <term>, "relation": "<=", "right": <term>, "severity": "hard"} '
+                  '(a sum goes inside left or right as {"sum": <term>, "over": [...]})',
+    "binding": '{"index": "i", "set": "<a set>"}',
+    "filter": '{"attr": "<a field>", "op": "=", "value": ...}',
+    "via": '{"rel": "<a relationship>", "from": "<a bound index>"}',
+    "variable declaration": '{"index": [<sets>], "domain": "continuous" | "integer" | "binary", "lower": 0}',
+    "parameter declaration": '{"index": [<sets>]}',
+    "objective": '{"sense": "minimize" | "maximize", "terms": [...]}',
+    "objective term": '{"id": ..., "weight": 1, "expression": <term>}',
+}
+_TERM_SHAPE = ('{"const": n} | {"var": name, "index": [...]} | {"par": name, "index": [...]} | '
+               '{"attr": {"of": "i", "name": field}} | {"add": [a, b]} | {"mul": [a, b]} | '
+               '{"sum": <term>, "over": [...]}')
+
+
 def _unknown_key(node: dict[str, Any], allowed: frozenset[str], loc: Loc, what: str):
     for key in node:
         if key not in allowed:
+            shape = _SHAPES.get(what) or (_TERM_SHAPE if what.endswith(" term") else None)
             return Refusal(
                 "key_unknown",
                 [*loc, key],
                 f"{json.dumps(key)} is not a key a {what} carries; this version reads "
-                f"{', '.join(sorted(allowed))}",
+                f"{', '.join(sorted(allowed))}" + (f"; write it as {shape}" if shape else ""),
             )
     return None
 
@@ -1026,7 +1047,7 @@ class _ShapeChecker:
                 "connected_via_invalid",
                 [*loc, "via"],
                 f"{json.dumps(body['via'])} is not a relationship this model declares in "
-                "relationships, so no dataset would carry its edges",
+                f"relationships, so no dataset would carry its edges{self._write_a_relationship()}",
             )
         return None
 
@@ -1096,7 +1117,7 @@ class _ShapeChecker:
                 "route_malformed",
                 [*loc, "depot_by"],
                 f"{json.dumps(body['depot_by'])} is not a relationship this model declares in "
-                "relationships, so no dataset would carry its links",
+                f"relationships, so no dataset would carry its links{self._write_a_relationship()}",
             )
         for key in ("severity", "weight", "when"):
             if key in constraint and (key != "severity" or constraint[key] != "hard"):
@@ -1324,7 +1345,7 @@ class _ShapeChecker:
             if name not in self.relationships:
                 return Refusal("join_ends_invalid", [*loc, "ends", i],
                                f"{json.dumps(name)} is not a relationship this model declares in relationships, "
-                               "so no dataset would carry the links' ends")
+                               f"so no dataset would carry the links' ends{self._write_a_relationship()}")
         if isinstance(body.get("sources"), list):
             problem = self._check_filters(body["sources"], [*loc, "sources"], body["places"].get("set"), {})
             if problem:
@@ -1469,7 +1490,9 @@ class _ShapeChecker:
                     "binding_index_not_a_name",
                     [*at, "index"],
                     f"{json.dumps(index)} is not an index name; names on this platform are "
-                    "^[a-z][a-z0-9_]*$",
+                    "^[a-z][a-z0-9_]*$; write it as "
+                    f'{{"index": "i", "set": {json.dumps(binding.get("set", "<a set>"))}}} and read the '
+                    'record as "i" in the rule',
                 )
             if index in scope:
                 return Refusal(
@@ -1503,6 +1526,13 @@ class _ShapeChecker:
                 return problem
         return scope
 
+    def _write_a_relationship(self) -> str:
+        """The fix a refusal of an undeclared relationship names: one of those declared, or how to declare one."""
+        if self.relationships:
+            return "; write it as one of " + ", ".join(json.dumps(r) for r in sorted(self.relationships))
+        return ("; write its name in \"relationships\" first (and the link in the seed's relationship_types), then "
+                "write it as that name")
+
     def _check_via(self, binding: dict[str, Any], at: Loc, scope: dict[str, str]):
         if "via" not in binding:
             return None
@@ -1523,7 +1553,7 @@ class _ShapeChecker:
                 "binding_via_rel_not_declared",
                 [*here, "rel"],
                 f"{json.dumps(via.get('rel'))} is not a relationship this model declares in "
-                "relationships, so no dataset would carry its edges",
+                f"relationships, so no dataset would carry its edges{self._write_a_relationship()}",
             )
 
         ends = [end for end in _VIA_ENDS if end in via]
@@ -1837,7 +1867,8 @@ class _ShapeChecker:
                 f"{name!r} is declared over {len(index_types)} "
                 f"{'set' if len(index_types) == 1 else 'sets'} "
                 f"({', '.join(index_types) or 'none'}), so it is subscripted with that many "
-                "indices",
+                f'indices; write it as {{"{kind}": {json.dumps(name)}, "index": '
+                f"[{', '.join(f'<an index over {t}>' for t in index_types)}]}}",
             )
         for j, index in enumerate(subscript):
             if isinstance(index, dict):

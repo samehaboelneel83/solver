@@ -39,7 +39,7 @@ Governance from here on: **no platform change is measured on the tuning set in t
 |---|---|---|---|---|
 | 1.1 | **Inventory.** Every repair and inference now scattered: `repair.py` (spec_of, misplaced, joined_keys, repair, _scalar_indices, _bound_rules, _walk), `core.py` (bind_literal_keys, the guards), `toolcall.py` (mend_brackets, strict_loads), `files.py` (list default), `idioms.py`. Each classified: *canonicalisation* (one spelling → the contract's), *inference* (something the model left implicit, derivable from the spec), *heuristic* (a guess). | `docs/plans/canonical-form.md` (new) | the inventory lists every function with its class and the corpus case it came from | complete |
 | 1.2 | **`canonical(spec) -> (spec, notes)`.** One ordered pass, each rule a small named function with a docstring, an example and a test; the pydantic contract applied after it. Canonicalisations and tested inferences move in; heuristics become notes to the model (never silent edits) or are deleted. | `app/agent/canon.py` (new); `repair.py` reduced to a thin call | unit test per rule; **fixed point on the corpus:** `canonical(gold) == gold` for every gold model; every mutation still warned after canonicalisation | complete (13 Oct: `repair.py` gone; no `re` in `canon.py`) |
-| 1.3 | **Refusals that name the fix.** Every contract refusal the corpus can provoke carries the canonical spelling in its message (as the over-without-sum case should have). | `app/ir/validate.py`, `app/api/model_spec.py` | a test that every refusal kind seen in the runs' `causes` tables has a "write it as" clause | — |
+| 1.3 | **Refusals that name the fix.** Every contract refusal the corpus can provoke carries the canonical spelling in its message (as the over-without-sum case should have). | `app/ir/validate.py`, `app/api/model_spec.py` | a test that every refusal kind seen in the runs' `causes` tables has a "write it as" clause | complete (13 Oct: `tests/test_refusals_name_the_fix.py`, the five kinds the tuning runs recorded) |
 
 ## Phase 2 — The constructs library (days 7–10)
 
@@ -197,3 +197,14 @@ The neutrality plan's step 5 and step 3b measurements run on within Phase 0; the
   reverse patch (`git show fe687b8 -- backend/app/agent/core.py | git apply -R`) still applies to `core.py`,
   so the deploy recipe is unchanged. Not deployed: the loop's measurement series is paused, and the pass is a
   refactor with no behaviour change. Next: 1.3 (refusals that name the fix), then Phase 2.
+- **13 Oct, 09:40 — Phase 1.3 done.** The tuning runs' `causes` tables (base, step 2, steps 4–7) record five
+  refusal kinds in all, each now naming the fix: a `null` index name (3 times) says to write
+  `{"index": "i", "set": ...}`; an unknown key says the node's canonical shape (a rule, a term, a goal term,
+  a binding, a declaration: `validate._SHAPES`); a wrong subscript count says
+  `{"var": name, "index": [<an index over a>, ...]}`; an undeclared relationship names those declared (or how
+  to declare one), at its four sites through `_write_a_relationship`; the order check's "no value is loaded"
+  already said what to load. `tests/test_refusals_name_the_fix.py` provokes each on a minimal model and
+  requires a "write it as" / "Load it with" clause; 489 validator and refusal tests pass, and the Assistant's
+  own tests (135) read the new text without change. The refusal codes and `loc` are as they were, so the
+  front end's port (`frontend/src/ir/validate.ts`, same codes, its own words) is untouched. Phase 1 is
+  complete; next is Phase 2 (the constructs library, from `idioms.py`).
