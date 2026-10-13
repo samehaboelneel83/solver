@@ -55,11 +55,11 @@ def test_the_platforms_own_messages_name_no_domain():
     found on one problem must speak in model terms, never in that problem's."""
     import inspect
 
-    from app.agent import canon, files, idioms
+    from app.agent import canon, constructs, files
     from app.solve import lint
 
     texts: dict[str, str] = {}
-    for module in (core, files, canon, idioms, lint):
+    for module in (core, files, canon, constructs, lint):
         for name, value in vars(module).items():
             if name.isupper() and isinstance(value, str) and not name.startswith("EXAMPLE"):
                 texts[f"{module.__name__}.{name}"] = value
@@ -91,6 +91,9 @@ def test_the_platforms_own_messages_name_no_domain():
                      "parameter_values": [{"parameter": "allowed", "entities": [["a", "a1"]], "value": 1}]},
             "ir": {"version": 2, "constraints": [{"id": "c", "left": {"par": "rate"}, "relation": "<=", "right": {"const": 1}}]}}
     texts["canon.notes"] = " ".join(canon.repair(spec))
+    texts["constructs.described"] = " ".join(constructs.describe())
+    for module in constructs.MODULES:
+        texts[f"{module.__name__}.FIELDS"] = " ".join(module.FIELDS.values())
     sheet = {"name": "s", "columns": ["a", "b", "v"], "rows": [["a1", "b1", "yes"], ["a2", None, "3 units"]], "total_rows": 2}
     report: list[str] = []
     files.expand({"parameters": [{"name": "allowed", "index": ["a", "b"], "default_value": 1}],

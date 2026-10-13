@@ -208,3 +208,19 @@ The neutrality plan's step 5 and step 3b measurements run on within Phase 0; the
   own tests (135) read the new text without change. The refusal codes and `loc` are as they were, so the
   front end's port (`frontend/src/ir/validate.ts`, same codes, its own words) is untouched. Phase 1 is
   complete; next is Phase 2 (the constructs library, from `idioms.py`).
+- **13 Oct, 10:20 — Phase 2 opened: the package.** `app/agent/idioms.py` became `app/agent/constructs/`:
+  one module per construct (`carried`, `only_if`, `largest_of`, `one_per_group` for exactly_one/at_most_one),
+  each with `KEYS`, `FIELDS`, a neutral `DESCRIPTION` the Phase 3 instructions will include verbatim, and its
+  `expand`; the registry and the one `expand(spec)` call in `__init__.py`; the helpers in `_common.py`. The
+  wire format, the expansions, the notes and the refusal texts are as they were (the refusal class is
+  `ConstructRefused`, `IdiomRefused` kept as its alias); `core.py` untouched, so the step-3b reverse patch
+  still applies. `tests/test_constructs.py` (the three hand-worked optima, the refusal, the plan card) plus a
+  registry test; the neutrality scan now reads every description and field text (43 tests pass with the
+  canonical-form and summary tests). **Baseline for the exit criterion:** the 8 tuning golds hold 60 plain
+  linear rules and 1 `place` rule, no construct rules -- so "every hard rule a construct or plain linear"
+  already holds, and the mutation table cannot show a construct's refusal from the golds. **Decision:**
+  `bench.phase1.mutate` gets a `construct` mutation class that takes each construct's wrong form from its own
+  test fixture (the plan's last column: the starting amount in every period, a partial list with default 1,
+  `level >= value x pick`, a missing `most`, the division written as is) and counts whether the construct
+  refuses or the checks warn; it is written with the first new construct (2.2 allowed pairs). Then 2.5, 2.7,
+  2.9, one per tick, each with its hand-worked optimum.

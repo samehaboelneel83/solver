@@ -1,4 +1,4 @@
-"""Modelling idioms the Assistant fills in (app/agent/idioms.py; neutrality plan, step 3): each is expanded into
+"""The constructs library (app/agent/constructs; build-protocol plan, Phase 2): each is expanded into
 ordinary rules, built and solved by the platform's own dry run with a trial, and reaches the hand-worked optimum."""
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from app.agent import idioms
+from app.agent import constructs
 from app.main import app
 from tests.test_tenancy import tenants  # noqa: F401
 from tests.test_v1_problem_run import db  # noqa: F401
@@ -18,7 +18,7 @@ from tests.test_v1_problem_run import db  # noqa: F401
 def _trial(headers, seed, ir):
     spec = {"domain_name": f"Idiom {uuid.uuid4().hex[:6]}", "problem_name": "T", "seed": seed, "ir": ir}
     expanded = copy.deepcopy(spec)
-    notes = idioms.expand(expanded)
+    notes = constructs.expand(expanded)
     got = TestClient(app).post("/api/v1/problems/from-spec", json={**expanded, "dry_run": True, "trial": True},
                                headers=headers)
     assert got.status_code == 200, got.text
@@ -104,13 +104,13 @@ def test_only_if_with_allowed_pairs_and_exactly_one(tenants):
 
 def test_an_idiom_written_wrong_is_refused_with_what_to_write():
     spec = {"seed": {"entities": []}, "ir": {"constraints": [{"id": "c_b", "carried": {"periods": {"index": "t"}}}]}}
-    with pytest.raises(idioms.IdiomRefused, match=r'rule c_b \("carried"\): "periods" is'):
-        idioms.expand(spec)
+    with pytest.raises(constructs.IdiomRefused, match=r'rule c_b \("carried"\): "periods" is'):
+        constructs.expand(spec)
     spec = {"seed": {}, "ir": {"variables": {"x": {"index": [], "domain": "continuous"}},
                                "constraints": [{"id": "c_x", "only_if": {"amount": {"var": "x", "index": []},
                                                                          "chosen": {"var": "y", "index": []}}}]}}
-    with pytest.raises(idioms.IdiomRefused, match="declares no upper bound"):
-        idioms.expand(spec)
+    with pytest.raises(constructs.IdiomRefused, match="declares no upper bound"):
+        constructs.expand(spec)
 
 
 def test_the_plan_card_shows_what_each_parameter_holds_as_loaded():
@@ -124,3 +124,17 @@ def test_the_plan_card_shows_what_each_parameter_holds_as_loaded():
     text = readback({"seed": seed, "ir": {}})
     assert "- is_open[w, c]: 6 cells given (value 1 in all 6), every other cell 0" in text
     assert "- cost[w, c]: 6 cells given (values from 10 to 15), every other cell 0" in text
+
+
+def test_every_construct_is_described_and_refuses_a_body_that_is_not_an_object():
+    """The registry: each construct names its keys, its fields and a neutral paragraph for the instructions; a
+    body that is not an object is refused with what to write."""
+    assert set(constructs.KEYS) == {"carried", "only_if", "largest_of", "at_most_one", "exactly_one"}
+    for module in constructs.MODULES:
+        assert module.KEYS and module.FIELDS and len(module.DESCRIPTION) > 100, module.__name__
+        for key in module.KEYS:
+            assert constructs.REGISTRY[key] is module
+            spec = {"seed": {}, "ir": {"constraints": [{"id": "c_x", key: "not an object"}]}}
+            with pytest.raises(constructs.ConstructRefused, match=rf'rule c_x \("{key}"\): write it as an object'):
+                constructs.expand(spec)
+    assert len(constructs.describe()) == len(constructs.MODULES)

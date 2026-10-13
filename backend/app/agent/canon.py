@@ -19,7 +19,7 @@ import json
 from typing import Any, Callable
 
 from app.agent import draft as agent_draft
-from app.agent import idioms as agent_idioms
+from app.agent import constructs as agent_constructs
 from app.agent.files import FileRefused
 
 BODY_KEYS = ("body", "term", "of", "expr", "expression", "value", "sum")
@@ -646,9 +646,9 @@ def canonical(args: Any, *, messages: list[dict[str, Any]] | None = None,
         if isinstance(term, dict):
             term.pop("note", None)
     if load is not None:
-        # Modelling idioms written as compact rules become the rules they stand for (app/agent/idioms.py);
+        # Constructs written as compact rules become the rules they stand for (app/agent/constructs);
         # they need the loaded records, so only on the expanded spec. IdiomRefused is a FileRefused: told.
-        notes.extend(agent_idioms.expand(spec))
+        notes.extend(agent_constructs.expand(spec))
     for rule in RULES:
         rule(spec, notes)
     notes[start:] = _dedup(notes[start:])
