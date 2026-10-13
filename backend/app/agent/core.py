@@ -66,6 +66,7 @@ from typing import Any, Callable, Iterator
 from app.agent import compact as agent_compact
 from app.agent import files as agent_files
 from app.agent import draft as agent_draft
+from app.agent import sentences as agent_sentences
 from app.agent import stages as agent_stages
 from app.agent import readback as agent_readback
 from app.agent import canon as agent_canon
@@ -4281,7 +4282,8 @@ class Agent:
                     built = self._spec(args)
                     built_as = agent_readback.readback(built, self.loaded).split("\n", 1)[-1] + trial_for_person(
                         body.get("trial")) + shape_for_person(body.get("shape")) + numbers_for_person(messages, built, self.ctx.files) \
-                        + goal_sense_for_person(messages, built.get("ir") or {})
+                        + goal_sense_for_person(messages, built.get("ir") or {}) \
+                        + agent_sentences.sentences_for_person(messages, built)
                     yield {"type": "plan", "summary": str(args.get("summary")) + "\n\n**As built** (read back "
                            "from the spec by the platform; check it says what you meant)\n```\n" + built_as + "\n```",
                            "counts": counts, "spec": self._spec(args, expand=False), "readback": built_as}

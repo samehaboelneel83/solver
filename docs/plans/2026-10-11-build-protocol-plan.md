@@ -334,3 +334,17 @@ The neutrality plan's step 5 and step 3b measurements run on within Phase 0; the
   patch still applies (the tools and dispatch sit far from the instructions). Not deployed: the model is not
   told the protocol yet (3.3), so nothing changes on the old path. Next: 3.2 (every sentence of the request
   mapped), then 3.3 (the instructions -- where the owner decides on step 3b).
+- **13 Oct, 17:00 — 3.2, every sentence of the request mapped.** `app/agent/sentences.py` (new): the
+  person's messages split into prose sentences (bullets stripped, a pasted table's rows and anything under four
+  words left out); a sentence states a rule (must, never, cannot, at most, at least, no more than, only,
+  exactly, within, before, after, capacity, deadline, ...; a sentence beginning "No ...") or a goal (minimise,
+  cheapest, fewest, best, ...; "at most"/"at least" are not goals). A sentence is held when an `add_rule`
+  claimed it, or a rule's note holds it, in the same words or most of them (one inside the other, or 60 % of
+  the shorter one's words shared); a goal sentence is held once a goal is staged. The card line: **CHECK
+  THIS: no rule holds "..." -- if it is a rule of the problem, it is missing** (at most eight named), and
+  "no goal holds ..." when no goal was staged. Only on the protocol path (a plan built in stages); a plan
+  written whole says nothing here -- its notes are the model's words, not the person's, and the line would be
+  noise. `mapping()` gives the request-left, model-right table for the card (3.5). On the tuning requests the
+  word lists find 3-9 rule sentences and 1-4 goal sentences each (the golds hold 5-14 rules), a proportionate
+  first reading. 22 sentence, neutrality and stage tests pass; the neutrality scan reads the new modules'
+  constants and card lines. Next: 3.3, the instructions (the step-3b decision), then 3.4-3.6.

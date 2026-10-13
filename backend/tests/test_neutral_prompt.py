@@ -93,6 +93,19 @@ def test_the_platforms_own_messages_name_no_domain():
             "ir": {"version": 2, "constraints": [{"id": "c", "left": {"par": "rate"}, "relation": "<=", "right": {"const": 1}}]}}
     texts["canon.notes"] = " ".join(canon.repair(spec))
     texts["constructs.described"] = " ".join(constructs.describe())
+    from app.agent import sentences, stages
+
+    for module in (sentences, stages):
+        for name, value in vars(module).items():
+            if name.isupper() and isinstance(value, str):
+                texts[f"{module.__name__}.{name}"] = value
+    texts["sentences.card"] = sentences.sentences_for_person(
+        [{"role": "user", "content": "Each one must take at most 40 units. We want the cheapest plan."},
+         {"role": "assistant", "content": "", "tool_calls": [{"id": "r", "type": "function", "function": {
+             "name": "add_rule", "arguments": "{}"}}]}])
+    texts["stages.said"] = " ".join(stages.check_decisions(
+        {"seed": {"entity_types": [{"name": "a"}], "entities": [{"type": "a", "key": "a1"}]},
+         "ir": {"variables": {"x": {"index": ["a"], "domain": "binary"}}}}).split())
     for module in constructs.MODULES:
         texts[f"{module.__name__}.FIELDS"] = " ".join(module.FIELDS.values())
     sheet = {"name": "s", "columns": ["a", "b", "v"], "rows": [["a1", "b1", "yes"], ["a2", None, "3 units"]], "total_rows": 2}
