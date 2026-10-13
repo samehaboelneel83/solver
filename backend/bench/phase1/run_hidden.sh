@@ -4,6 +4,7 @@
 cd "$(dirname "$0")"
 tag="${1:-base}"
 size="${2:-S}"
+only="${3:-}"   # optional: a comma-separated list of case ids (h07,h08) to run only those, e.g. after a crash
 export PW_DIR="C:/Users/user/AppData/Local/Temp/claude/D--solver/3932906e-32f9-4d3f-b0fb-ac43eb061e80/scratchpad/pw"
 export LIMIT_MIN=20
 mkdir -p runs/hidden
@@ -12,6 +13,7 @@ for f in ../hidden/h[0-9][0-9]_*.py; do
   p="${m%%_*}"
   case_dir="../hidden/cases/${p}/${size}"
   [ -d "$case_dir" ] || continue
+  if [ -n "$only" ] && ! echo ",$only," | grep -q ",$p,"; then continue; fi
   out="runs/hidden/${p}-${size}-${tag}"
   echo "$(date +%T) start ${p} ${size}" >> "runs/hidden-${tag}.log"
   node drive_case.mjs "$case_dir" "$out" "H ${p} ${size} ${tag} $(date +%H%M)" > "${out}.out" 2>&1
