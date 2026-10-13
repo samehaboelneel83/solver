@@ -129,7 +129,7 @@ def test_the_plan_card_shows_what_each_parameter_holds_as_loaded():
 def test_every_construct_is_described_and_refuses_a_body_that_is_not_an_object():
     """The registry: each construct names its keys, its fields and a neutral paragraph for the instructions; a
     body that is not an object is refused with what to write."""
-    assert set(constructs.KEYS) == {"carried", "only_if", "allowed_pairs", "largest_of", "at_most_one", "exactly_one", "covering", "share_of_total"}
+    assert set(constructs.KEYS) == {"carried", "only_if", "allowed_pairs", "largest_of", "at_most_one", "exactly_one", "covering", "share_of_total", "used_only_where_given"}
     for module in constructs.MODULES:
         assert module.KEYS and module.FIELDS and len(module.DESCRIPTION) > 100, module.__name__
         for key in module.KEYS:
@@ -265,4 +265,36 @@ def test_share_of_total_written_wrong_is_refused_with_what_to_write():
     ir["constraints"][1]["share_of_total"]["relation"] = ">="
     ir["constraints"][1]["share_of_total"]["part"] = 3
     with pytest.raises(constructs.ConstructRefused, match='"part" is the part of the mix'):
+        constructs.expand({"seed": seed, "ir": ir})
+
+
+def test_used_only_where_given_keeps_the_amount_to_the_pairs_with_a_value(tenants):
+    """used_only_where_given.EXAMPLE: two records, three options, a rate for four of the six pairs: 44. Without the
+    rule the cheapest plan would use the pairs with no rate, at the default of 0."""
+    from app.agent.constructs import used_only_where_given as given
+
+    seed, ir = copy.deepcopy(given.EXAMPLE["seed"]), copy.deepcopy(given.EXAMPLE["ir"])
+    trial, expanded, notes = _trial(tenants["b"], seed, ir)
+    assert trial["status"] == "optimal" and abs(trial["objective"] - 44) < 1e-6, trial
+    flag = next(p for p in expanded["seed"]["parameters"] if p["name"] == "c_given_given")
+    assert flag["index"] == ["record", "option"] and flag["default_value"] == 0
+    assert sum(1 for v in expanded["seed"]["parameter_values"] if v["parameter"] == "c_given_given") == 4
+    rule = next(c for c in expanded["ir"]["constraints"] if c["id"] == "c_given")
+    assert rule["right"] == {"mul": [{"const": 10}, {"par": "c_given_given", "index": ["r", "o"]}]}
+    assert "1 for the 4 cell(s) rate has" in rule["note"]
+
+
+def test_used_only_where_given_written_wrong_is_refused_with_what_to_write():
+    from app.agent.constructs import used_only_where_given as given
+
+    seed, ir = copy.deepcopy(given.EXAMPLE["seed"]), copy.deepcopy(given.EXAMPLE["ir"])
+    ir["constraints"][2]["used_only_where_given"]["given"] = {"par": "rate"}
+    with pytest.raises(constructs.ConstructRefused, match=r'rule c_given \("used_only_where_given"\): "given" is the parameter'):
+        constructs.expand({"seed": seed, "ir": ir})
+    ir["constraints"][2]["used_only_where_given"]["given"] = {"par": "rate", "index": ["r"]}
+    with pytest.raises(constructs.ConstructRefused, match="declared over 2 kind"):
+        constructs.expand({"seed": seed, "ir": ir})
+    ir["constraints"][2]["used_only_where_given"]["given"] = {"par": "rate", "index": ["r", "o"]}
+    seed["parameter_values"] = []
+    with pytest.raises(constructs.ConstructRefused, match='"rate" has no cells'):
         constructs.expand({"seed": seed, "ir": ir})

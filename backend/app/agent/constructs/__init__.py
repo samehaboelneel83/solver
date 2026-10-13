@@ -17,14 +17,16 @@ from __future__ import annotations
 from types import ModuleType
 from typing import Any
 
-from app.agent.constructs import allowed_pairs, carried, covering, largest_of, one_per_group, only_if, share_of_total
+from app.agent.constructs import (allowed_pairs, carried, covering, largest_of, one_per_group, only_if, share_of_total,
+                                  used_only_where_given)
 from app.agent.constructs._common import ConstructRefused
 
 #: `IdiomRefused` was the name before the package (neutrality plan, step 3); kept for what reads it.
 IdiomRefused = ConstructRefused
 
 #: Every construct module, in the order the instructions describe them.
-MODULES: tuple[ModuleType, ...] = (carried, only_if, allowed_pairs, largest_of, one_per_group, covering, share_of_total)
+MODULES: tuple[ModuleType, ...] = (carried, only_if, allowed_pairs, used_only_where_given, largest_of, one_per_group,
+                                  covering, share_of_total)
 
 #: Rule key -> the module that expands it.
 REGISTRY: dict[str, ModuleType] = {key: module for module in MODULES for key in module.KEYS}

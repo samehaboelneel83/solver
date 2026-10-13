@@ -260,3 +260,13 @@ The neutrality plan's step 5 and step 3b measurements run on within Phase 0; the
   Phase 3.2 case exactly -- the sentence "at least 30% of the total" selects the construct, and a plain rule
   for such a sentence is what the staged protocol refuses. Next: 2.9 used_only_where_given, then
   EXAMPLE/WRONG pairs for the four moved constructs, then the all-one decision warning.
+- **13 Oct, 12:45 — construct 2.9 `used_only_where_given`.** `app/agent/constructs/used_only_where_given.py`:
+  the pair's indices, the amount, the parameter whose cells say where, `most`; the platform makes a 0/1
+  parameter that is 1 exactly where the given parameter has a cell (one per distinct cell, after the files are
+  loaded) and writes amount <= most x that; the note counts the cells. Example (two records needing 10 from
+  three options of 8, a rate for four of six pairs: 44). The mistake written by hand -- no rule, the amount
+  free at the default rate of 0 (goal 0) -- is **caught by the trial's no-data check**. Table: 54 caught, 27
+  same goal, 21 missed (golds unchanged); 19 construct and neutrality tests pass. The nine constructs of the
+  plan's table are in: 2.1, 2.3, 2.4, 2.6 moved; 2.2, 2.5, 2.7, 2.9 new; 2.8 is the seed's
+  `relationships_in_order`. Next: EXAMPLE/WRONG pairs for the four moved constructs (the plan's last column),
+  then the Phase 2 exit check and the all-one decision warning.
