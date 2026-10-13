@@ -239,3 +239,13 @@ The neutrality plan's step 5 and step 3b measurements run on within Phase 0; the
   note); golds unchanged -- 53 caught, 27 same goal, 19 missed.** 26 construct, neutrality and canonical-form
   tests pass. Next: 2.5 covering, 2.7 share_of_total, 2.9 used_only_where_given, and EXAMPLE/WRONG pairs for
   the four moved constructs so the table shows every construct.
+- **13 Oct, 11:35 — construct 2.5 `covering`.** `app/agent/constructs/covering.py`: each requirement, the
+  options, `covers` as a 0/1 parameter over (option, requirement) or as a relationship from the option to what
+  it covers (a `via` binding), `chosen`, `at_least` (1). Example in the module (four requirements, three
+  options: 7; as links 7; `at_least` 2 infeasible, since one requirement has one cover). The mistake written by
+  hand -- the cover per pair, `chosen >= covers` for every option and requirement, which chooses every covering
+  option (10) -- **is MISSED by every check**: the table reads 53 caught, 27 same goal, 20 missed (golds
+  unchanged). A gap recorded for the next tick: a 0/1 decision with every cell at 1 decides nothing, as one
+  with every cell at 0 does (the trial's "does nothing" card has the all-zero half only); whether a warning on
+  the all-one half is safe on the golds is the test. 15 construct and neutrality tests pass. Next: 2.7
+  share_of_total, 2.9 used_only_where_given, then EXAMPLE/WRONG pairs for the four moved constructs.

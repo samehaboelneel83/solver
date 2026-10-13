@@ -129,7 +129,7 @@ def test_the_plan_card_shows_what_each_parameter_holds_as_loaded():
 def test_every_construct_is_described_and_refuses_a_body_that_is_not_an_object():
     """The registry: each construct names its keys, its fields and a neutral paragraph for the instructions; a
     body that is not an object is refused with what to write."""
-    assert set(constructs.KEYS) == {"carried", "only_if", "allowed_pairs", "largest_of", "at_most_one", "exactly_one"}
+    assert set(constructs.KEYS) == {"carried", "only_if", "allowed_pairs", "largest_of", "at_most_one", "exactly_one", "covering"}
     for module in constructs.MODULES:
         assert module.KEYS and module.FIELDS and len(module.DESCRIPTION) > 100, module.__name__
         for key in module.KEYS:
@@ -188,4 +188,45 @@ def test_allowed_pairs_written_without_its_list_is_refused_with_what_to_write():
     seed, ir = _pairs_case(partial_list=True)
     ir["constraints"][0]["allowed_pairs"]["for"] = [{"index": "r", "set": "record"}]
     with pytest.raises(constructs.ConstructRefused, match='"for" is the pair'):
+        constructs.expand({"seed": seed, "ir": ir})
+
+
+def test_covering_chooses_the_cheapest_options_that_cover_every_requirement(tenants):
+    """covering.EXAMPLE: o1 + o3 leave n3 uncovered, so o2 is in every cover; 7. The same with the cover given as
+    a relationship from the option to what it covers, and with at_least 2 (every option: 10)."""
+    from app.agent.constructs import covering
+
+    seed, ir = copy.deepcopy(covering.EXAMPLE["seed"]), copy.deepcopy(covering.EXAMPLE["ir"])
+    trial, expanded, _ = _trial(tenants["b"], seed, ir)
+    assert trial["status"] == "optimal" and abs(trial["objective"] - 7) < 1e-6, trial
+    rule = expanded["ir"]["constraints"][0]
+    assert rule["relation"] == ">=" and rule["right"] == {"const": 1} and "covers x chosen" in rule["note"]
+    # The cover as links.
+    seed, ir = copy.deepcopy(covering.EXAMPLE["seed"]), copy.deepcopy(covering.EXAMPLE["ir"])
+    seed["relationship_types"] = [{"name": "covers_link", "from": "option", "to": "need", "cardinality": "many_to_many"}]
+    seed["relationships"] = [{"type": "covers_link", "from": ["option", v["entities"][0][1]], "to": ["need", v["entities"][1][1]]}
+                             for v in seed.pop("parameter_values")]
+    seed["parameters"] = []
+    ir["parameters"] = {}
+    ir["relationships"] = ["covers_link"]
+    ir["constraints"][0]["covering"]["covers"] = {"rel": "covers_link"}
+    trial, expanded, _ = _trial(tenants["b"], seed, ir)
+    assert trial["status"] == "optimal" and abs(trial["objective"] - 7) < 1e-6, trial
+    assert expanded["ir"]["constraints"][0]["left"]["over"][0]["via"] == {"rel": "covers_link", "to": "n"}
+    # Two covering options for every requirement: n3 is covered by o2 alone, so it cannot be done.
+    seed, ir = copy.deepcopy(covering.EXAMPLE["seed"]), copy.deepcopy(covering.EXAMPLE["ir"])
+    ir["constraints"][0]["covering"]["at_least"] = 2
+    trial, _, _ = _trial(tenants["b"], seed, ir)
+    assert trial["status"] == "infeasible", trial
+
+
+def test_covering_written_wrong_is_refused_with_what_to_write():
+    from app.agent.constructs import covering
+
+    seed, ir = copy.deepcopy(covering.EXAMPLE["seed"]), copy.deepcopy(covering.EXAMPLE["ir"])
+    ir["constraints"][0]["covering"]["covers"] = "covers"
+    with pytest.raises(constructs.ConstructRefused, match=r'rule c_cover \("covering"\): "covers" is a 0/1 parameter'):
+        constructs.expand({"seed": seed, "ir": ir})
+    ir["constraints"][0]["covering"]["covers"] = {"rel": "nothing"}
+    with pytest.raises(constructs.ConstructRefused, match='does not list in "relationships"'):
         constructs.expand({"seed": seed, "ir": ir})
