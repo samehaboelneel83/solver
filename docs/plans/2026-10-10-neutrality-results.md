@@ -828,3 +828,11 @@ right per run: [5, 4, 5] -> mean 4.7 of 10, range 4-5; wrong unwarned (case-runs
   wrong-unwarned count keeps falling (7 → 5 → 2). p01, p02, p03, p09 right in every run; p04 in two of three.
   Never right: p05, p06, p07, p08, p10 -- the slow cases, lost to the limit more often than to a wrong model.
 - The hidden run follows (from 01:42).
+
+## Incident: a WSL kernel panic stopped Docker at 03:26 (13 Oct)
+
+During step 7's hidden run, the WSL virtual machine behind Docker Desktop died ("Kernel panic - not syncing:
+Fatal machine check": a hardware fault reported inside the VM, not the platform). h01–h06 had run on a healthy
+stack; h07–h16 each "ran" in a second against a dead backend. Docker Desktop was restarted (the engine back
+in 20 s), the stack came up on the same image and migration, and the ten voided cases are re-run under the same
+tag (`run_hidden.sh` now takes a list of cases). The model server was unaffected throughout.
