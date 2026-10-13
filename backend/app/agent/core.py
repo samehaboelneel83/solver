@@ -66,9 +66,8 @@ from typing import Any, Callable, Iterator
 from app.agent import compact as agent_compact
 from app.agent import files as agent_files
 from app.agent import draft as agent_draft
-from app.agent import idioms as agent_idioms
 from app.agent import readback as agent_readback
-from app.agent import repair as agent_repair
+from app.agent import canon as agent_canon
 from app.agent import sandbox
 from app.agent import toolcall
 
@@ -491,60 +490,6 @@ DATA_POST = re.compile(r"^/api/domain/?$|^/api/v1/gis/datasets$|^/api/v1/gis/dat
                        r"|^/api/v1/candidate-sets(?:/from-map)?$"
                        r"|^/api/v1/parameters/\d+/recompute$")
 READ_ONLY_POST = re.compile(r"^/api/v1/gis/domains/\d+/records/propose$|^/api/v1/problems/\d+/versions/validate$")
-
-
-def bind_literal_keys(ir: dict) -> list[str]:
-    """`work[n, d, "night"]`: a record named by its key where an index belongs. The IR wants every index
-    bound, so the roster field test's model wrote it again and again and was refused each time. Each such
-    key becomes an index bound to that one record -- {"index": "k_night", "set": "shift", "where": id =
-    "night"} -- added to the rule's forall (a goal term: summed over it); one record, so nothing else
-    changes. Rewrites `ir` in place; returns what it did, for the model to read."""
-    declared = {**{n: (v or {}).get("index") or [] for n, v in (ir.get("variables") or {}).items()},
-                **{n: (v or {}).get("index") or [] for n, v in (ir.get("parameters") or {}).items()}}
-    done: list[str] = []
-
-    def walk(term, scope: set[str], added: dict[str, dict]):
-        if isinstance(term, list):
-            for t in term:
-                walk(t, scope, added)
-            return
-        if not isinstance(term, dict):
-            return
-        inner = set(scope)
-        for b in term.get("over") or []:
-            if isinstance(b, dict) and isinstance(b.get("index"), str):
-                inner.add(b["index"])
-        ref = term.get("var") if "var" in term else term.get("par")
-        if isinstance(ref, str) and isinstance(term.get("index"), list) and ref in declared:
-            sets = declared[ref]
-            for j, key in enumerate(term["index"]):
-                if isinstance(key, str) and key not in inner and j < len(sets):
-                    name = "k_" + "".join(ch if ch.isascii() and ch.isalnum() else "_" for ch in key.lower())[:40]
-                    if name not in added:
-                        added[name] = {"index": name, "set": sets[j],
-                                       "where": [{"attr": "id", "op": "=", "value": key}]}
-                        done.append(f'{ref}[..."{key}"...] -> index {name} bound to the {sets[j]} "{key}"')
-                    term["index"][j] = name
-        for k, v in term.items():
-            if k not in ("index", "where"):
-                walk(v, inner, added)
-
-    for c in ir.get("constraints") or []:
-        if not isinstance(c, dict):
-            continue
-        scope = {b["index"] for b in c.get("forall") or [] if isinstance(b, dict) and isinstance(b.get("index"), str)}
-        added: dict[str, dict] = {}
-        walk([c.get("left"), c.get("right")], scope, added)
-        if added:
-            c["forall"] = list(c.get("forall") or []) + list(added.values())
-    for t in ((ir.get("objective") or {}).get("terms") or []):
-        if not isinstance(t, dict):
-            continue
-        added = {}
-        walk(t.get("expression"), set(), added)
-        if added:
-            t["expression"] = {"sum": t["expression"], "over": list(added.values())}
-    return done
 
 
 #: Tools whose results are data or calculations, so their numbers may be used in a plan.
@@ -3224,42 +3169,19 @@ class Agent:
 
     # -- the plan: checked before the person sees it, built exactly as approved --
     def _spec(self, args: dict, expand: bool = True) -> dict:
-        """The spec as the model wrote it; expanded, its file references become rows."""
-        spec, notes = agent_repair.spec_of(args)
-        self.joined.extend(notes)
-        # A plan sent with only what changes is completed from the last plan proposed (app/agent/draft.py).
-        spec, completed = agent_draft.complete(spec, self.messages)
-        if completed:
-            self.joined.append(completed)
-        spec = {k: v for k, v in spec.items() if k != "dry_run"}
-        self.joined.extend(agent_repair.misplaced(spec))
-        self.joined.extend(agent_repair.joined_keys(spec))
-        if not isinstance(spec.get("ir"), dict):
-            raise agent_files.FileRefused(
-                'the spec has no "ir" (the model: {"version": 2, "sets", "relationships", "parameters", "variables", '
-                '"constraints", "objective"}) -- it goes beside "seed", which holds the data')
-        if "domain_id" not in spec and not spec.get("domain_name") and self.ctx.domain_id is not None:
-            spec["domain_id"] = self.ctx.domain_id
-        if expand and isinstance(spec.get("seed"), dict):
-            self._typed_cells = len(spec["seed"].get("parameter_values") or [])
-            self.loaded = []  # what each *_from_file entry stored against the file: on the plan card
-            spec["seed"] = agent_files.expand(spec["seed"], self._load_files(spec["seed"]), self.loaded)  # FileRefused: told
-        if isinstance(spec.get("ir"), dict):
-            spec["ir"] = json.loads(json.dumps(spec["ir"]))  # never the model's own copy
-            for term in ((spec["ir"].get("objective") or {}).get("terms") or []):
-                # A goal term has no "note" (rules do): a refusal for it cost Qwen a whole 2-minute reply.
-                if isinstance(term, dict):
-                    term.pop("note", None)
-            if expand:
-                # Modelling idioms written as compact rules become the rules they stand for (app/agent/idioms.py);
-                # they need the loaded records, so only on the expanded spec. IdiomRefused is a FileRefused: told.
-                self.joined.extend(agent_idioms.expand(spec))
-            self.joined.extend(agent_repair.repair(spec))
-            bound = bind_literal_keys(spec["ir"])
-            if bound:
-                self.joined.append("records named by their key where an index belongs were bound to them: "
-                                   + "; ".join(bound))
+        """The spec as the model wrote it, in the canonical form (app/agent/canon.py: one ordered pass, each
+        rewrite noted for the model in `joined`); expanded, its file references become rows and the idioms the
+        rules they stand for. FileRefused when it has no ir, or a load or an idiom refuses."""
+        spec, _ = agent_canon.canonical(args, messages=self.messages, load=self._expand_seed if expand else None,
+                                        domain_id=self.ctx.domain_id, notes=self.joined)
         return spec
+
+    def _expand_seed(self, seed: dict) -> dict:
+        """The seed's file references as records (files.expand); what each entry stored is kept for the plan
+        card, and how many cells the spec typed itself for the order check."""
+        self._typed_cells = len(seed.get("parameter_values") or [])
+        self.loaded = []  # what each *_from_file entry stored against the file: on the plan card
+        return agent_files.expand(seed, self._load_files(seed), self.loaded)  # FileRefused: told
 
     def _load_files(self, seed: dict) -> list[dict]:
         """The files a plan loads from: the attached ones, and -- read whole, on the server -- files run_python
@@ -3749,7 +3671,7 @@ class Agent:
             self.refusals[key] = self.refusals.get(key, 0) + 1
             if self.refusals[key] < MAX_SAME_ERROR:
                 continue
-            spec = agent_repair.spec_of(_args(c))[0]
+            spec = agent_canon.spec_of(_args(c))[0]
             fragment = ""
             loc = re.search(r'"loc":\s*(\[[^\]]*\])', result)
             if loc:

@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient
 
 from app.agent import core
 from app.agent import files as agent_files
-from app.agent import repair
+from app.agent import canon as repair  # the canonical form (app/agent/canon.py); the old module name kept in the tests
 from app.api import agent as agent_api
 from app.main import app
 from tests.test_agent import _chat
@@ -1095,7 +1095,7 @@ def test_stock_over_periods_with_backorders_solves_to_the_reference(tenants, db)
 
 
 def test_subtraction_written_as_sub_is_repaired():
-    from app.agent.repair import repair
+    from app.agent.canon import repair
 
     spec = {"ir": {"constraints": [{"id": "c", "left": {"sub": [{"var": "a", "index": []}, {"var": "b", "index": []}]},
                                     "relation": "=", "right": {"neg": {"var": "c", "index": []}}},
@@ -1167,7 +1167,7 @@ def test_cutting_stock_from_patterns_that_fit_solves_to_the_reference(tenants, d
 
 
 def test_a_null_bound_is_left_out():
-    from app.agent.repair import repair
+    from app.agent.canon import repair
 
     spec = {"ir": {"variables": {"uses": {"index": ["p"], "domain": "integer", "lower": 0, "upper": None}}}}
     notes = repair(spec)
@@ -1309,7 +1309,7 @@ def test_futures_asked_for_a_model_with_no_later_decision_say_they_were_not_plan
 
 
 def test_seed_data_written_inside_the_ir_is_moved_to_the_seed():
-    from app.agent.repair import misplaced
+    from app.agent.canon import misplaced
 
     spec = {"seed": {}, "ir": {"sets": ["pattern"], "patterns_that_fit": [{"type": "pattern", "of": "width",
                                                                           "size": "cm", "capacity": 100, "count": "cuts"}]}}
@@ -1349,7 +1349,7 @@ def test_room_per_record_reads_a_limit_held_in_a_parameter(tenants, db):
 
 
 def test_an_interval_part_written_as_a_term_is_reduced_to_its_name():
-    from app.agent.repair import repair
+    from app.agent.canon import repair
 
     spec = {"ir": {"sets": ["op"], "variables": {"task": {"index": ["op"], "domain": "interval",
                                                           "start": {"var": "begin", "index": ["op"]}, "end": "finish",
@@ -1360,7 +1360,7 @@ def test_an_interval_part_written_as_a_term_is_reduced_to_its_name():
 
 
 def test_a_one_number_decision_read_with_an_index_is_read_with_none():
-    from app.agent.repair import repair
+    from app.agent.canon import repair
 
     spec = {"ir": {"sets": ["op"], "variables": {"makespan": {"index": [], "domain": "integer"},
                                                 "finish": {"index": ["op"], "domain": "integer"}},
@@ -1580,7 +1580,7 @@ def test_runs_with_the_same_answer_show_one_facts_card():
 
 
 def test_a_spec_is_read_wherever_the_model_put_it():
-    from app.agent.repair import spec_of
+    from app.agent.canon import spec_of
 
     ir = {"version": 2, "sets": [], "variables": {"x": {"index": [], "domain": "binary"}}, "constraints": [],
           "objective": {"sense": "minimize", "terms": []}}
@@ -1609,7 +1609,7 @@ def test_a_spec_is_read_wherever_the_model_put_it():
 def test_values_for_a_parameter_only_the_ir_declares_and_a_sums_default_zero_are_repaired():
     """The Nile Juice trace's two refusals after the spec was read: 48 cells of "demand" with no declaration in
     the seed, and "default": 0 on a sum."""
-    from app.agent.repair import repair
+    from app.agent.canon import repair
 
     def spec(cells, default=0):
         return {"seed": {"entity_types": [], "parameter_values": cells},
@@ -1635,7 +1635,7 @@ def test_a_product_of_one_part_and_a_stray_backslash_are_put_right():
     """The Delta Pharma trace (in the browser, 10 October 2026): {"mul": [ship[w, c]]} under a sum was refused four
     times as "mul has exactly two factors", after three calls were lost to "$\\ge$" in the plan's summary."""
     from app.agent import toolcall
-    from app.agent.repair import repair
+    from app.agent.canon import repair
 
     ship = {"var": "ship", "index": ["w", "c"]}
     spec = {"seed": {}, "ir": {"version": 2, "sets": ["warehouse", "city"], "constraints": [
@@ -1679,7 +1679,7 @@ def test_a_file_load_keeps_only_the_rows_its_filter_matches_and_reads_yes_no_as_
 def test_relationships_written_as_objects_are_listed_by_name():
     """The evaluation (10 October 2026): "relationships": [{"name": "next", ...}] crashed the plan check four turns
     running ("unhashable type: 'dict'")."""
-    from app.agent.repair import repair
+    from app.agent.canon import repair
 
     spec = {"seed": {}, "ir": {"version": 2, "sets": ["week"], "relationships": [
         {"name": "next", "from": "week", "to": "week"}, "after", {"from": "week"}]}}

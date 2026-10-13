@@ -11,6 +11,10 @@ listed with where it lives, the incident it came from, and its class:
   to the model (never a silent edit), or delete.
 - **K — check, not a repair** (listed so the boundary is explicit; moves to the checks, untouched here).
 
+**13 October 2026 (Phase 1.2):** the pass is `app/agent/canon.py` — `canonical()` in the order written at the end of
+this page, the rules as the named functions of `canon.RULES`, `repair.py` gone. The tables below name the functions
+as they were; the rule each became is in the last section.
+
 ## `app/agent/toolcall.py` — the reply as JSON
 
 | What | Incident | Class |
@@ -89,3 +93,28 @@ listed with where it lives, the incident it came from, and its class:
   the seed-level rules of `repair` → the IR-level rules (`_scalar_indices`, `_walk`, `_bound_rules`) →
   `bind_literal_keys` → the contract. Today's code runs in this order already across `Agent._spec`; Phase 1.2
   makes it one function with one note list and one test file, and `repair.py` goes.
+
+## Where each repair went (13 October 2026)
+
+| Was | Is now (`app/agent/canon.py`) |
+|---|---|
+| `toolcall` mending | unchanged, called by `spec_of` |
+| `spec_of`, `misplaced`, `joined_keys` | the same names, the first three steps of `canonical()` |
+| the draft merge | `draft.complete`, the second step |
+| `files.expand` | the caller's `load` (the Assistant's `_expand_seed`), the fourth step |
+| `idioms.expand` | the fifth step, on an expanded spec only |
+| `repair`: uncertainty on a seed parameter | `uncertainty_declared_in_ir` |
+| `repair`: the complete 0/1 list on a default of 1 (partial → a note) | `complete_list_default` |
+| `repair`: a parameter with values declared only in `ir` | `declared_from_values` |
+| `repair`: relationships as objects | `relationships_by_name` |
+| `repair`: `sets` missing | `sets_stated` |
+| `repair`: empty or dict `forall` | `forall_shape` |
+| `repair`: no `index`, interval parts as terms, `null` bounds | `decision_shape` |
+| `repair`: no severity and no weight | `hard_by_default` |
+| `_scalar_indices` | `scalar_indices` |
+| `_walk`, `_lift_sum` | `term_shapes` |
+| `_bound_rules` | `bound_rules` |
+| `core.bind_literal_keys` | `literal_keys` (the function itself moved here, same name) |
+
+`canon.repair(spec)` keeps the old entry point for the tests of each incident (the rules after the load, in place,
+the literal keys aside). The fixed-point test is `tests/test_canon.py`.

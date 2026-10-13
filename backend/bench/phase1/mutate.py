@@ -27,7 +27,9 @@ HERE = Path(__file__).parent
 
 
 def _signals(ir: dict, data: dict, request: str) -> tuple[set[str], float | None, str]:
-    """What the checks say of (ir, data): a set of signal names, the goal, the status."""
+    """What the checks say of (ir, data): a set of signal names, the goal, the status. The IR goes through the
+    canonical form first, as a plan does (app/agent/canon.py): a mutation must still be warned after it."""
+    from app.agent.canon import canonical
     from app.agent.core import idle_decisions, unused_numbers
     from app.api.model_spec import used_without_data
     from app.solve import lint, sandbox
@@ -37,6 +39,7 @@ def _signals(ir: dict, data: dict, request: str) -> tuple[set[str], float | None
     from app.solve.convexity import refine
 
     out: set[str] = set()
+    ir = canonical({"spec": {"ir": ir, "seed": {}}})[0]["ir"]
     try:
         compiled = compile_model(ir, data)
     except Exception as exc:  # noqa: BLE001

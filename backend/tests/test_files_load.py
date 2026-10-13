@@ -103,7 +103,7 @@ def test_a_complete_list_on_a_default_of_the_same_value_gets_the_opposite_defaul
 
 
 def test_a_typed_list_of_ones_on_a_default_of_one_is_flipped_only_when_complete():
-    from app.agent import repair
+    from app.agent import canon as repair
 
     spec = {"seed": {"entities": [{"type": "c", "key": k} for k in ("C4", "C5")],
                      "parameters": [{"name": "allowed", "index": ["c", "w"], "default_value": 1},
@@ -120,7 +120,7 @@ def test_a_typed_list_of_ones_on_a_default_of_one_is_flipped_only_when_complete(
 
 
 def test_one_number_declared_in_the_seed_is_read_with_no_index_however_written():
-    from app.agent import repair
+    from app.agent import canon as repair
 
     spec = {"seed": {"parameters": [{"name": "rate", "default_value": 2}, {"name": "cost", "index": ["w"]}]},
             "ir": {"version": 2, "parameters": {"cost": {"index": ["w"]}},
@@ -213,7 +213,7 @@ def test_an_approved_plan_builds_with_the_pasted_tables_attached():
 
 def test_a_term_with_over_and_no_sum_is_read_as_a_sum_over_the_binding():
     """11 October 2026: {"add": [...], "over": [b]} was refused six times running, and the Assistant gave up."""
-    from app.agent import repair
+    from app.agent import canon as repair
 
     b = {"index": "r", "set": "record"}
     spec = {"seed": {}, "ir": {"version": 2, "constraints": [

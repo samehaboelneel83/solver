@@ -25,7 +25,7 @@ import pytest
 
 from fastapi.testclient import TestClient
 
-from app.agent import core
+from app.agent import canon, core
 from app.agent import files as agent_files
 from app.api import agent as agent_api
 from app.main import app
@@ -548,7 +548,7 @@ def test_a_record_named_by_its_key_in_an_index_is_bound_to_it(tenants, db):
     rest["forall"] = rest["forall"][:3]  # no s1 / s2 bindings: the keys themselves
     rest["left"] = {"add": [{"var": "work", "index": ["n", "d", "night"]}, {"var": "work", "index": ["n", "d2", "morning"]}]}
     ir = json.loads(json.dumps(spec["ir"]))
-    done = core.bind_literal_keys(ir)
+    done = canon.bind_literal_keys(ir)
     assert len(done) == 2 and '"night"' in done[0]
     rest = next(c for c in ir["constraints"] if c["id"] == "c_rest")
     assert rest["forall"][-2:] == [{"index": "k_night", "set": "shift", "where": [{"attr": "id", "op": "=", "value": "night"}]},
@@ -556,7 +556,7 @@ def test_a_record_named_by_its_key_in_an_index_is_bound_to_it(tenants, db):
     # A goal term naming one record is summed over that one record.
     goal = {"version": 2, "sets": ["shift"], "variables": {"x": {"index": ["shift"], "domain": "binary"}},
             "objective": {"sense": "minimize", "terms": [{"id": "o", "weight": 1, "expression": {"var": "x", "index": ["night"]}}]}}
-    core.bind_literal_keys(goal)
+    canon.bind_literal_keys(goal)
     assert goal["objective"]["terms"][0]["expression"]["over"][0]["index"] == "k_night"
     # And the whole roster, written that way, builds and solves to the reference.
     client = TestClient(app)
@@ -1122,7 +1122,7 @@ def test_a_set_of_futures_with_no_records_points_to_the_uncertainty_declaration(
 
 def test_an_uncertain_number_the_plan_cannot_plan_for_is_refused_and_a_seed_uncertainty_is_moved():
     """Bakery retest: uncertainty written on the seed's parameter, deviation 100 for +/- 100 loaves, no stage."""
-    from app.agent.repair import repair
+    from app.agent.canon import repair
 
     spec = {"seed": {"parameters": [{"name": "demand", "index": [], "default_value": 200,
                                      "uncertainty": {"kind": "interval", "deviation": 100}}]},

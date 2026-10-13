@@ -182,3 +182,18 @@ The neutrality plan's step 5 and step 3b measurements run on within Phase 0; the
   incident and class. Almost all are canonicalisations (one spelling, one meaning); three are inferences the
   spec determines; no silent heuristic remains. The order of the single pass is written down; Phase 1.2
   (`app/agent/canon.py`, one function, one note list, one test file, the fixed-point test on the golds) follows.
+- **13 Oct, 07:20 — Phase 1.2 done.** `app/agent/canon.py` holds the pass: `canonical(args, messages, load,
+  domain_id, notes) -> (spec, notes)` in the inventory's order (where the spec is → the draft merge →
+  `misplaced` → `joined_keys` → the caller's load → the idioms → the twelve rules of `RULES`, each a named
+  function with its docstring and incident: `uncertainty_declared_in_ir`, `complete_list_default`,
+  `declared_from_values`, `relationships_by_name`, `sets_stated`, `forall_shape`, `decision_shape`,
+  `hard_by_default`, `scalar_indices`, `term_shapes`, `bound_rules`, `literal_keys`). `repair.py` is gone;
+  `bind_literal_keys` left `core.py`; `Agent._spec` is the one call. Every note string is as it was (the
+  neutrality scan now reads `canon`). `tests/test_canon.py`: **the fixed point holds on all 8 golds**
+  (`canonical(gold) == gold`, no notes), one pass on a spec written every wrong way at once reaches a fixed
+  point, the notes said before a refusal stay with the caller, the draft merge is a step of the pass. The
+  mutation check (`bench.phase1.mutate`) now canonicalises each variant first: its table is identical before
+  and after (**52 caught, 27 same goal, 19 missed**). 189 tests pass across the touched files. The step-3b
+  reverse patch (`git show fe687b8 -- backend/app/agent/core.py | git apply -R`) still applies to `core.py`,
+  so the deploy recipe is unchanged. Not deployed: the loop's measurement series is paused, and the pass is a
+  refactor with no behaviour change. Next: 1.3 (refusals that name the fix), then Phase 2.

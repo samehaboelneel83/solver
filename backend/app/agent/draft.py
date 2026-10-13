@@ -105,7 +105,7 @@ def merge(previous: dict[str, Any] | None, partial: dict[str, Any]) -> dict[str,
 def draft_from(messages: list[dict[str, Any]]) -> dict[str, Any] | None:
     """The plan as last proposed before the call now being checked: every earlier `propose_plan` call's spec,
     each merged onto the one before (a chain of patches resolves to one plan)."""
-    from app.agent import repair
+    from app.agent import canon  # here, not at the top: canon imports this module
 
     # A summary carries the draft of the calls it folded (compact.py): the fold starts from the latest one.
     calls: list[Any] = []
@@ -130,7 +130,7 @@ def draft_from(messages: list[dict[str, Any]]) -> dict[str, Any] | None:
             args = json.loads(raw) if isinstance(raw, str) else (raw or {})
         except ValueError:
             continue
-        spec, _ = repair.spec_of(args)
+        spec, _ = canon.spec_of(args)
         draft = merge(draft, spec) if is_partial(spec) else spec
     return draft
 
