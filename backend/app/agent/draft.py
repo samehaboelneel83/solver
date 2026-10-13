@@ -102,9 +102,39 @@ def merge(previous: dict[str, Any] | None, partial: dict[str, Any]) -> dict[str,
     return out
 
 
-def draft_from(messages: list[dict[str, Any]]) -> dict[str, Any] | None:
+#: The build protocol's stage tools (build-protocol plan, Phase 3.1): each call is a patch on the draft.
+STAGE_TOOLS = ("stage_data", "stage_decisions", "add_rule", "stage_goal")
+#: What a stage_data call may carry: the seed's own parts.
+SEED_PARTS = tuple(SEED_KEYS) + ("patterns_that_fit",)
+
+
+def stage_patch(name: str, args: dict[str, Any]) -> dict[str, Any]:
+    """The partial spec a stage call stands for: the data as a seed, the decisions (and declared parameters)
+    as the IR's, one rule (its sentence kept as the note it has none of), the goal."""
+    if name == "stage_data":
+        return {"seed": {k: v for k, v in args.items() if k in SEED_PARTS}}
+    if name == "stage_decisions":
+        ir: dict[str, Any] = {"variables": args.get("variables") if isinstance(args.get("variables"), dict) else {}}
+        if isinstance(args.get("parameters"), dict):
+            ir["parameters"] = args["parameters"]
+        return {"ir": ir}
+    if name == "add_rule":
+        rule = dict(args.get("rule")) if isinstance(args.get("rule"), dict) else {}
+        if isinstance(args.get("sentence"), str) and args["sentence"].strip() and not rule.get("note"):
+            rule["note"] = args["sentence"].strip()
+        if isinstance(args.get("drop"), str) and not rule:
+            rule = {"id": args["drop"], "drop": True}
+        return {"ir": {"constraints": [rule]}}
+    if name == "stage_goal":
+        return {"ir": {"objective": args.get("objective")}}
+    return {}
+
+
+def draft_from(messages: list[dict[str, Any]], before: str | None = None) -> dict[str, Any] | None:
     """The plan as last proposed before the call now being checked: every earlier `propose_plan` call's spec,
-    each merged onto the one before (a chain of patches resolves to one plan)."""
+    each merged onto the one before (a chain of patches resolves to one plan), and every stage call's patch
+    (STAGE_TOOLS). `before` is the id of the call being checked: everything earlier is folded; left out, the
+    last call is the one being checked."""
     from app.agent import canon  # here, not at the top: canon imports this module
 
     # A summary carries the draft of the calls it folded (compact.py): the fold starts from the latest one.
@@ -116,12 +146,17 @@ def draft_from(messages: list[dict[str, Any]]) -> dict[str, Any] | None:
         if m.get("role") != "assistant":
             continue
         for c in m.get("tool_calls") or []:
-            if (c.get("function") or {}).get("name") == "propose_plan":
+            if (c.get("function") or {}).get("name") in ("propose_plan", *STAGE_TOOLS):
                 calls.append(c)
-    if len(calls) < 2:
+    if before is not None:
+        at = next((i for i, c in enumerate(calls) if isinstance(c, dict) and c.get("id") == before), None)
+        calls = calls[:at] if at is not None else calls
+    else:
+        calls = calls[:-1]  # the last call is the one being checked
+    if not calls:
         return None  # nothing before the call being checked
     draft: dict[str, Any] | None = None
-    for c in calls[:-1]:
+    for c in calls:
         if "function" not in c:  # a summary's draft, already whole
             draft = c
             continue
@@ -129,6 +164,10 @@ def draft_from(messages: list[dict[str, Any]]) -> dict[str, Any] | None:
         try:
             args = json.loads(raw) if isinstance(raw, str) else (raw or {})
         except ValueError:
+            continue
+        name = (c.get("function") or {}).get("name")
+        if name in STAGE_TOOLS:
+            draft = merge(draft, stage_patch(name, args if isinstance(args, dict) else {}))
             continue
         spec, _ = canon.spec_of(args)
         draft = merge(draft, spec) if is_partial(spec) else spec

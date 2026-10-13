@@ -297,3 +297,22 @@ The neutrality plan's step 5 and step 3b measurements run on within Phase 0; the
   Phase 3.2 case). 36 tests pass across the card, neutrality, construct and numbers tests. `core.py` was
   edited (the card lines, far from the instructions): the step-3b reverse patch still applies. Not deployed.
   **Phase 2 is complete.** Next: Phase 3, the staged build protocol.
+- **13 Oct, 15:10 — Phase 3 opened: the stages as a pure layer.** `app/agent/stages.py` (new): `assemble`
+  (the draft as the spec, with `sets` and `relationships` derived from what the model indexes over and walks),
+  `check_decisions` (every index kind has records, bounds in order, the shape check, the read-back),
+  `check_rule` (the one rule expanded and canonicalised, the shape check in the draft's model, its range as the
+  product of the forall kinds' record counts -- "up to" with a filter or a via -- and the data it reads, the
+  sentence kept as the rule's note), `check_goal` (the shape check, every parameter read declared, the
+  read-back). The stage order refuses out of turn ("declare the decisions first with stage_decisions").
+  **Deviation from the plan's text:** the draft is not a new platform message; the stage calls themselves
+  are the state -- `draft.draft_from` folds `stage_data`, `stage_decisions`, `add_rule` (replace by id, `drop`)
+  and `stage_goal` into the same draft the propose_plan patches use, so a summary carries it already and
+  `to_wire` needs nothing; it now takes the id of the call being checked (`before`), since one assistant message
+  may carry several stage calls. `tests/test_stages.py`: **every tuning gold replayed stage by stage is
+  accepted at every stage and assembles to the gold model again** (decisions, parameters, rules, goal equal;
+  the derived sets are the gold's but for a set nothing indexes over; every walked relationship present), plus
+  the order, the read-back and the fold by id (44 tests with the draft, canonical-form and summary tests).
+  Not wired to the Assistant yet (next tick: the four tools, dispatch, propose_plan with no spec; `stage_data`
+  has its own path -- `misplaced`, `joined_keys`, the load, the seed-level findings -- since the full pass
+  refuses a spec with no ir). The step-3b reverse patch is expected to break at 3.3 (the instructions
+  rewrite lands on fe687b8's lines): measure 3b or drop it is the owner's call, to be put at that point.
