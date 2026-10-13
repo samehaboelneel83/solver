@@ -138,6 +138,9 @@ def draft_from(messages: list[dict[str, Any]], before: str | None = None) -> dic
     from app.agent import canon  # here, not at the top: canon imports this module
 
     # A summary carries the draft of the calls it folded (compact.py): the fold starts from the latest one.
+    # A stage call the platform refused ("Not staged") never joined the draft.
+    refused = {m.get("tool_call_id") for m in messages
+               if m.get("role") == "tool" and str(m.get("content") or "").startswith("Not staged")}
     calls: list[Any] = []
     for m in messages:
         if m.get("role") == "user" and isinstance(m.get("draft"), dict):
@@ -146,7 +149,7 @@ def draft_from(messages: list[dict[str, Any]], before: str | None = None) -> dic
         if m.get("role") != "assistant":
             continue
         for c in m.get("tool_calls") or []:
-            if (c.get("function") or {}).get("name") in ("propose_plan", *STAGE_TOOLS):
+            if (c.get("function") or {}).get("name") in ("propose_plan", *STAGE_TOOLS) and c.get("id") not in refused:
                 calls.append(c)
     if before is not None:
         at = next((i for i, c in enumerate(calls) if isinstance(c, dict) and c.get("id") == before), None)
@@ -156,6 +159,7 @@ def draft_from(messages: list[dict[str, Any]], before: str | None = None) -> dic
     if not calls:
         return None  # nothing before the call being checked
     draft: dict[str, Any] | None = None
+    staged = False
     for c in calls:
         if "function" not in c:  # a summary's draft, already whole
             draft = c
@@ -168,9 +172,14 @@ def draft_from(messages: list[dict[str, Any]], before: str | None = None) -> dic
         name = (c.get("function") or {}).get("name")
         if name in STAGE_TOOLS:
             draft = merge(draft, stage_patch(name, args if isinstance(args, dict) else {}))
+            staged = True
             continue
         spec, _ = canon.spec_of(args)
         draft = merge(draft, spec) if is_partial(spec) else spec
+    if staged:
+        from app.agent import stages  # here: stages reads this module
+
+        return stages.assemble(draft)  # the sets and relationships derived; the IR whole
     return draft
 
 
@@ -192,17 +201,24 @@ def repeated(verdict: str, messages: list[dict[str, Any]]) -> int:
     return sum(1 for r in _plan_results(messages) if re.sub(r"\d+", "#", r)[:len(head)] == head)
 
 
-def complete(spec: dict[str, Any], messages: list[dict[str, Any]]) -> tuple[dict[str, Any], str | None]:
+def complete(spec: dict[str, Any], messages: list[dict[str, Any]],
+             before: str | None = None) -> tuple[dict[str, Any], str | None]:
     """`spec` whole, or the patch on the draft; the note says what was kept. After a send-back that asked for
-    the whole plan (WHOLE_MARK in the last propose_plan answer), the spec is taken as it is, no merge."""
+    the whole plan (WHOLE_MARK in the last propose_plan answer), the spec is taken as it is, no merge. A spec
+    with nothing in it (propose_plan after the stages) is the draft assembled from them."""
     if not is_partial(spec):
         return spec, None
     results = _plan_results(messages)
-    if results and WHOLE_MARK in results[-1]:
+    if results and WHOLE_MARK in results[-1] and spec:
         return spec, None
-    draft = draft_from(messages)
+    draft = draft_from(messages, before=before)
     if draft is None:
         return spec, None
+    if not spec:
+        ir = draft.get("ir") if isinstance(draft.get("ir"), dict) else {}
+        return draft, (f"the plan was assembled from the stages: {len(ir.get('constraints') or [])} rule(s), "
+                       f"{len(ir.get('variables') or {})} decision(s)"
+                       + (", the goal" if isinstance(ir.get("objective"), dict) else ", NO goal staged"))
     merged = merge(draft, spec)
     changed = []
     ir = spec.get("ir") if isinstance(spec.get("ir"), dict) else {}

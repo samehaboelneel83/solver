@@ -66,6 +66,7 @@ from typing import Any, Callable, Iterator
 from app.agent import compact as agent_compact
 from app.agent import files as agent_files
 from app.agent import draft as agent_draft
+from app.agent import stages as agent_stages
 from app.agent import readback as agent_readback
 from app.agent import canon as agent_canon
 from app.agent import sandbox
@@ -209,14 +210,55 @@ PLAN_TOOL: dict[str, Any] = {"type": "function", "function": {
     "parameters": {"type": "object", "properties": {
         "summary": {"type": "string", "description": "markdown for the user: problem, records and data, "
                     "decisions, rules (words + formula), goal, assumptions"},
-        "spec": {"type": "object", "description": "domain_name or domain_id, problem_name, note, seed, ir"},
-    }, "required": ["summary", "spec"]}}}
+        "spec": {"type": "object", "description": "domain_name or domain_id, problem_name, note, seed, ir -- "
+                 "left out when the plan was built in stages (stage_data, stage_decisions, add_rule, stage_goal): "
+                 "the platform assembles it from them"},
+    }, "required": ["summary"]}}}
+#: The build protocol (build-protocol plan, Phase 3): the plan built in stages, each checked as it comes, so a
+#: reply is small and a mistake is found at the stage it belongs to. app/agent/stages.py holds the checks.
+STAGE_TOOL_SPECS: list[dict[str, Any]] = [
+    {"type": "function", "function": {
+        "name": "stage_data",
+        "description": "Stage 1 of a plan built in stages: the data -- the kinds of record and their fields, the "
+                       "records (typed, or loaded from an attached file), the parameters and their values, the "
+                       "relationship types and links. The platform loads and checks it and reports what each entry "
+                       "stored, the records per kind and each parameter's cells. Then stage_decisions.",
+        "parameters": {"type": "object", "properties": {
+            "entity_types": {"type": "array"}, "entities": {"type": "array"}, "entities_from_file": {"type": "array"},
+            "parameters": {"type": "array"}, "parameter_values": {"type": "array"},
+            "parameter_values_from_file": {"type": "array"}, "relationship_types": {"type": "array"},
+            "relationships": {"type": "array"}, "relationships_from_file": {"type": "array"},
+            "relationships_in_order": {"type": "array"}, "distances_from_fields": {"type": "array"}}}}},
+    {"type": "function", "function": {
+        "name": "stage_decisions",
+        "description": "Stage 2: the decisions (the IR's variables: name, index kinds, domain, bounds) and the "
+                       "parameters the rules will read (the IR's parameters: name, index kinds). The platform checks "
+                       "every index kind has records and reads the decisions back. Then add_rule, one rule per call.",
+        "parameters": {"type": "object", "properties": {
+            "variables": {"type": "object"}, "parameters": {"type": "object"}}, "required": ["variables"]}}},
+    {"type": "function", "function": {
+        "name": "add_rule",
+        "description": "Stage 3: ONE rule, with the sentence of the request it holds, quoted. The platform checks "
+                       "the rule in the model so far and says what it ranges over and reads -- or refuses it with "
+                       "what to write. Call it once per rule; {\"drop\": \"<id>\"} removes a rule. Then stage_goal.",
+        "parameters": {"type": "object", "properties": {
+            "sentence": {"type": "string", "description": "the request's words this rule holds"},
+            "rule": {"type": "object", "description": "the rule: {id, forall, left, relation, right, severity} "
+                     "or a construct (carried, only_if, allowed_pairs, largest_of, exactly_one, covering, ...)"},
+            "drop": {"type": "string", "description": "the id of a rule to remove instead"}}}}},
+    {"type": "function", "function": {
+        "name": "stage_goal",
+        "description": "Stage 4: the goal (the IR's objective: sense and terms). The platform checks it in the "
+                       "model so far and reads it back. Then propose_plan with the summary only: the platform "
+                       "assembles the plan from the stages, runs the trial and shows the person.",
+        "parameters": {"type": "object", "properties": {"objective": {"type": "object"}}, "required": ["objective"]}}},
+]
 _CALL_API = next(t for t in TOOLS if t["function"]["name"] == "call_api")
 MODEL_TOOLS = [t for t in TOOLS if t["function"]["name"] not in ("call_api", "hand_to_describe")] + [
     {"type": "function", "function": {**_CALL_API["function"], "description":
      "Read platform data (GET), or solve a scenario after the build (POST /api/v1/scenarios/{id}/runs). "
      "Nothing else may be written in this mode: changes go through propose_plan."}},
-    PLAN_TOOL]
+    PLAN_TOOL, *STAGE_TOOL_SPECS]
 WORKSPACE_TOOL: dict[str, Any] = {"type": "function", "function": {
     "name": "describe_workspace",
     "description": "What a domain (workspace) already holds: kinds of record with their fields, counts and some keys, "
@@ -1148,6 +1190,8 @@ def _shown(name: str, args: dict) -> dict:
     """What the UI shows of a call: a plan's spec is large and shown in its own card."""
     if name == "propose_plan":
         return {"summary": str(args.get("summary", ""))[:200]}
+    if name == "stage_data":
+        return {k: (f"{len(v)} entries" if isinstance(v, list) else v) for k, v in args.items()}
     return args
 
 
@@ -2662,6 +2706,11 @@ class Agent:
                         return clip(f"Run {body.get('id')} has settled ({body.get('status')}). This is read_result "
                                     "for it; report from it:\n\n" + text, lim)
                 return clip(res, lim)
+            if name in agent_draft.STAGE_TOOLS:
+                if name not in self.tool_names:
+                    return f"{name} is not available in this mode"
+                return {"stage_data": self._stage_data, "stage_decisions": self._stage_decisions,
+                        "add_rule": self._add_rule, "stage_goal": self._stage_goal}[name](args)
             if name == "propose_plan":
                 return self._check_plan(args)
             return f"unknown tool {name}"
@@ -3134,6 +3183,84 @@ class Agent:
                        if line.startswith(("Totals over", "Totals of field")) or "room left" in line)
         return out
 
+    # -- the build protocol's stages (app/agent/stages.py) ------------------------------------------------------
+
+    def _draft_before(self) -> dict | None:
+        """The draft as the stage calls before the one being executed left it."""
+        return agent_draft.draft_from(self.messages, before=getattr(self, "_call_id", None))
+
+    def _stage_data(self, args: dict) -> str:
+        seed = {k: v for k, v in args.items() if k in agent_draft.SEED_PARTS}
+        if not seed:
+            return ("Not staged: stage_data carries the seed's parts -- entity_types, entities or entities_from_file, "
+                    "parameters, parameter_values or parameter_values_from_file, relationship_types, relationships "
+                    "or relationships_from_file")
+        spec: dict = {"seed": seed}
+        notes = agent_canon.misplaced(spec) + agent_canon.joined_keys(spec)
+        try:
+            loaded = self._expand_seed(spec["seed"])
+        except agent_files.FileRefused as e:
+            return f"Not staged: {e}"
+        lines = list(self.loaded)
+        for kind, n in agent_stages.records_per_kind(loaded).items():
+            lines.append(f"- {kind}: {n} record(s)" if n >= 0 else f"- {kind}: records loaded from a file")
+        cells: dict[str, int] = {}
+        for v in loaded.get("parameter_values") or []:
+            if isinstance(v, dict):
+                cells[str(v.get("parameter"))] = cells.get(str(v.get("parameter")), 0) + 1
+        for p in loaded.get("parameters") or []:
+            if isinstance(p, dict) and p.get("name"):
+                index = [str(x) for x in p.get("index") or []]
+                lines.append(f"- {p['name']}: {cells.get(str(p['name']), 0)} cell(s)"
+                             + (f" over {', '.join(index)}" if index else " (one number)")
+                             + f", default {p.get('default_value', 0)}")
+        links: dict[str, int] = {}
+        for r in loaded.get("relationships") or []:
+            if isinstance(r, dict):
+                links[str(r.get("type"))] = links.get(str(r.get("type")), 0) + 1
+        for rt in loaded.get("relationship_types") or []:
+            if isinstance(rt, dict) and rt.get("name"):
+                lines.append(f"- {rt['name']}: {links.get(str(rt['name']), 0)} link(s)")
+        from app.solve import lint  # here: lint reads this module's helpers
+
+        for f in lint.as_default(loaded) + lint.one_way(loaded):
+            lines.append("- CHECK THIS: " + str(f.get("said")))
+        return ("Data staged:\n" + "\n".join(lines) + ("\nNote: " + "; ".join(notes) if notes else "")
+                + "\nNext: stage_decisions (the decisions and the parameters the rules read).")
+
+    def _stage_decisions(self, args: dict) -> str:
+        draft = agent_draft.merge(self._draft_before(), agent_draft.stage_patch("stage_decisions", args))
+        try:
+            said = agent_stages.check_decisions(draft, self._workspace_counts(draft))
+        except agent_files.FileRefused as e:
+            return f"Not staged: {e}"
+        return said + "\nNext: add_rule, one rule per call, quoting the sentence of the request it holds."
+
+    def _add_rule(self, args: dict) -> str:
+        if isinstance(args.get("drop"), str) and args["drop"].strip() and not args.get("rule"):
+            return f"Rule {args['drop'].strip()} dropped from the draft."
+        draft = self._draft_before()
+        try:
+            _, said = agent_stages.check_rule(draft, args.get("rule"), args.get("sentence"), self._workspace_counts(draft))
+        except agent_files.FileRefused as e:
+            return f"Not staged: {e}"
+        return said + "\nNext: another add_rule, or stage_goal when every rule of the request is in."
+
+    def _stage_goal(self, args: dict) -> str:
+        draft = self._draft_before()
+        try:
+            said = agent_stages.check_goal(draft, args.get("objective"))
+        except agent_files.FileRefused as e:
+            return f"Not staged: {e}"
+        return said + "\nNext: propose_plan with the summary for the person (no spec: the platform assembles it)."
+
+    def _workspace_counts(self, draft: dict | None) -> dict[str, int]:
+        """Records per kind the workspace already holds, when one is selected (a stage may build on them)."""
+        try:
+            return self._existing_records(draft or {})
+        except Exception:  # noqa: BLE001 -- no workspace, or none reachable: the staged data alone counts
+            return {}
+
     def _check_spec(self, args: Any) -> str:
         try:
             expanded = self._spec(args if isinstance(args, dict) else {"spec": args})
@@ -3190,7 +3317,8 @@ class Agent:
         rewrite noted for the model in `joined`); expanded, its file references become rows and the idioms the
         rules they stand for. FileRefused when it has no ir, or a load or an idiom refuses."""
         spec, _ = agent_canon.canonical(args, messages=self.messages, load=self._expand_seed if expand else None,
-                                        domain_id=self.ctx.domain_id, notes=self.joined)
+                                        domain_id=self.ctx.domain_id, notes=self.joined,
+                                        call_id=getattr(self, "_call_id", None))
         return spec
 
     def _expand_seed(self, seed: dict) -> dict:
@@ -3372,7 +3500,7 @@ class Agent:
         # Every send-back in the log: the panel keeps a clipped preview only, and a run's losses could not be
         # read back (12 October 2026).
         logging.getLogger("solver.assistant").info("assistant.sent_back %s", verdict[:600].replace("\n", " "))
-        draft = agent_draft.draft_from(self.messages)
+        draft = agent_draft.draft_from(self.messages, before=getattr(self, "_call_id", None))
         if draft is None:
             return verdict
         # The same refusal after a patch: the patch did not touch what it names, most often because removing a
@@ -3484,6 +3612,7 @@ class Agent:
         self._messages = messages  # what this conversation has said so far (a refresh applies what it reported)
         for c in calls:
             name, args = c["function"]["name"], _args(c)
+            self._call_id = c.get("id")  # the call being checked: the draft is what came before it
             yield {"type": "tool", "name": name, "args": _shown(name, args)}
             if self.cancelled.is_set():
                 result = "Refused: turn stopped before this action."
@@ -3501,7 +3630,7 @@ class Agent:
                 result = self.run_tool(name, args)
             while self.events:
                 yield self.events.pop(0)
-            ok = not (result.startswith(("tool error", "Refused", "Could not", "The build was refused", "Not valid yet",
+            ok = not (result.startswith(("tool error", "Refused", "Could not", "The build was refused", "Not valid yet", "Not staged",
                                          "The spec does not build", "run_python is not", "No attached",
                                          "No data source", "The data source", "The extraction of"))
                       or '"ok": false' in result[:40] or '"exit_code": -' in result[:30]

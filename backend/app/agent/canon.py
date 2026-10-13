@@ -616,19 +616,20 @@ def repair(spec: dict[str, Any]) -> list[str]:
 def canonical(args: Any, *, messages: list[dict[str, Any]] | None = None,
               load: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
               domain_id: int | None = None,
-              notes: list[str] | None = None) -> tuple[dict[str, Any], list[str]]:
+              notes: list[str] | None = None, call_id: str | None = None) -> tuple[dict[str, Any], list[str]]:
     """The one pass: the spec of a call as the model wrote it, in the contract's form, and the notes that say
     what was rewritten. `messages` is the conversation (a partial plan is completed from the last one proposed);
     `load`, when given, turns the seed's file references into records (the caller's, since the files are its)
     and turns the idiom expansions on, which need the records; `domain_id` is written on a spec that names no
-    domain. Raises FileRefused when the spec has no `ir` after every move, or when a load or an idiom refuses --
+    domain; `call_id` is the call being checked (the draft is what came before it). Raises FileRefused when
+    the spec has no `ir` after every move, or when a load or an idiom refuses --
     the notes said before the refusal stay in `notes`, when the caller gives its own list (the model reads them
     beside the refusal)."""
     notes = notes if notes is not None else []
     start = len(notes)
     spec, first = spec_of(args)
     notes.extend(first)
-    spec, completed = agent_draft.complete(spec, messages or [])
+    spec, completed = agent_draft.complete(spec, messages or [], before=call_id)
     if completed:
         notes.append(completed)
     spec = {k: v for k, v in spec.items() if k != "dry_run"}

@@ -316,3 +316,21 @@ The neutrality plan's step 5 and step 3b measurements run on within Phase 0; the
   has its own path -- `misplaced`, `joined_keys`, the load, the seed-level findings -- since the full pass
   refuses a spec with no ir). The step-3b reverse patch is expected to break at 3.3 (the instructions
   rewrite lands on fe687b8's lines): measure 3b or drop it is the owner's call, to be put at that point.
+- **13 Oct, 16:10 — the stages wired into the Assistant.** Four tools in the modelling mode
+  (`STAGE_TOOL_SPECS` beside `PLAN_TOOL`, whose `spec` is no longer required): `stage_data` (the seed's parts
+  through `misplaced`, `joined_keys` and the Assistant's own load; says what each entry stored, the records per
+  kind, each parameter's cells and default, each relationship's links, and the seed-level findings as CHECK
+  THIS lines -- a load that refuses refuses the whole stage, per-entry refusals are a later refinement),
+  `stage_decisions`, `add_rule` (`drop` removes), `stage_goal`, each reading the draft the calls before it left
+  (`_call_id`, set per call in the dispatch loop, through the canonical pass to the fold); a refusal begins
+  "Not staged" and the fold skips a refused stage call, so a refused rule never joins the draft.
+  `propose_plan` with no spec: the canonical pass completes the empty spec from the draft assembled from the
+  stages and says so ("the plan was assembled from the stages: 7 rule(s), 4 decision(s), the goal"); the old
+  path with a full spec is unchanged. `assemble` now unions what a draft already lists with what the stages
+  since add (the fold assembles at every step). 50 tests pass: every gold replayed stage by stage, the
+  Assistant's dispatch end to end (data, decisions, a rule accepted, a rule refused with the fix, the goal,
+  the draft at propose without the refused rule), the draft, canonical-form, summary and neutrality tests;
+  the Assistant's own suites (blend, field test: 177) passed before the last two fixes. The step-3b reverse
+  patch still applies (the tools and dispatch sit far from the instructions). Not deployed: the model is not
+  told the protocol yet (3.3), so nothing changes on the old path. Next: 3.2 (every sentence of the request
+  mapped), then 3.3 (the instructions -- where the owner decides on step 3b).

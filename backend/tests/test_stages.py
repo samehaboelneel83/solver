@@ -134,8 +134,73 @@ def test_the_fold_takes_the_call_being_checked_by_id():
                     {"id": "r2", "type": "function", "function": {"name": "add_rule", "arguments": json.dumps(
                         {"drop": "c1"})}}]}]
     at_r1 = agent_draft.draft_from(messages, before="r1")
-    assert at_r1["ir"]["variables"] == {"x": {"index": ["a"], "domain": "binary"}} and "constraints" not in at_r1["ir"]
+    assert at_r1["ir"]["variables"] == {"x": {"index": ["a"], "domain": "binary"}} and at_r1["ir"]["constraints"] == []
+    assert at_r1["ir"]["sets"] == ["a"] and at_r1["ir"]["version"] == 2  # assembled: the sets derived
     at_r2 = agent_draft.draft_from(messages, before="r2")
     assert [c["id"] for c in at_r2["ir"]["constraints"]] == ["c1"] and at_r2["ir"]["constraints"][0]["note"] == "s1"
     after = agent_draft.draft_from(messages + [_call("p", "propose_plan", {"summary": "s"})], before="p")
     assert after["ir"]["constraints"] == []
+
+
+def test_propose_with_no_spec_is_the_draft_assembled_from_the_stages():
+    from app.agent import canon
+
+    messages = [_call("d", "stage_data", {"entity_types": [{"name": "a"}], "entities": [{"type": "a", "key": "a1"}]}),
+                _call("v", "stage_decisions", {"variables": {"x": {"index": ["a"], "domain": "binary"}}}),
+                _call("r", "add_rule", {"sentence": "at most one", "rule": {
+                    "id": "c1", "forall": [{"index": "i", "set": "a"}], "left": {"var": "x", "index": ["i"]},
+                    "relation": "<=", "right": {"const": 1}}}),
+                _call("g", "stage_goal", {"objective": {"sense": "maximize", "terms": [{"id": "o", "weight": 1, "expression": {
+                    "sum": {"var": "x", "index": ["i"]}, "over": [{"index": "i", "set": "a"}]}}]}}),
+                _call("p", "propose_plan", {"summary": "the plan"})]
+    spec, notes = canon.canonical({"summary": "the plan"}, messages=messages, call_id="p")
+    assert spec["ir"]["sets"] == ["a"] and [c["id"] for c in spec["ir"]["constraints"]] == ["c1"]
+    assert spec["ir"]["constraints"][0]["severity"] == "hard" and spec["ir"]["constraints"][0]["note"] == "at most one"
+    assert spec["ir"]["objective"]["sense"] == "maximize" and spec["seed"]["entities"] == [{"type": "a", "key": "a1"}]
+    assert any("assembled from the stages: 1 rule(s), 1 decision(s), the goal" in n for n in notes)
+
+
+def test_the_assistant_runs_the_stages_as_tools():
+    """The four tools through the Assistant's dispatch, each reading the draft the calls before it left, with the
+    call being executed named by its id."""
+    from app.agent import core
+    from app.api import agent as agent_api
+
+    agent = core.Agent(core.Settings(), agent_api._index, lambda *a, **k: {"ok": False, "status": 404, "body": {}},
+                       core.Context("x", mode="model"))
+    assert {"stage_data", "stage_decisions", "add_rule", "stage_goal"} <= agent.tool_names
+    data = {"entity_types": [{"name": "a", "attributes": [{"name": "cost", "data_type": "number"}]}],
+            "entities": [{"type": "a", "key": k, "attrs": {"cost": c}} for k, c in (("a1", 2), ("a2", 5))],
+            "parameters": [{"name": "most", "index": [], "default_value": 1}]}
+    agent.messages.append(_call("d", "stage_data", data))
+    agent._call_id = "d"
+    said = agent.run_tool("stage_data", data)
+    assert said.startswith("Data staged:") and "- a: 2 record(s)" in said and "- most: 0 cell(s) (one number), default 1" in said
+    decisions = {"variables": {"x": {"index": ["a"], "domain": "binary"}}, "parameters": {"most": {"index": []}}}
+    agent.messages.append(_call("v", "stage_decisions", decisions))
+    agent._call_id = "v"
+    said = agent.run_tool("stage_decisions", decisions)
+    assert said.startswith("Decisions staged:") and "- x: binary per a (2)" in said
+    rule = {"sentence": "at most one chosen", "rule": {"id": "c_most", "left": {"sum": {"var": "x", "index": ["i"]},
+            "over": [{"index": "i", "set": "a"}]}, "relation": "<=", "right": {"par": "most", "index": []}}}
+    agent.messages.append(_call("r", "add_rule", rule))
+    agent._call_id = "r"
+    said = agent.run_tool("add_rule", rule)
+    assert said.startswith('rule c_most holds "at most one chosen": c_most ranges over once; reads most')
+    bad = {"sentence": "s", "rule": {"id": "c_bad", "left": {"var": "x", "index": []}, "relation": "<=", "right": {"const": 1}}}
+    agent.messages.append(_call("b", "add_rule", bad))
+    agent._call_id = "b"
+    refusal = agent.run_tool("add_rule", bad)
+    assert refusal.startswith("Not staged: ") and "write it as" in refusal
+    agent.messages.append({"role": "tool", "tool_call_id": "b", "name": "add_rule", "content": refusal})
+    goal = {"objective": {"sense": "maximize", "terms": [{"id": "o", "weight": 1, "expression": {
+        "sum": {"mul": [{"attr": {"of": "i", "name": "cost"}}, {"var": "x", "index": ["i"]}]}, "over": [{"index": "i", "set": "a"}]}}]}}
+    agent.messages.append(_call("g", "stage_goal", goal))
+    agent._call_id = "g"
+    said = agent.run_tool("stage_goal", goal)
+    assert said.startswith("Goal staged: maximize") and "reads cost" in said
+    # The draft at propose: the refused rule never joined it.
+    agent.messages.append(_call("p", "propose_plan", {"summary": "s"}))
+    agent._call_id = "p"
+    spec = agent._spec({"summary": "s"}, expand=False)
+    assert [c["id"] for c in spec["ir"]["constraints"]] == ["c_most"]

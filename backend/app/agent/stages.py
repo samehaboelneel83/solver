@@ -128,11 +128,12 @@ def assemble(draft: dict[str, Any] | None) -> dict[str, Any]:
     seed = copy.deepcopy(_seed(draft))
     ir = copy.deepcopy(_ir(draft))
     out: dict[str, Any] = {"version": 2}
-    out["sets"] = ir.get("sets") if isinstance(ir.get("sets"), list) and ir.get("sets") else _index_sets(ir)
-    rels = ir.get("relationships") if isinstance(ir.get("relationships"), list) else None
+    # What was listed already (an assembled draft, or a model written whole) and what the stages since added.
+    listed = [s for s in ir.get("sets") or [] if isinstance(s, str)] if isinstance(ir.get("sets"), list) else []
+    out["sets"] = list(dict.fromkeys([*listed, *_index_sets(ir)]))
+    rels = [r for r in ir.get("relationships") or [] if isinstance(r, str)] if isinstance(ir.get("relationships"), list) else []
     declared = [str(r.get("name")) for r in seed.get("relationship_types") or [] if isinstance(r, dict) and r.get("name")]
-    read = _relationships_read(ir)
-    out["relationships"] = rels if rels else [r for r in dict.fromkeys(read + declared) if r in read or r in declared]
+    out["relationships"] = list(dict.fromkeys([*rels, *_relationships_read(ir), *declared]))
     out["parameters"] = ir.get("parameters") if isinstance(ir.get("parameters"), dict) else {}
     out["variables"] = ir.get("variables") if isinstance(ir.get("variables"), dict) else {}
     out["constraints"] = [c for c in ir.get("constraints") or [] if isinstance(c, dict) and not c.get("drop")]
