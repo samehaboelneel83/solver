@@ -24,7 +24,8 @@ warning on the plan card — the number that must reach 0.
 | step5 | same | hidden, 16 small | 4 / 16 | 8 | 3 | below step 4's 7: eight cases at the limit |
 | step6 | image `solver-backend:step6` (seventh start; main at bb05f11 without 3b): + no-data, swamped-goal and goal-sense checks, `over` repair, unused-number rules, patch send-back (four defects fixed on the way), 4-minute cap, send-back log | tuning x3 | mean 4.3 (5, 3, 5) | 22 of 30 | 5 of 30 | |
 | step6 | same | hidden, 16 small | 6 / 16 | 7 | 1 | six of the seven built are right; nine at the limit, all slow replies |
-| step7 | image `solver-backend:step7` (main at 384549a without 3b): + the pair-table form of the no-data check | tuning x3 + hidden | running (from 19:30, 12 Oct) | | | |
+| step7 | image `solver-backend:step7` (main at 384549a without 3b): + the pair-table form of the no-data check | tuning x3 | mean 4.7 (5, 4, 5) | 20 of 30 | 2 of 30 | |
+| step7 | same | hidden, 16 small (h07–h16 re-run after the WSL panic) | 4 / 16 | 6 | 2 | ten at the limit, every one a slow reply |
 
 ## base — hidden set, before step 2 (finished 02:29, 11 Oct)
 
@@ -836,3 +837,45 @@ Fatal machine check": a hardware fault reported inside the VM, not the platform)
 stack; h07–h16 each "ran" in a second against a dead backend. Docker Desktop was restarted (the engine back
 in 20 s), the stack came up on the same image and migration, and the ten voided cases are re-run under the same
 tag (`run_hidden.sh` now takes a list of cases). The model server was unaffected throughout.
+
+## step7 — hidden set (finished 06:38, 13 Oct; h01–h06 before the panic, h07–h16 re-run after it)
+
+```
+case           built  first  solved right  viol  warned  min
+h01-S          yes    yes    yes    no    1     0       17.1
+h02-S          no     no     no     no    0     0       20.1
+h03-S          yes    yes    yes    yes   0     0       12.2
+h04-S          no     no     no     no    0     0       20
+h05-S          no     no     no     no    0     0       20
+h06-S          yes    yes    yes    yes   0     0       2.4
+h07-S          yes    yes    yes    yes   0     0       11.1
+h08-S          yes    yes    yes    no    1     0       7.8
+h09-S          no     no     no     no    0     0       20
+h10-S          no     no     no     no    0     0       20
+h11-S          no     no     no     no    0     0       19.5
+h12-S          no     no     no     no    0     0       20
+h13-S          no     no     no     no    0     0       20
+h14-S          no     no     no     no    0     0       16.6
+h15-S          yes    yes    yes    yes   0     0       10.2
+h16-S          no     no     no     no    0     1       20
+
+4 right of 16; built 6; wrong but solved 2 (of them warned on the card 0)
+```
+
+| Hidden reading | base | step 2 | step 4 | step 5 | step 6 | step 7 |
+|---|---|---|---|---|---|---|
+| right of 16 | 6 | 4 | 7 | 4 | 6 | 4 |
+| built | 12 | 9 | 11 | 8 | 7 | 6 |
+| wrong, unwarned | 6 | 3 | 4 | 3 | 1 | 2 |
+| at the limit | 4 | 9 | 5 | 8 | 9 | 10 |
+
+- **Within variance of step 6** (the images differ by one check): 4 of the 6 built are right, the 2 wrong miss
+  by one violation each, unwarned (the rule-left-out class). No refusals, no backend errors.
+- **Time is the whole loss on the hidden set:** ten cases with a reply past the 4-minute cap; the shorter re-ask
+  did not finish either. Across the series "right" has not moved (6, 4, 7, 4, 6, 4) while "built" has fallen
+  as the checks and send-backs added work for a model that was already slow on these problems; what is built
+  is right far more often than at the start (6 of 12 → 4 of 6).
+- **Reading for the plan:** the checks have done their part (wrong unwarned 6 → 2); the levers that buy time
+  inside the one-shot design (the patch send-back, the 4-minute cap) did not recover the slow hidden cases.
+  The next gain is structural: the staged protocol (Phase 3), where a stage is a small reply by construction.
+  No new image is queued; the measurement loop pauses here and the work moves to Phases 1.2–3.
