@@ -153,8 +153,10 @@ def constructs_table() -> tuple[int, int]:
         spec["ir"]["constraints"] = [c for c in spec["ir"]["constraints"] if c.get("id") not in replaced] \
             + copy.deepcopy(wrong["constraints"])
         try:
-            constructs.expand(spec)
+            said = constructs.expand(spec)
             got, obj, status = _signals(spec["ir"], data_of(spec["seed"]), "", spec["seed"])
+            # What a construct says of how it was filled (a note, not a refusal) is a warning the model reads.
+            got |= {"construct:" + " ".join(s.split(": ", 1)[-1].split()[:4]) for s in said if " written as the idiom " not in s}
         except ConstructRefused as exc:
             got, obj, status = {f"refused:{type(exc).__name__}"}, None, "refused"
         new = got - base

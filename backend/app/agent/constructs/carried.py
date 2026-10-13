@@ -40,7 +40,7 @@ DESCRIPTION = (
 )
 
 
-def expand(rid: str, body: Any, rule: dict, ir: dict, seed: dict, _kind: str) -> list[dict[str, Any]]:
+def expand(rid: str, body: Any, rule: dict, ir: dict, seed: dict, _kind: str) -> tuple[list[dict[str, Any]], list[str]]:
     from app.seed import order_links
 
     body = body_object(body)
@@ -55,6 +55,13 @@ def expand(rid: str, body: Any, rule: dict, ir: dict, seed: dict, _kind: str) ->
     outs = body.get("out") or []
     ins = [ins] if isinstance(ins, dict) else list(ins)
     outs = [outs] if isinstance(outs, dict) else list(outs)
+    said: list[str] = []
+    for term in ins:
+        # A bare number among what comes in is counted in every period (the Nile Juice mistake: the amount on
+        # hand at the start written as an inflow). Said, not refused: a fixed inflow every period is a real thing.
+        if isinstance(term, dict) and set(term) == {"const"}:
+            said.append(f'the number {term["const"]} in "in" is counted in EVERY period; if it is the amount on '
+                        'hand at the start, write it as "initial" (counted in the first period only)')
     rel = f"{rid}_next"
     first = f"{rid}_first"
     # The periods in order, linked; the first one is the one nothing comes before.
@@ -91,4 +98,34 @@ def expand(rid: str, body: Any, rule: dict, ir: dict, seed: dict, _kind: str) ->
     return [{"id": rid, "note": f"{note} (the idiom carried: what was left before + in"
                                 + (" + the starting amount, first period only" if initial is not None else "")
                                 + " = out + what is left)",
-             "forall": for_ + [{"index": t, "set": kind}], "left": left, "relation": "=", "right": right}]
+             "forall": for_ + [{"index": t, "set": kind}], "left": left, "relation": "=", "right": right}], said
+
+
+#: The hand-worked example: demand 5, 7, 4 over three periods; 3 on hand at the start; at most 6 made a period
+#: at 1 each; 2 to carry one over a period. Period 2 needs 7 > 6, so 1 is made early and carried: 13 made +
+#: 2 carrying = 15. Counting the 3 in every period (the Nile Juice mistake) would make it 7.
+EXAMPLE: dict[str, Any] = {
+    "objective": 15,
+    "seed": {"entity_types": [{"name": "period", "attributes": [{"name": "demand", "data_type": "number"}]}],
+             "entities": [{"type": "period", "key": k, "attrs": {"demand": d}} for k, d in (("t1", 5), ("t2", 7), ("t3", 4))]},
+    "ir": {"version": 2, "sets": ["period"], "parameters": {},
+           "variables": {"make": {"index": ["period"], "domain": "continuous", "lower": 0, "upper": 6},
+                         "left": {"index": ["period"], "domain": "continuous", "lower": 0}},
+           "constraints": [{"id": "c_balance", "carried": {
+               "periods": {"index": "t", "set": "period", "by": "#row"},
+               "level": {"var": "left", "index": ["t"]}, "in": [{"var": "make", "index": ["t"]}],
+               "out": [{"attr": {"of": "t", "name": "demand"}}], "initial": {"const": 3}}}],
+           "objective": {"sense": "minimize", "terms": [{"id": "o", "weight": 1, "expression": {"add": [
+               {"sum": {"var": "make", "index": ["t"]}, "over": [{"index": "t", "set": "period"}]},
+               {"sum": {"mul": [{"const": 2}, {"var": "left", "index": ["t"]}]}, "over": [{"index": "t", "set": "period"}]}]}}]}},
+}
+
+#: The mistake: the starting amount written among what comes in, so it is counted in every period (7).
+WRONG: dict[str, Any] = {
+    "why": "the starting amount written in \"in\", counted in every period",
+    "objective": 7,
+    "constraints": [{"id": "c_balance", "carried": {
+        "periods": {"index": "t", "set": "period", "by": "#row"},
+        "level": {"var": "left", "index": ["t"]}, "in": [{"var": "make", "index": ["t"]}, {"const": 3}],
+        "out": [{"attr": {"of": "t", "name": "demand"}}]}}],
+}

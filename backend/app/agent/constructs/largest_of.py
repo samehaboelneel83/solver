@@ -61,3 +61,36 @@ def expand(rid: str, body: Any, rule: dict, ir: dict, seed: dict, _kind: str) ->
          "forall": copy.deepcopy(for_) + copy.deepcopy(options), "left": copy.deepcopy(cell), "relation": "<=",
          "right": chosen},
     ]
+
+
+#: The hand-worked example: two options protect the same thing at 60 and 50, each costing 10. Chosen both, the
+#: level is 60, not 110; the best is the first alone: 60 - 10 = 50.
+EXAMPLE: dict[str, Any] = {
+    "objective": 50,
+    "seed": {"entity_types": [{"name": "option", "attributes": []}, {"name": "thing", "attributes": []}],
+             "entities": [{"type": "option", "key": "o1"}, {"type": "option", "key": "o2"}, {"type": "thing", "key": "a1"}],
+             "parameters": [{"name": "gives", "index": ["option", "thing"], "default_value": 0}],
+             "parameter_values": [{"parameter": "gives", "entities": [["option", "o1"], ["thing", "a1"]], "value": 60},
+                                  {"parameter": "gives", "entities": [["option", "o2"], ["thing", "a1"]], "value": 50}]},
+    "ir": {"version": 2, "sets": ["option", "thing"], "parameters": {"gives": {"index": ["option", "thing"]}},
+           "variables": {"pick": {"index": ["option"], "domain": "binary"},
+                         "level": {"index": ["thing"], "domain": "continuous", "lower": 0, "upper": 100}},
+           "constraints": [{"id": "c_level", "largest_of": {
+               "for": [{"index": "a", "set": "thing"}], "level": {"var": "level", "index": ["a"]},
+               "options": {"index": "o", "set": "option"}, "value": {"par": "gives", "index": ["o", "a"]},
+               "chosen": {"var": "pick", "index": ["o"]}}}],
+           "objective": {"sense": "maximize", "terms": [{"id": "o", "weight": 1, "expression": {"add": [
+               {"sum": {"var": "level", "index": ["a"]}, "over": [{"index": "a", "set": "thing"}]},
+               {"sum": {"mul": [{"const": -10}, {"var": "pick", "index": ["o"]}]}, "over": [{"index": "o", "set": "option"}]}]}}]}},
+}
+
+#: The mistake written by hand: level >= value x pick for every option, which holds the level down by nothing:
+#: the level goes to its bound of 100 with no option chosen (100).
+WRONG: dict[str, Any] = {
+    "why": "level >= value x pick for every option: the level is free upward, nothing need be chosen",
+    "objective": 100,
+    "constraints": [{"id": "c_level", "forall": [{"index": "a", "set": "thing"}, {"index": "o", "set": "option"}],
+                     "left": {"var": "level", "index": ["a"]}, "relation": ">=",
+                     "right": {"mul": [{"par": "gives", "index": ["o", "a"]}, {"var": "pick", "index": ["o"]}]},
+                     "severity": "hard"}],
+}

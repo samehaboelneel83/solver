@@ -49,3 +49,35 @@ def expand(rid: str, body: Any, rule: dict, ir: dict, seed: dict, _kind: str) ->
     return [{"id": rid, "note": f"{note} (the idiom only_if: amount <= most x chosen)",
              **({"forall": bindings(body.get("for"), '"for"')} if body.get("for") else {}),
              "left": amount, "relation": "<=", "right": {"mul": [copy.deepcopy(most), copy.deepcopy(chosen)]}}]
+
+
+#: The hand-worked example (a fixed charge): 6 units from two places; p1 costs 10 to open and 1 a unit, p2
+#: costs 3 to open and 2 a unit. p2 alone: 3 + 12 = 15; p1 alone: 16.
+EXAMPLE: dict[str, Any] = {
+    "objective": 15,
+    "seed": {"entity_types": [{"name": "place", "attributes": [{"name": "opening", "data_type": "number"},
+                                                               {"name": "unit", "data_type": "number"}]}],
+             "entities": [{"type": "place", "key": "p1", "attrs": {"opening": 10, "unit": 1}},
+                          {"type": "place", "key": "p2", "attrs": {"opening": 3, "unit": 2}}],
+             "parameters": [{"name": "needed", "index": [], "default_value": 6}], "parameter_values": []},
+    "ir": {"version": 2, "sets": ["place"], "parameters": {"needed": {"index": []}},
+           "variables": {"ship": {"index": ["place"], "domain": "continuous", "lower": 0},
+                         "open": {"index": ["place"], "domain": "binary"}},
+           "constraints": [
+               {"id": "c_need", "left": {"sum": {"var": "ship", "index": ["p"]}, "over": [{"index": "p", "set": "place"}]},
+                "relation": "=", "right": {"par": "needed", "index": []}, "severity": "hard"},
+               {"id": "c_open", "only_if": {"for": [{"index": "p", "set": "place"}], "amount": {"var": "ship", "index": ["p"]},
+                                            "chosen": {"var": "open", "index": ["p"]}, "most": {"par": "needed", "index": []}}}],
+           "objective": {"sense": "minimize", "terms": [{"id": "o", "weight": 1, "expression": {"sum": {"add": [
+               {"mul": [{"attr": {"of": "p", "name": "opening"}}, {"var": "open", "index": ["p"]}]},
+               {"mul": [{"attr": {"of": "p", "name": "unit"}}, {"var": "ship", "index": ["p"]}]}]},
+               "over": [{"index": "p", "set": "place"}]}}]}},
+}
+
+#: The mistake: "most" left out on an amount that declares no upper bound (refused, with what to write).
+WRONG: dict[str, Any] = {
+    "why": "\"most\" left out on an amount with no upper bound",
+    "objective": None,
+    "constraints": [{"id": "c_open", "only_if": {"for": [{"index": "p", "set": "place"}], "amount": {"var": "ship", "index": ["p"]},
+                                                 "chosen": {"var": "open", "index": ["p"]}}}],
+}

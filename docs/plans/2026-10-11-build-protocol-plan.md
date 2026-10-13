@@ -270,3 +270,18 @@ The neutrality plan's step 5 and step 3b measurements run on within Phase 0; the
   plan's table are in: 2.1, 2.3, 2.4, 2.6 moved; 2.2, 2.5, 2.7, 2.9 new; 2.8 is the seed's
   `relationships_in_order`. Next: EXAMPLE/WRONG pairs for the four moved constructs (the plan's last column),
   then the Phase 2 exit check and the all-one decision warning.
+- **13 Oct, 13:20 — every construct in the table.** The four moved constructs carry their hand-worked
+  example and the mistake written by hand (the plan's last column), and the three old tests read the modules'
+  examples; `only_if` has a fixed-charge example of its own (two places, 15), and `carried` now *says* when a
+  bare number is written among what comes in ("counted in EVERY period; if it is the amount on hand at the
+  start, write it as initial") -- a note, not a refusal, since a fixed inflow is a real thing; a construct's
+  `expand` may return (rules, notes) and the notes reach the model with the expansion's. The construct table,
+  all eight modules: **6 caught** (carried: the construct's note and "does nothing"; only_if: refused for a
+  missing `most`; allowed_pairs: the pass's list-default note; used_only_where_given: the trial's no-data
+  check; largest_of: `level >= value x pick` caught by never-helps and "does nothing"), **1 harmless**
+  (exactly one written as at least one: same goal), **2 missed** (covering per pair, the share against the
+  part alone -- the Phase 3.2 case). Whole table: 58 caught, 27 same goal, 21 missed; golds unchanged. 33
+  construct, neutrality and canonical-form tests pass. **Phase 2 exit:** every hard rule of every tuning gold
+  is plain linear or `place` (none hand-writes a construct's algebra); all construct tests pass; the table
+  shows each construct's refusal or warning, with the two misses named. Phase 2 is complete but for the
+  all-one decision warning (a lever for covering's miss), which comes next; then Phase 3.

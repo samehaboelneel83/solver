@@ -30,76 +30,56 @@ def _kind(name, *attrs):
 
 
 def test_carried_counts_the_starting_amount_in_the_first_period_only(tenants):
-    """Demand 5, 7, 4; 3 on hand at the start; at most 6 made a period at 1 each; 2 to carry one over a period.
-    Period 2 needs 7 > 6, so 1 is made early and carried: 13 made + 2 carrying = 15. Counting the 3 in every
-    period (the Nile Juice mistake) would make it 7."""
-    seed = {"entity_types": [_kind("period", "demand")],
-            "entities": [{"type": "period", "key": k, "attrs": {"demand": d}} for k, d in (("t1", 5), ("t2", 7), ("t3", 4))]}
-    t = {"index": "t", "set": "period"}
-    ir = {"version": 2, "sets": ["period"], "parameters": {},
-          "variables": {"make": {"index": ["period"], "domain": "continuous", "lower": 0, "upper": 6},
-                        "left": {"index": ["period"], "domain": "continuous", "lower": 0}},
-          "constraints": [{"id": "c_balance", "carried": {
-              "periods": {"index": "t", "set": "period", "by": "#row"},
-              "level": {"var": "left", "index": ["t"]}, "in": [{"var": "make", "index": ["t"]}],
-              "out": [{"attr": {"of": "t", "name": "demand"}}], "initial": {"const": 3}}}],
-          "objective": {"sense": "minimize", "terms": [{"id": "o", "weight": 1, "expression": {"add": [
-              {"sum": {"var": "make", "index": ["t"]}, "over": [t]},
-              {"sum": {"mul": [{"const": 2}, {"var": "left", "index": ["t"]}]}, "over": [t]}]}}]}}
+    """carried.EXAMPLE: demand 5, 7, 4; 3 on hand at the start; at most 6 made a period at 1 each; 2 to carry one
+    over a period. Period 2 needs 7 > 6, so 1 is made early and carried: 13 made + 2 carrying = 15. Counting the 3
+    in every period (the Nile Juice mistake) would make it 7 -- and the construct says so when a number is
+    written among what comes in."""
+    from app.agent.constructs import carried
+
+    seed, ir = copy.deepcopy(carried.EXAMPLE["seed"]), copy.deepcopy(carried.EXAMPLE["ir"])
     trial, expanded, notes = _trial(tenants["b"], seed, ir)
     assert trial["status"] == "optimal" and abs(trial["objective"] - 15) < 1e-6, trial
     assert [c["id"] for c in expanded["ir"]["constraints"]] == ["c_balance"] and "c_balance_next" in expanded["ir"]["relationships"]
     assert notes == ['rule c_balance written as the idiom "carried" became c_balance']
+    seed, ir = copy.deepcopy(carried.EXAMPLE["seed"]), copy.deepcopy(carried.EXAMPLE["ir"])
+    ir["constraints"] = copy.deepcopy(carried.WRONG["constraints"])
+    trial, expanded, notes = _trial(tenants["b"], seed, ir)
+    assert abs(trial["objective"] - 7) < 1e-6 and any('counted in EVERY period' in n for n in notes), (trial, notes)
 
 
 def test_largest_of_does_not_add_overlapping_effects(tenants):
-    """Two options protect the same asset at 60 and 50, each costing 10: chosen both, the level is 60, not 110;
-    the best is to choose the first only: 60 - 10 = 50."""
-    seed = {"entity_types": [{"name": "option", "attributes": []}, {"name": "asset", "attributes": []}],
-            "entities": [{"type": "option", "key": "o1"}, {"type": "option", "key": "o2"}, {"type": "asset", "key": "a1"}],
-            "parameters": [{"name": "gives", "index": ["option", "asset"], "default_value": 0}],
-            "parameter_values": [{"parameter": "gives", "entities": [["option", "o1"], ["asset", "a1"]], "value": 60},
-                                 {"parameter": "gives", "entities": [["option", "o2"], ["asset", "a1"]], "value": 50}]}
-    a, o = {"index": "a", "set": "asset"}, {"index": "o", "set": "option"}
-    ir = {"version": 2, "sets": ["option", "asset"], "parameters": {"gives": {"index": ["option", "asset"]}},
-          "variables": {"pick": {"index": ["option"], "domain": "binary"},
-                        "level": {"index": ["asset"], "domain": "continuous", "lower": 0, "upper": 100}},
-          "constraints": [{"id": "c_level", "largest_of": {"for": [a], "level": {"var": "level", "index": ["a"]},
-                                                          "options": o, "value": {"par": "gives", "index": ["o", "a"]},
-                                                          "chosen": {"var": "pick", "index": ["o"]}}}],
-          "objective": {"sense": "maximize", "terms": [{"id": "o", "weight": 1, "expression": {"add": [
-              {"sum": {"var": "level", "index": ["a"]}, "over": [a]},
-              {"sum": {"mul": [{"const": -10}, {"var": "pick", "index": ["o"]}]}, "over": [o]}]}}]}}
+    """largest_of.EXAMPLE: two options protect the same thing at 60 and 50, each costing 10: chosen both, the level
+    is 60, not 110; the best is to choose the first only: 60 - 10 = 50."""
+    from app.agent.constructs import largest_of
+
+    seed, ir = copy.deepcopy(largest_of.EXAMPLE["seed"]), copy.deepcopy(largest_of.EXAMPLE["ir"])
     trial, expanded, _ = _trial(tenants["b"], seed, ir)
     assert trial["status"] == "optimal" and abs(trial["objective"] - 50) < 1e-6, trial
     assert [c["id"] for c in expanded["ir"]["constraints"]] == ["c_level", "c_level_one", "c_level_chosen"]
 
 
 def test_only_if_with_allowed_pairs_and_exactly_one(tenants):
-    """Each of two tasks goes to exactly one of two places; only the pairs the list allows; cheapest = 4 + 3."""
-    seed = {"entity_types": [{"name": "task", "attributes": []}, {"name": "place", "attributes": []}],
-            "entities": [{"type": "task", "key": k} for k in ("k1", "k2")] + [{"type": "place", "key": p} for p in ("p1", "p2")],
-            "parameters": [{"name": "allowed", "index": ["task", "place"], "default_value": 0},
-                           {"name": "cost", "index": ["task", "place"], "default_value": 0}],
-            "parameter_values": [
-                {"parameter": "allowed", "entities": [["task", "k1"], ["place", "p2"]], "value": 1},
-                {"parameter": "allowed", "entities": [["task", "k2"], ["place", "p1"]], "value": 1},
-                {"parameter": "allowed", "entities": [["task", "k2"], ["place", "p2"]], "value": 1}]
-            + [{"parameter": "cost", "entities": [["task", k], ["place", p]], "value": c}
-               for k, p, c in (("k1", "p1", 1), ("k1", "p2", 4), ("k2", "p1", 3), ("k2", "p2", 2))]}
-    k, p = {"index": "k", "set": "task"}, {"index": "p", "set": "place"}
-    go = {"var": "go", "index": ["k", "p"]}
-    ir = {"version": 2, "sets": ["task", "place"],
-          "parameters": {"allowed": {"index": ["task", "place"]}, "cost": {"index": ["task", "place"]}},
-          "variables": {"go": {"index": ["task", "place"], "domain": "binary"}},
-          "constraints": [{"id": "c_allowed", "only_if": {"for": [k, p], "amount": go,
-                                                          "chosen": {"par": "allowed", "index": ["k", "p"]}}},
-                          {"id": "c_one", "exactly_one": {"for": [k], "over": [p], "pick": go}},
-                          {"id": "c_place", "at_most_one": {"for": [p], "over": [k], "pick": go}}],
-          "objective": {"sense": "minimize", "terms": [{"id": "o", "weight": 1, "expression": {
-              "sum": {"mul": [{"par": "cost", "index": ["k", "p"]}, go]}, "over": [k, p]}}]}}
+    """one_per_group.EXAMPLE: each of two tasks goes to exactly one of two places, only the pairs the list allows;
+    cheapest = 4 + 3."""
+    from app.agent.constructs import one_per_group
+
+    seed, ir = copy.deepcopy(one_per_group.EXAMPLE["seed"]), copy.deepcopy(one_per_group.EXAMPLE["ir"])
     trial, _, _ = _trial(tenants["b"], seed, ir)
     assert trial["status"] == "optimal" and abs(trial["objective"] - 7) < 1e-6, trial
+
+
+def test_only_if_carries_a_fixed_charge(tenants):
+    """only_if.EXAMPLE: 6 units from two places, one cheap to open and dear a unit, the other the reverse: 15."""
+    from app.agent.constructs import only_if
+
+    seed, ir = copy.deepcopy(only_if.EXAMPLE["seed"]), copy.deepcopy(only_if.EXAMPLE["ir"])
+    trial, expanded, _ = _trial(tenants["b"], seed, ir)
+    assert trial["status"] == "optimal" and abs(trial["objective"] - 15) < 1e-6, trial
+    rule = next(c for c in expanded["ir"]["constraints"] if c["id"] == "c_open")
+    assert rule["right"] == {"mul": [{"par": "needed", "index": []}, {"var": "open", "index": ["p"]}]}
+    ir["constraints"] = [c for c in ir["constraints"] if c["id"] != "c_open"] + copy.deepcopy(only_if.WRONG["constraints"])
+    with pytest.raises(constructs.ConstructRefused, match="declares no upper bound"):
+        constructs.expand({"seed": seed, "ir": ir})
 
 
 def test_an_idiom_written_wrong_is_refused_with_what_to_write():
@@ -132,6 +112,7 @@ def test_every_construct_is_described_and_refuses_a_body_that_is_not_an_object()
     assert set(constructs.KEYS) == {"carried", "only_if", "allowed_pairs", "largest_of", "at_most_one", "exactly_one", "covering", "share_of_total", "used_only_where_given"}
     for module in constructs.MODULES:
         assert module.KEYS and module.FIELDS and len(module.DESCRIPTION) > 100, module.__name__
+        assert isinstance(module.EXAMPLE["objective"], (int, float)) and module.WRONG["why"], module.__name__
         for key in module.KEYS:
             assert constructs.REGISTRY[key] is module
             spec = {"seed": {}, "ir": {"constraints": [{"id": "c_x", key: "not an object"}]}}

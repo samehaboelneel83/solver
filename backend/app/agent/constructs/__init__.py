@@ -60,6 +60,9 @@ def expand(spec: dict[str, Any]) -> list[str]:
             made = REGISTRY[kind].expand(rid, rule[kind], rule, ir, seed, kind)
         except ConstructRefused as exc:
             raise ConstructRefused(f'rule {rid} ("{kind}"): {exc}') from None
+        if isinstance(made, tuple):  # (rules, what the construct says of how it was filled)
+            made, said = made
+            notes.extend(f"rule {rid}: {s}" for s in said)
         for r in made:
             r.setdefault("severity", rule.get("severity", "hard"))
             if rule.get("severity") == "soft" and "weight" in rule:
