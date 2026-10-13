@@ -892,3 +892,8 @@ lines on top. What this step measures against step 7 is therefore: step 3b + the
 + the always-yes warning. Procedure as before: the backend log read (no errors in 6 h), the whole suite on
 main, the image from a clean worktree, `rerun_three.sh step8` (three tuning runs, then the hidden set, read
 blind). The push to GitHub waits for the reading.
+
+**Deployed 13 Oct, 20:50** (the owner's go-ahead: "do with all authorities and permissions"): `solver-backend:step8`
+(6ae679) on backend and the three workers; verified in the container: `canon.py`, `stages.py`, `sentences.py`
+present, the always-yes check and step 3b's SHORTCUTS lines in, migration 0122, health 200, a clean start log.
+`rerun_three.sh step8` started at 20:52: runs `step8-1`, `-2`, `-3`, then the hidden set.
