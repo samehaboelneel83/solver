@@ -1074,3 +1074,16 @@ Reading:
   with right answers coming in 7 to 14 minutes each.
 - Causes: 1 refusal in the whole run (a missing record id); slow replies on 7 cases; p06 and p07 unbuilt at
   the limit.
+
+**Step 9 ended early (14 Oct, 10:05, the owner's "solve")**: measured on run 1 (5 right, 1 wrong unwarned) and
+run 2's first four cases (p02 right, p01 wrong unwarned, p04 at the limit with a wrong goal it could not
+rebuild, p06 unbuilt); its hidden run not made.
+
+## Step 10 (14 Oct, 10:06): the stage checks and revisions
+
+`solver-backend:step10` (ffabc3, main at 0376ba8) deployed and verified (`seed_faults`, `as_revision` in the
+container; health 200). Over step 9: each stage refuses what the final proposal used to refuse (undeclared
+link types and parameters, parameters with no values; unread data named at the goal stage), and a plan
+proposed again after a build is built into the same workspace as "<problem> (version N)". `run_step10.sh`:
+three tuning runs, three cases at a time, 30 minutes a case, then the hidden set. Judged against step 9 run 1
+(5 right, 1 wrong unwarned) and step 7 (4.7, 2 of 30).
