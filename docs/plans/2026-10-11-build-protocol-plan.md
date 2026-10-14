@@ -373,3 +373,12 @@ The neutrality plan's step 5 and step 3b measurements run on within Phase 0; the
   at least the old path's. The sheet is 39,100 characters (from 34,000); 154 tests pass, the neutrality scan
   of the rendered sheet among them. Next: the protocol image (step 9) built from main once step 8's run 3 is
   in, its three tuning runs in parallel, read against step 8's.
+- **14 Oct, 08:05 — diagnosis on step 9's first minutes, and the plan adapted again.** (Findings in the
+  results document: the parallel runner's path bug, the propose path's stale call id, no tool-call log.) What
+  the plan now adds, in order: **(a) protocol uptake is measured first** -- per case, how many stage calls
+  against whole-spec proposals (`assistant.tool` lines, counted blind per run), because a protocol the model
+  does not use measures nothing; **(b) if uptake is low** after the first parallel batch, a whole-spec
+  `propose_plan` that is refused answers with the stage to redo instead of "fix and propose again" (the old
+  path stays accepted when it passes, so nothing is lost); **(c) stage and propose calls in one reply** --
+  today the turn loop keeps only the propose_plan and drops the rest; the stage calls beside it should run
+  first. (b) and (c) are written only if (a) shows the need.

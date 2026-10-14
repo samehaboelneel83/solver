@@ -1010,3 +1010,15 @@ time, then the hidden set; 30 minutes a case), read against step 8: mean 4.3, 6 
 `solver-backend:step9` (066dc4) on backend and the three workers; verified in the container: the protocol's
 PHASE 2 text present, step 3b's SHORTCUTS block gone, migration 0122, health 200. `run_step9.sh` started at
 07:51, detached: three cases at a time (p02, p04, p06 first).
+
+**Step 9, first start stopped (14 Oct, 07:55) and restarted at 07:58 on a rebuilt image (b9e722, main at
+b9c4983).** Three findings in its first four minutes:
+1. *The parallel runner* wrote every case to `runs/-S-step9-1` (bash expanded the path before the case id was
+   assigned, both in one `local`); the three drivers overwrote each other. Fixed; each case has its folder.
+2. *A protocol defect:* the turn loop handles `propose_plan` itself and never set the call id, so the plan was
+   assembled from the stage calls only up to the last one executed -- that stage (usually the goal) was
+   dropped. Fixed, with a regression test that shows the goal missing under the stale id.
+3. *Observability:* only send-backs were logged, so whether the model used the stages at all could not be read
+   (the two send-backs of the first start came from a whole-spec `propose_plan`). Every tool call is now logged
+   by name and outcome (`assistant.tool <name> ok|refused [whole-spec]`, no arguments or data).
+The first start's workspaces are left in place under their own clock-suffixed names; nothing of them is scored.
