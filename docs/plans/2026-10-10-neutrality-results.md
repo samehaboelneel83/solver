@@ -930,3 +930,5 @@ Reading: 4 right; 2 wrong without a warning (p09: a different goal, no violation
 p10: 2 violations, unwarned); 2 unbuilt at the limit (p05 after 6 refusals and a long reply, p06 after
 three continues). Causes: refusals 7 in all (p05's 6 are the filter shape and a quadratic product), slow
 replies 6 across the run. Within the run-to-run noise of step 7 (5, 4, 5); runs 2 and 3 decide.
+*(The step 5-7 runs, tuning and hidden, rescored with the key-order fix: every aggregate as recorded --
+tuning 3/5/3, 5/3/5, 5/4/5; hidden 4, 6, 4 of 16. The series stands; the fix only lifts p04 under step 8.)*
