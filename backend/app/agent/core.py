@@ -3472,8 +3472,13 @@ class Agent:
             return f"The spec does not build yet (the user has not seen it): {e}. Fix it and call propose_plan again."
         faults = self._order_faults(spec)
         if faults:
-            return ("The spec does not build yet; fix these and call propose_plan again (the user has not seen it): "
-                    + " ".join(faults))
+            # Every fault in one send-back: the build's own check runs too, and what it refuses is added, so one
+            # resend can fix them all (14 Oct, R1: 74% of what the model wrote was whole plans resent after a
+            # refusal, often one fault per round).
+            check = self.call("POST", "/api/v1/problems/from-spec", None, {**_sendable(spec), "dry_run": True})
+            also = "" if check.get("ok") else " ALSO, the build check refuses: " + clip(check.get("body"), 3000)
+            return ("The spec does not build yet; fix ALL of these and call propose_plan again (the user has not "
+                    "seen it): " + " ".join(faults) + also)
         res = self.call("POST", "/api/v1/problems/from-spec", None, {**_sendable(spec), "dry_run": True, "trial": True})
         if res.get("ok"):
             # A plan with no answer goes back before the person sees it, twice at most; then it is shown.
