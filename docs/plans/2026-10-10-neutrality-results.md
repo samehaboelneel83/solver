@@ -1087,3 +1087,26 @@ link types and parameters, parameters with no values; unread data named at the g
 proposed again after a build is built into the same workspace as "<problem> (version N)". `run_step10.sh`:
 three tuning runs, three cases at a time, 30 minutes a case, then the hidden set. Judged against step 9 run 1
 (5 right, 1 wrong unwarned) and step 7 (4.7, 2 of 30).
+
+### Step 10, run 1 (14 Oct, 11:10): 4 right of 10; built 7; wrong but solved 3 (all 3 warned)
+
+| case | built | first | right | viol | warned | min |
+|---|---|---|---|---|---|---|
+| p01 | yes | yes | yes | 0 | 0 | 10.1 |
+| p02 | yes | no | no | 2 | 3 | 5.9 |
+| p03 | yes | yes | yes | 0 | 0 | 24.9 |
+| p04 | yes | no | yes | 0 | 3 | 16 |
+| p05 | no | no | no | 0 | 0 | 30 |
+| p06 | no | no | no | 0 | 0 | 30 |
+| p07 | yes | no | no | 0 | 3 | 14.5 |
+| p08 | yes | no | no | 1 | 3 | 6.2 |
+| p09 | no | no | no | 0 | 0 | 30 |
+| p10 | yes | yes | yes | 0 | 0 | 11 |
+
+Reading: **no wrong answer without a warning** (step 9 run 1 had 1, step 8 had 6 of 30) -- every wrong plan
+reached the person with CHECK THIS lines on its card; 4 right, one fewer than step 9's run 1, inside the
+run-to-run spread (step 7: 5, 4, 5). Losses: three unbuilt at the limit, all on slow replies and loops of
+refusals the checks were right to make (p09: values the model computed itself, a plan with no workspace
+name). The stop rule set for step 9 (at least 5 right) would revert on this run alone; with the owner's aim
+"a reliable platform", where a silent wrong answer is the failure that matters most, step 10 is judged on its
+three runs instead of one, against step 9's run 1 and step 7. Runs 2 and 3 are under way.
