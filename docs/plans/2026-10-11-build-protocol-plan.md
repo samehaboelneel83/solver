@@ -408,3 +408,13 @@ The neutrality plan's step 5 and step 3b measurements run on within Phase 0; the
   the full protocol. Tested both ways. The live stack runs the step 7 image regardless. Next, when the owner
   chooses: time the model server's replies, cut the context sent per call, and measure the protocol again on a
   faster model.
+- **14 Oct, 17:00 — the model server timed (recommendation 2's first measurement; nothing changed).** The
+  local server (qwen3.5, context 262,144) measured from this machine, one request at a time, thinking off:
+  **writing: about 80 tokens a second** (800 tokens in 9.5-10.1 s, twice); **reading: about 5,800 tokens a
+  second** (58,822 prompt tokens in 9.9 s; 117,624 in 20.5 s). What that means for a case: the Assistant's
+  calls carry 20,000-60,000 tokens of conversation (the panel shows "~32k of 262k", summaries at ~55,000),
+  so every call spends 4-10 s reading before it writes a word; a reply of 4,096 tokens takes about 50 s, and a
+  thinking reply of 12,000 tokens (the 240-second cap) about 2.5 minutes; with three cases side by side each
+  gets a share of the writing rate. So **writing, not reading, is where the time goes**: the levers in order
+  are fewer and shorter replies (thinking off where it does not pay; smaller tool results the model must
+  echo), then fewer cases at once on the shared server, then the context sent per call.
