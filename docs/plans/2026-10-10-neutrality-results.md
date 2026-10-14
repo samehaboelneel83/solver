@@ -1153,3 +1153,14 @@ reply got about 44 -- three cases share it. **Steps 9, 10 and 11 were all measur
 on time alone (most of their losses were cases out of time). Step 11 stopped after run 1; step 7's image is back
 on the stack and measured once under the same conditions (`run_step7p.sh`: three at a time, 30 minutes), so the
 images can be compared fairly.
+
+### Step 7 under the parallel runner (20:58): 4 right of 10; built 9; wrong but solved 3 (warned 2)
+
+Under the same conditions (three cases at a time, 30 minutes a case) the images read: step 7 -- 4 right,
+built 9, 1 wrong unwarned; step 9 -- 5, 8, 1; step 10 -- 4/4/2, 7/6/5, 0/2/1; step 11 -- 3, 5, 1. **The images
+are within one case of each other on right answers**; the gap between step 7's 4.7 and the newer images' 3-4 was
+mostly the measuring conditions (serial against parallel), not the images. Step 7 builds the most plans (9 of
+10) and stays on the stack: fewest moving parts, same right count. What did not move in any image, serial or
+parallel: about 4 of 10 right on this model. The levers that remain are on the model's side (it writes about
+80 tokens a second, about 2,100 per reply), not in the platform's checks. Measured from here on: one image at a
+time, the same runner for both sides of a comparison, three runs before a verdict.
