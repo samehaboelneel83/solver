@@ -391,3 +391,13 @@ The neutrality plan's step 5 and step 3b measurements run on within Phase 0; the
   proposal run at the stage they belong to -- undeclared or valueless parameters at stage_decisions, links of
   an undeclared type at stage_data, data no rule reads named at stage_goal -- since 7 of step 9's third start's
   refusals were of these kinds, found at the end.
+- **14 Oct, 10:15 — what step 9's runs show next, and step 10's content (built, tested, not deployed).**
+  Step 9 run 1 passed the stop rule (5 right, 1 wrong unwarned). Run 2's p04 showed a new failure: built and
+  solved at 7.75 minutes with the goal wrong (-248703 against 963), the model saw it and tried to rebuild, and
+  every rebuild was refused -- the workspace name already taken, then the problem name already taken in it,
+  then the problem name left out -- until the 30-minute stop. Step 10 candidates, each with tests: (1) the
+  stage checks of 08:45 (parameters, link types, unread data at their stage); (2) **revisions**: a plan
+  proposed again after a build in the same conversation goes into the built workspace as "<problem>
+  (version N)" (`stages.as_revision`; a workspace name not used before stays a new workspace). Both are
+  defect fixes in the same component; if they go in together the step says so, and the causes table per
+  case shows which one acted (stage refusals against revision notes).

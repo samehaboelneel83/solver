@@ -3401,8 +3401,12 @@ class Agent:
         rewrite noted for the model in `joined`); expanded, its file references become rows and the idioms the
         rules they stand for. FileRefused when it has no ir, or a load or an idiom refuses."""
         spec, _ = agent_canon.canonical(args, messages=self.messages, load=self._expand_seed if expand else None,
-                                        domain_id=self.ctx.domain_id, notes=self.joined,
+                                        domain_id=None if self.built else self.ctx.domain_id, notes=self.joined,
                                         call_id=getattr(self, "_call_id", None))
+        # A plan proposed again after a build goes into the built workspace as the problem's next version.
+        self.joined.extend(agent_stages.as_revision(spec, self.messages, self.built))
+        if "domain_id" not in spec and not spec.get("domain_name") and self.ctx.domain_id is not None:
+            spec["domain_id"] = self.ctx.domain_id
         return spec
 
     def _expand_seed(self, seed: dict) -> dict:

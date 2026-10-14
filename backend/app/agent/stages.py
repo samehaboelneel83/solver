@@ -399,3 +399,55 @@ def check_goal(draft: dict[str, Any] | None, objective: Any, workspace: dict[str
         + ("; " + "; ".join(notes) if notes else "")
         + (NEWLINE + "BEFORE propose_plan, fix (the plan is refused with these): " + "; ".join(before) if before else ""))
     return said
+
+
+def _proposed_names(messages: list[dict[str, Any]]) -> tuple[set[str], set[str]]:
+    """The workspace and problem names the conversation's propose_plan calls used (beside the summary or in a
+    spec)."""
+    domains: set[str] = set()
+    problems: set[str] = set()
+    for m in messages:
+        if m.get("role") != "assistant":
+            continue
+        for c in m.get("tool_calls") or []:
+            if (c.get("function") or {}).get("name") != "propose_plan":
+                continue
+            try:
+                raw = (c.get("function") or {}).get("arguments")
+                args = json.loads(raw) if isinstance(raw, str) else (raw or {})
+            except ValueError:
+                continue
+            spec = args.get("spec") if isinstance(args.get("spec"), dict) else {}
+            for src in (args, spec):
+                if isinstance(src.get("domain_name"), str) and src["domain_name"].strip():
+                    domains.add(src["domain_name"].strip())
+                if isinstance(src.get("problem_name"), str) and src["problem_name"].strip():
+                    problems.add(src["problem_name"].strip())
+    return domains, problems
+
+
+def as_revision(spec: dict[str, Any], messages: list[dict[str, Any]], built: dict[str, Any] | None) -> list[str]:
+    """A plan proposed again after a build in this conversation is a revision: it goes into the workspace that
+    was built (not a new one under the same name) as the problem's next version, by name (14 Oct, step 9 run 2:
+    a goal found wrong after the build was never rebuilt -- "a domain named ... already exists", "a problem with
+    this name already exists", "problem_name missing", until the limit). A workspace name not used before in
+    the conversation is a new workspace the person asked for, and is left alone. In place; returns notes."""
+    if not isinstance(built, dict) or not built.get("domain_id"):
+        return []
+    if spec.get("domain_id") is not None and str(spec["domain_id"]) != str(built["domain_id"]):
+        return []  # another existing workspace, named by the model
+    domains, problems = _proposed_names(messages)
+    name = spec.get("domain_name")
+    if spec.get("domain_id") is None and isinstance(name, str) and name.strip() and name.strip() not in domains:
+        return []
+    builds = sum(1 for m in messages if m.get("role") == "tool" and m.get("name") == "propose_plan"
+                 and str(m.get("content") or "").startswith("BUILT "))
+    spec.pop("domain_name", None)
+    spec["domain_id"] = built["domain_id"]
+    problem = spec.get("problem_name") if isinstance(spec.get("problem_name"), str) else None
+    base = (problem or "").strip() or next(iter(sorted(problems)), "Plan")
+    base = base.split(" (version ")[0]
+    if not problem or problem.strip() in problems:
+        spec["problem_name"] = f"{base} (version {builds + 1})"
+    return [f"this plan revises the one built in this conversation: it is built into the same workspace "
+            f"(domain_id {built['domain_id']}) as \"{spec['problem_name']}\""]

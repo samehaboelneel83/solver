@@ -271,3 +271,33 @@ def test_the_stages_find_what_the_final_proposal_would_refuse():
     said = stages.check_goal(draft, {"sense": "maximize", "terms": [{"id": "o", "weight": 1, "expression": {
         "sum": {"var": "x", "index": ["i"]}, "over": [{"index": "i", "set": "a"}]}}]})
     assert "BEFORE propose_plan, fix" in said and "parameter cost holds data but no rule or goal reads it" in said
+
+
+def test_a_plan_proposed_again_after_a_build_is_a_revision_in_the_built_workspace():
+    """14 Oct, step 9 run 2: a goal found wrong after the build was never rebuilt (the workspace name and the
+    problem name were both taken, then the problem name was left out)."""
+    first = {"summary": "s", "domain_name": "W", "problem_name": "Weekly plan"}
+    messages = [_call("p1", "propose_plan", first),
+                {"role": "tool", "name": "propose_plan", "tool_call_id": "p1", "content": 'BUILT {"domain_id": 9}'}]
+    built = {"domain_id": 9, "problem_id": 4}
+    again = {"domain_name": "W"}
+    notes = stages.as_revision(again, messages, built)
+    assert again == {"domain_id": 9, "problem_name": "Weekly plan (version 2)"} and "revises" in notes[0]
+    again = {"domain_name": "W", "problem_name": "Weekly plan"}
+    stages.as_revision(again, messages, built)
+    assert again["problem_name"] == "Weekly plan (version 2)" and again["domain_id"] == 9
+    # A new workspace the person asked for is left alone; so is a plan with no build before it.
+    fresh = {"domain_name": "Another one", "problem_name": "P"}
+    assert stages.as_revision(fresh, messages, built) == [] and fresh == {"domain_name": "Another one", "problem_name": "P"}
+    plain = {"domain_name": "W"}
+    assert stages.as_revision(plain, messages, None) == [] and plain == {"domain_name": "W"}
+
+
+def test_a_revision_given_the_built_workspace_by_id_still_gets_the_next_version_name():
+    messages = [_call("p1", "propose_plan", {"summary": "s", "domain_name": "W", "problem_name": "Weekly plan"}),
+                {"role": "tool", "name": "propose_plan", "tool_call_id": "p1", "content": 'BUILT {"domain_id": 9}'}]
+    again = {"domain_id": 9, "problem_name": "Weekly plan"}
+    stages.as_revision(again, messages, {"domain_id": 9})
+    assert again == {"domain_id": 9, "problem_name": "Weekly plan (version 2)"}
+    other = {"domain_id": 12, "problem_name": "Weekly plan"}
+    assert stages.as_revision(other, messages, {"domain_id": 9}) == [] and other["problem_name"] == "Weekly plan"
