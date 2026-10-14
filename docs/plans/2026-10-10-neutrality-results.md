@@ -1038,3 +1038,39 @@ another case's. `drive_case.mjs` now takes only the runs of the problems its own
 newest run when `PARALLEL=1`, which `run_parallel.sh` sets). p04 and p08 were re-fetched from their own
 workspaces (`rescue_run.py`: one run each, 753 and 759) and rescored: **p04 right** (goal 963), p08 wrong
 (one violation). Serial runs (steps 1-8) took the newest run safely, one case at a time.
+
+**Second harness incident, 09:21 (mine).** At 09:15 a line was added to `run_parallel.sh` while it was running.
+Bash reads a running script from the file as it goes, so the shifted text broke it at its next command: the
+script died at 09:21 without waiting for its last cases, and run 2 started while run 1's p05 was still
+running (four cases on the model for about seven minutes, p05's last minutes and run 2's first). p10, the
+other case still running, finished on its own run. Rule from here: a running script is never edited; a
+change waits for the run to end.
+
+### Step 9, run 1 (14 Oct, 09:28; three cases at a time, 30 minutes a case): 5 right of 10; built 8; wrong but solved 2 (warned 1)
+
+| case | built | first | solved | right | viol | warned | min |
+|---|---|---|---|---|---|---|---|
+| p01 | yes | no | yes | no | 3 | 3 | 23.9 |
+| p02 | yes | no | yes | yes | 0 | 0 | 10.2 |
+| p03 | yes | no | yes | yes | 0 | 3 | 11.5 |
+| p04 | yes | yes | yes | yes | 0 | 0 | 11.3 |
+| p05 | yes | no | no | no | 0 | 3 | 30 |
+| p06 | no | no | no | no | 0 | 0 | 30 |
+| p07 | no | no | no | no | 0 | 0 | 30 |
+| p08 | yes | yes | yes | no | 1 | 0 | 16.2 |
+| p09 | yes | yes | yes | yes | 0 | 0 | 7.4 |
+| p10 | yes | yes | yes | yes | 0 | 0 | 13.9 |
+
+Reading:
+- **The stop rule passes:** 5 right (at least 5 needed) and 1 wrong without a warning (p08; at most 2). The
+  step 9 image stays.
+- **The 30-minute limit made no difference to the count:** every right case finished inside 14 minutes.
+- **p05** built and solved inside its limit (run 773, finished at 09:22) but was still writing its report at
+  30 minutes, so it is not answered, as at-limit cases always were. Scored separately for information
+  (`runs/p05-S-step9-1-late`): not right either (a different goal, no violation).
+- **The protocol is used:** the tool log of this run shows stage calls on every case built, and 4 of the 5 right
+  answers were right the first time the plan was shown.
+- **The parallel runner works:** the whole run took 65 minutes, against about 2.5 hours one case at a time,
+  with right answers coming in 7 to 14 minutes each.
+- Causes: 1 refusal in the whole run (a missing record id); slow replies on 7 cases; p06 and p07 unbuilt at
+  the limit.
