@@ -932,3 +932,22 @@ three continues). Causes: refusals 7 in all (p05's 6 are the filter shape and a 
 replies 6 across the run. Within the run-to-run noise of step 7 (5, 4, 5); runs 2 and 3 decide.
 *(The step 5-7 runs, tuning and hidden, rescored with the key-order fix: every aggregate as recorded --
 tuning 3/5/3, 5/3/5, 5/4/5; hidden 4, 6, 4 of 16. The series stands; the fix only lifts p04 under step 8.)*
+
+### Step 8, run 2 (14 Oct, 05:43): 5 right of 10; built 7; wrong but solved 2 (warned 0)
+
+| case | built | first | solved | right | viol | warned | min |
+|---|---|---|---|---|---|---|---|
+| p01 | yes | yes | yes | yes | 0 | 0 | 4.1 |
+| p02 | yes | yes | yes | yes | 0 | 0 | 3.1 |
+| p03 | yes | no | yes | yes | 0 | 3 | 10.4 |
+| p04 | yes | no | yes | yes | 0 | 3 | 10.8 |
+| p05 | no | no | no | no | 0 | 1 | 20.1 |
+| p06 | no | no | no | no | 0 | 0 | 20.1 |
+| p07 | yes | yes | yes | no | 1 | 0 | 17.9 |
+| p08 | no | no | no | no | 0 | 0 | 20.1 |
+| p09 | yes | yes | yes | yes | 0 | 0 | 7.9 |
+| p10 | yes | yes | yes | no | 0 | 0 | 4.4 |
+
+Reading: 5 right, four of them first time; 2 wrong without a warning (p07 one violation; p10 a different
+goal, no violation); 3 unbuilt at the limit, all on slow replies (p05 two, p06 and p08 one each; two refusals
+in the whole run). Runs so far: 4, 5.
