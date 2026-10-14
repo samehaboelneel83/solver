@@ -1068,8 +1068,8 @@ Reading:
 - **p05** built and solved inside its limit (run 773, finished at 09:22) but was still writing its report at
   30 minutes, so it is not answered, as at-limit cases always were. Scored separately for information
   (`runs/p05-S-step9-1-late`): not right either (a different goal, no violation).
-- **The protocol is used:** the tool log of this run shows stage calls on every case built, and 4 of the 5 right
-  answers were right the first time the plan was shown.
+- **The protocol is used:** 9 of the 10 cases made stage calls (counted in each panel); the exception is p03,
+  the layout case, built with a whole spec. 4 of the 5 right answers were right the first time the plan was shown.
 - **The parallel runner works:** the whole run took 65 minutes, against about 2.5 hours one case at a time,
   with right answers coming in 7 to 14 minutes each.
 - Causes: 1 refusal in the whole run (a missing record id); slow replies on 7 cases; p06 and p07 unbuilt at
