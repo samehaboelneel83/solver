@@ -956,3 +956,40 @@ in the whole run). Runs so far: 4, 5.
 `run_hidden.sh` and `run_parallel.sh`. Step 8's three runs were at 20 (run 3 was already under way, on the
 limit it started with); step 9 and after are at 30, so a case that was "at the limit" under step 8 may build
 under step 9 on time alone -- the readings say the limit beside the counts from here on.
+
+### Step 8, run 3 (14 Oct, 07:41): 4 right of 10; built 6; wrong but solved 2 (warned 0)
+
+| case | built | first | solved | right | viol | warned | min |
+|---|---|---|---|---|---|---|---|
+| p01 | yes | yes | yes | no | 3 | 0 | 3.7 |
+| p02 | yes | yes | yes | yes | 0 | 0 | 1.9 |
+| p03 | yes | no | yes | yes | 0 | 3 | 5.9 |
+| p04 | yes | no | yes | yes | 0 | 3 | 11.6 |
+| p05 | no | no | no | no | 0 | 0 | 20 |
+| p06 | no | no | no | no | 0 | 0 | 14.7 |
+| p07 | yes | yes | yes | no | 70 | 0 | 14.1 |
+| p08 | no | no | no | no | 0 | 2 | 20.1 |
+| p09 | yes | no | yes | yes | 0 | 0 | 4 |
+| p10 | no | no | no | no | 0 | 0 | 20 |
+
+Causes: refusals 6 (five of "a parameter holds data but no rule or goal reads it", on p05 and p10, which
+ended at the limit), slow replies 5, p06 three continues and stopped short of the limit.
+
+### Step 8, the three-run reading (the old path's baseline for step 9)
+
+| | step 7 | step 8 |
+|---|---|---|
+| right per run | 5, 4, 5 (mean 4.7) | 4, 5, 4 (mean 4.3) |
+| wrong without a warning (case-runs of 30) | 2 | **6** |
+| never built in three runs | p05, p06 | p05, p06 |
+
+Per case over the three runs: p03 and p04 right every time; p01, p02, p09 right twice; p08 once; p05, p06,
+p07, p10 never (p07 built every time and wrong every time, 1, 1 and 70 violations, warned once).
+
+Reading: no gain, and the unwarned-wrong count is back up (6 of 30, from 2). Step 8 carried four changes
+at once over step 7 -- step 3b's SHORTCUTS lines, the canonical pass, the refusal texts that name the fix,
+the always-yes warning -- so the rise cannot be pinned on one; the case shape is the known one (p07's model
+misses rules the request states, p10 and p01 answer a different goal or hold a rule too loosely), which is
+the class the protocol's sentence mapping (3.2) is built to warn about. Step 3b's lines are gone in step 9
+(3.3 replaced them by the constructs' descriptions), so step 9 is read against this baseline: mean 4.3,
+6 wrong unwarned of 30, at the 20-minute limit (step 9 runs at 30).
