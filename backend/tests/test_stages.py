@@ -220,3 +220,28 @@ def test_the_plan_proposed_after_the_stages_carries_the_last_stage():
     assert "objective" not in stale["ir"]  # what the stale id gave
     spec, _ = canon.canonical({"summary": "s"}, messages=messages, call_id="p")
     assert spec["ir"]["objective"]["sense"] == "maximize"
+
+
+def test_a_goal_staged_after_a_construct_rule_is_checked_with_the_construct_expanded():
+    """14 Oct: stage_goal after an only_if rule was refused, "only_if is not a key a constraint carries"."""
+    draft = {"seed": {"entity_types": [{"name": "a"}], "entities": [{"type": "a", "key": k} for k in ("a1", "a2")]},
+             "ir": {"variables": {"x": {"index": ["a"], "domain": "continuous", "lower": 0, "upper": 5},
+                                  "y": {"index": ["a"], "domain": "binary"}},
+                    "constraints": [{"id": "c_open", "only_if": {"for": [{"index": "i", "set": "a"}],
+                                                                 "amount": {"var": "x", "index": ["i"]},
+                                                                 "chosen": {"var": "y", "index": ["i"]}}}]}}
+    said = stages.check_goal(draft, {"sense": "maximize", "terms": [{"id": "o", "weight": 1, "expression": {
+        "sum": {"var": "x", "index": ["i"]}, "over": [{"index": "i", "set": "a"}]}}]})
+    assert said.startswith("Goal staged: maximize")
+    assert stages.check_decisions(draft).startswith("Decisions staged:")
+
+
+def test_a_plan_built_in_stages_names_its_workspace_and_problem_beside_the_summary():
+    from app.agent import canon
+
+    messages = [_call("d", "stage_data", {"entity_types": [{"name": "a"}], "entities": [{"type": "a", "key": "a1"}]}),
+                _call("v", "stage_decisions", {"variables": {"x": {"index": ["a"], "domain": "binary"}}}),
+                _call("p", "propose_plan", {"summary": "s", "domain_name": "New one", "problem_name": "P"})]
+    spec, _ = canon.canonical({"summary": "s", "domain_name": "New one", "problem_name": "P"}, messages=messages,
+                              call_id="p", domain_id=7)
+    assert spec["domain_name"] == "New one" and spec["problem_name"] == "P" and "domain_id" not in spec

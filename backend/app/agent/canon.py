@@ -632,6 +632,11 @@ def canonical(args: Any, *, messages: list[dict[str, Any]] | None = None,
     spec, completed = agent_draft.complete(spec, messages or [], before=call_id)
     if completed:
         notes.append(completed)
+        # A plan built in stages names its workspace and problem beside the summary (14 Oct: propose_plan
+        # with no spec had nowhere to put domain_name, and the build was refused for a reused workspace).
+        for key in (*SPEC_KEYS, "note"):
+            if key not in ("ir", "seed") and isinstance(args, dict) and key in args and key not in spec:
+                spec[key] = args[key]
     spec = {k: v for k, v in spec.items() if k != "dry_run"}
     notes.extend(misplaced(spec))
     notes.extend(joined_keys(spec))

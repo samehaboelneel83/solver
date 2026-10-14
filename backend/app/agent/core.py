@@ -220,7 +220,17 @@ PLAN_TOOL: dict[str, Any] = {"type": "function", "function": {
         "spec": {"type": "object", "description": "domain_name or domain_id, problem_name, note, seed, ir -- "
                  "left out when the plan was built in stages (stage_data, stage_decisions, add_rule, stage_goal): "
                  "the platform assembles it from them"},
+        "domain_name": {"type": "string", "description": "with a plan built in stages: the new workspace's name "
+                        "(or domain_id for an existing one)"},
+        "domain_id": {"type": "integer"},
+        "problem_name": {"type": "string", "description": "with a plan built in stages: the problem's name"},
     }, "required": ["summary"]}}}
+#: Added to a refused whole-spec propose_plan: the stage that fixes what was refused, instead of the whole again.
+STAGE_HINT = ("\n\nInstead of sending the whole spec again, fix it in stages: the data (records, parameters, "
+              "links) with stage_data, the decisions with stage_decisions, each rule with add_rule (one call per "
+              "rule, the request's sentence quoted; it replaces the rule with the same id), the goal with "
+              "stage_goal -- then propose_plan with the summary, domain_name and problem_name and no spec. Each "
+              "stage is checked on its own, so only the part named above needs a new call.")
 #: The build protocol (build-protocol plan, Phase 3): the plan built in stages, each checked as it comes, so a
 #: reply is small and a mistake is found at the stage it belongs to. app/agent/stages.py holds the checks.
 STAGE_TOOL_SPECS: list[dict[str, Any]] = [
@@ -1494,8 +1504,8 @@ reply carries the whole model.
    Every sentence of the request that states a rule gets its add_rule: the person's card shows each sentence
    beside the rule that holds it, and names the sentences no rule holds.
 4. stage_goal: the objective (sense and terms).
-5. propose_plan with the summary only, no spec: the platform assembles the plan from the stages, checks and
-   trial-solves it, and shows the person.
+5. propose_plan with the summary, domain_name (a new workspace's name, or domain_id) and problem_name, and
+   no spec: the platform assembles the plan from the stages, checks and trial-solves it, and shows the person.
 A stage answered "Not staged" is fixed and sent again before moving on. When the person changes something, redo
 only the stage it touches (add_rule replaces a rule by its id; {{"drop": "<id>"}} removes one) and propose again.
 (propose_plan with a whole spec, after check_spec, still works, but it is slower and checked only at the end.)
@@ -3557,8 +3567,11 @@ class Agent:
         # read back (12 October 2026).
         logging.getLogger("solver.assistant").info("assistant.sent_back %s", verdict[:600].replace("\n", " "))
         draft = agent_draft.draft_from(self.messages, before=getattr(self, "_call_id", None))
+        whole = bool(args.get("spec")) and not verdict.startswith("Refused")
         if draft is None:
-            return verdict
+            # A whole spec refused: the stage that fixes it, so the next reply is one small call, not the whole
+            # model again (14 Oct, step 9's first runs: 23 whole-spec proposals refused, 1 case in 5 staged).
+            return verdict + (STAGE_HINT if whole else "")
         # The same refusal after a patch: the patch did not touch what it names, most often because removing a
         # rule needs "drop" (a rule left out of a patch stays). Twice: name the rules the plan still holds;
         # three times: the next plan is taken whole, no merge (the marker is read by draft.complete).
@@ -3568,7 +3581,7 @@ class Agent:
         if repeats == 1:
             ids = [str(c.get("id")) for c in ((draft.get("ir") or {}).get("constraints") or []) if isinstance(c, dict)]
             return verdict + REPEATED_HINT.format(rules=", ".join(ids) or "none")
-        return verdict + PATCH_HINT
+        return verdict + (STAGE_HINT if whole else PATCH_HINT)
 
     def _check_plan_whole(self, args: dict) -> str:
         # The person's own go-ahead ("you decide the rest and go ahead") is the discussion: the evaluation's

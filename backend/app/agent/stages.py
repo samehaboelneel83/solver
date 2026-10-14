@@ -149,6 +149,18 @@ def assemble(draft: dict[str, Any] | None) -> dict[str, Any]:
 # The checks, one per stage
 
 
+def _expanded(spec: dict[str, Any], notes: list[str]) -> None:
+    """The assembled draft as the contract will see it: every construct rule expanded into the rules it stands
+    for, the rules in the canonical form, records named by their key bound (14 Oct: a goal staged after an
+    only_if rule was refused, "only_if is not a key a constraint carries", because the draft was checked raw)."""
+    try:
+        notes.extend(constructs.expand(spec))
+    except ConstructRefused as exc:
+        raise StageRefused(str(exc)) from None
+    notes.extend(canon.repair(spec))
+    canon.literal_keys(spec, notes)
+
+
 def _refusal_said(refusal: Refusal) -> str:
     loc = ".".join(str(p) for p in refusal.loc) if refusal.loc else "the model"
     return f"{refusal.message} (at {loc})"
@@ -194,6 +206,7 @@ def check_decisions(draft: dict[str, Any] | None, workspace_counts: dict[str, in
     if problems:
         raise StageRefused("; ".join(problems))
     spec = assemble(draft)
+    _expanded(spec, [])
     problem = _shape_problem(spec, without_goal_ok=True)
     if problem:
         raise StageRefused(problem)
@@ -240,12 +253,7 @@ def check_rule(draft: dict[str, Any] | None, rule: Any, sentence: str | None = N
         rule["note"] = sentence.strip()
     trial = assemble(merge_rule(draft, rule))
     notes: list[str] = []
-    try:
-        notes.extend(constructs.expand(trial))
-    except ConstructRefused as exc:
-        raise StageRefused(str(exc)) from None
-    notes.extend(canon.repair(trial))
-    canon.literal_keys(trial, notes)
+    _expanded(trial, notes)
     made = [c for c in trial["ir"]["constraints"] if isinstance(c, dict)
             and (c.get("id") == rule["id"] or str(c.get("id", "")).startswith(str(rule["id"]) + "_"))]
     problem = _shape_problem(trial, without_goal_ok=True)
@@ -286,8 +294,8 @@ def check_goal(draft: dict[str, Any] | None, objective: Any) -> str:
         if isinstance(term, dict):
             term.pop("note", None)
     notes: list[str] = []
-    notes.extend(canon.repair(trial))
-    canon.literal_keys(trial, notes)
+    _expanded(trial, notes)
+    notes = [n for n in notes if " written as the idiom " not in n]  # said when each rule was staged
     problem = _shape_problem(trial, without_goal_ok=False)
     if problem:
         raise StageRefused(problem)
