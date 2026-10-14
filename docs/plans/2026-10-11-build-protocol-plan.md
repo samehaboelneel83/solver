@@ -401,3 +401,10 @@ The neutrality plan's step 5 and step 3b measurements run on within Phase 0; the
   (version N)" (`stages.as_revision`; a workspace name not used before stays a new workspace). Both are
   defect fixes in the same component; if they go in together the step says so, and the causes table per
   case shows which one acted (stage refusals against revision notes).
+- **14 Oct, 14:30 — the protocol behind a setting (the owner's choice: recommendation 3).** Steps 9-10 measured
+  the protocol at 5 (one run) and 3.3 (three runs) against step 7's 4.7, with more cases out of time: more model
+  calls, each slow. `LLM_BUILD_STAGES` (off by default) now decides it: off, the model sees the whole-spec
+  PHASE 2 and no stage tools or constructs block, and a refused whole spec gets the patch hint as before; on,
+  the full protocol. Tested both ways. The live stack runs the step 7 image regardless. Next, when the owner
+  chooses: time the model server's replies, cut the context sent per call, and measure the protocol again on a
+  faster model.

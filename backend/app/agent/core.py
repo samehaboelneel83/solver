@@ -36,6 +36,8 @@ Settings (environment):
     LLM_CONTEXT          32768      the model's max_model_len (vLLM's own value is read when it reports one)
     LLM_TIMEOUT          1800       seconds to wait for one model reply (the connection)
     LLM_REPLY_SECONDS    240        the longest one reply may take; past it the step is asked again, shorter
+    LLM_BUILD_STAGES     off        on: the model builds plans in stages (stage tools and the protocol text); off,
+                                    the whole-spec path measured best on this model (14 Oct)
     LLM_STAGE_REPLY_SECONDS 120     the same for a reply on the build protocol (a stage is small; a slow model
                                     loses one stage, not the whole model)
     LLM_WORKING_TOKENS   48000      summarize the older conversation past this many tokens (whichever comes first)
@@ -225,6 +227,23 @@ PLAN_TOOL: dict[str, Any] = {"type": "function", "function": {
         "domain_id": {"type": "integer"},
         "problem_name": {"type": "string", "description": "with a plan built in stages: the problem's name"},
     }, "required": ["summary"]}}}
+#: The build protocol is a setting (LLM_BUILD_STAGES, off by default): measured on 14 Oct (steps 9-10) it did not
+#: raise the right answers on this model -- more replies, each slow -- so the whole-spec path stays the default and
+#: the protocol is kept to be measured again on a faster model.
+PHASE2_WHOLE = 'PHASE 2 - PROPOSE: when nothing important is open, run check_spec on your spec and fix every error it reports\n(nothing is built and the user sees nothing), then call propose_plan with the same spec.\n'
+PHASE2_STAGES = 'PHASE 2 - BUILD THE PLAN IN STAGES: when nothing important is open, build the plan through the stage tools, one\nsmall call at a time; the platform checks each stage as it comes, so a mistake is found where it belongs and no\nreply carries the whole model.\n1. stage_data: the kinds of record and their fields, the records (typed, or *_from_file from the attached\n   sheets), the parameters with their values, the relationship types and links. Read what it reports: the\n   records per kind, the cells per parameter, the links per relationship, and every CHECK THIS line.\n2. stage_decisions: the decisions (variables: name, index kinds, domain, bounds) and the parameters the rules\n   read (parameters: name, index kinds).\n3. add_rule, ONE rule per call, with "sentence": the request\'s own words the rule holds, quoted. Write the rule\n   as {"id", "forall", "left", "relation", "right", "severity"} in the term language (SPEC below), or as a\n   CONSTRUCT (below). The platform says what the rule ranges over and reads, or refuses it with what to write.\n   Every sentence of the request that states a rule gets its add_rule: the person\'s card shows each sentence\n   beside the rule that holds it, and names the sentences no rule holds.\n4. stage_goal: the objective (sense and terms).\n5. propose_plan with the summary, domain_name (a new workspace\'s name, or domain_id) and problem_name, and\n   no spec: the platform assembles the plan from the stages, checks and trial-solves it, and shows the person.\nA stage answered "Not staged" is fixed and sent again before moving on. When the person changes something, redo\nonly the stage it touches (add_rule replaces a rule by its id; {"drop": "<id>"} removes one) and propose again.\n(propose_plan with a whole spec, after check_spec, still works, but it is slower and checked only at the end.)\n'
+CONSTRUCTS_INTRO = ("CONSTRUCTS: a rule written as one of these is expanded by the platform into the rules it stands "
+                    "for (the period links, the helper decisions and parameters are made for you); write the construct "
+                    "with add_rule instead of the algebra wherever one fits -- the mistakes the hand-written forms "
+                    "make cannot be expressed in them.\n")
+
+
+def stages_on() -> bool:
+    """LLM_BUILD_STAGES=on: the model builds plans in stages (stage tools, the sheet's protocol text, the stage
+    hint on a refused whole spec). Off by default."""
+    return _env("LLM_BUILD_STAGES", "off").strip().lower() in ("1", "on", "true", "yes")
+
+
 #: Added to a refused whole-spec propose_plan: the stage that fixes what was refused, instead of the whole again.
 STAGE_HINT = ("\n\nInstead of sending the whole spec again, fix it in stages: the data (records, parameters, "
               "links) with stage_data, the decisions with stage_decisions, each rule with add_rule (one call per "
@@ -275,7 +294,7 @@ MODEL_TOOLS = [t for t in TOOLS if t["function"]["name"] not in ("call_api", "ha
     {"type": "function", "function": {**_CALL_API["function"], "description":
      "Read platform data (GET), or solve a scenario after the build (POST /api/v1/scenarios/{id}/runs). "
      "Nothing else may be written in this mode: changes go through propose_plan."}},
-    PLAN_TOOL, *STAGE_TOOL_SPECS]
+    PLAN_TOOL]
 WORKSPACE_TOOL: dict[str, Any] = {"type": "function", "function": {
     "name": "describe_workspace",
     "description": "What a domain (workspace) already holds: kinds of record with their fields, counts and some keys, "
@@ -1382,7 +1401,11 @@ def model_prompt(ctx: "Context") -> str:
                          "If the candidate API cannot express a required relationship, do not attempt client-side "
                          "generation: use a supported platform calculation or ask for source data. Never substitute "
                          "a count approximation or drop a required rule without the user's approval.")
-    constructs_text = "\n".join("- " + d for d in agent_constructs.describe())
+    if stages_on():
+        phase2_text = PHASE2_STAGES
+        constructs_block = CONSTRUCTS_INTRO + "\n".join("- " + d for d in agent_constructs.describe())
+    else:
+        phase2_text, constructs_block = PHASE2_WHOLE, ""
     return f"""You are the modelling assistant of the Problem Solver platform, talking with "{ctx.username}".
 They describe a real decision problem in their own words. You understand it fully, turn it into a platform
 model, get their approval, build it, and explain what you built. {where} Reply in the user's language.
@@ -1490,26 +1513,7 @@ the model too big or slow, stop and tell the user the numbers (e.g. "0.1 m gives
 million cell links") with the options and what each costs, and wait for their answer. Never invent a threshold the
 user did not give (e.g. "within 50 m of an access point") -- compute it from the data or ask.
 
-PHASE 2 - BUILD THE PLAN IN STAGES: when nothing important is open, build the plan through the stage tools, one
-small call at a time; the platform checks each stage as it comes, so a mistake is found where it belongs and no
-reply carries the whole model.
-1. stage_data: the kinds of record and their fields, the records (typed, or *_from_file from the attached
-   sheets), the parameters with their values, the relationship types and links. Read what it reports: the
-   records per kind, the cells per parameter, the links per relationship, and every CHECK THIS line.
-2. stage_decisions: the decisions (variables: name, index kinds, domain, bounds) and the parameters the rules
-   read (parameters: name, index kinds).
-3. add_rule, ONE rule per call, with "sentence": the request's own words the rule holds, quoted. Write the rule
-   as {{"id", "forall", "left", "relation", "right", "severity"}} in the term language (SPEC below), or as a
-   CONSTRUCT (below). The platform says what the rule ranges over and reads, or refuses it with what to write.
-   Every sentence of the request that states a rule gets its add_rule: the person's card shows each sentence
-   beside the rule that holds it, and names the sentences no rule holds.
-4. stage_goal: the objective (sense and terms).
-5. propose_plan with the summary, domain_name (a new workspace's name, or domain_id) and problem_name, and
-   no spec: the platform assembles the plan from the stages, checks and trial-solves it, and shows the person.
-A stage answered "Not staged" is fixed and sent again before moving on. When the person changes something, redo
-only the stage it touches (add_rule replaces a rule by its id; {{"drop": "<id>"}} removes one) and propose again.
-(propose_plan with a whole spec, after check_spec, still works, but it is slower and checked only at the end.)
-- summary (markdown the user reads), in the Model Editor's own terms, these headings in this order:
+{phase2_text}- summary (markdown the user reads), in the Model Editor's own terms, these headings in this order:
   **Problem** one paragraph in the user's words.
   **Sets** each kind of record: what it is, how many, its fields with units, where the data comes from
   (typed in the chat, or file X / sheet Y). A short table of members when there are few.
@@ -1688,10 +1692,7 @@ instead); one binary visit[vehicle, stop, stop] and ONE rule {{"id":"c_routes","
 field>"}}}} (time windows add "travel":"<a time parameter>","earliest","latest","service": stop fields). Goal:
 minimise the sum over v, i, j of distance[i, j] * visit[v, i, j]. Never write the visiting, sub-tour or load rules
 yourself: the route rule holds them.
-CONSTRUCTS: a rule written as one of these is expanded by the platform into the rules it stands for (the
-period links, the helper decisions and parameters are made for you); write the construct with add_rule instead of
-the algebra wherever one fits -- the mistakes the hand-written forms make cannot be expressed in them.
-{constructs_text}
+{constructs_block}
 
 TOOL CALLS: only through the tool interface, never as text in your reply; valid JSON with unique keys (each list,
 e.g. entity_types or constraints, once, with all its items); keep each call small (load rows from files, never
@@ -1711,7 +1712,8 @@ def system_prompt(index: ApiIndex, ctx: Context, native: bool) -> str:
     attached = agent_files.outline(ctx.files)
     path_tool = ("run_python has networkx too (graphs, paths, connectivity, e.g. which cells reach an access point)."
                  if ctx.can_run_python else "")
-    tools = list(MODEL_TOOLS if ctx.mode == "model" else TOOLS) + ([sandbox.SCHEMA] if ctx.can_run_python else [])
+    tools = list((MODEL_TOOLS + (STAGE_TOOL_SPECS if stages_on() else [])) if ctx.mode == "model" else TOOLS) \
+        + ([sandbox.SCHEMA] if ctx.can_run_python else [])
     if ctx.mode == "model":
         return model_prompt(ctx) + ("\n\n" + attached if attached else "") + \
             ("" if native else text_protocol(tools))
@@ -2516,7 +2518,7 @@ class Agent:
         self.call = call
         self.ctx = ctx
         self.modelling = ctx.mode == "model"
-        self.tools = list(MODEL_TOOLS if self.modelling else TOOLS)
+        self.tools = list((MODEL_TOOLS + (STAGE_TOOL_SPECS if stages_on() else [])) if self.modelling else TOOLS)
         if ctx.can_run_python:
             self.tools.append(sandbox.SCHEMA)
         self.tool_names = {t["function"]["name"] for t in self.tools}
@@ -3593,7 +3595,7 @@ class Agent:
         if draft is None:
             # A whole spec refused: the stage that fixes it, so the next reply is one small call, not the whole
             # model again (14 Oct, step 9's first runs: 23 whole-spec proposals refused, 1 case in 5 staged).
-            return verdict + (STAGE_HINT if whole else "")
+            return verdict + (STAGE_HINT if whole and stages_on() else "")
         # The same refusal after a patch: the patch did not touch what it names, most often because removing a
         # rule needs "drop" (a rule left out of a patch stays). Twice: name the rules the plan still holds;
         # three times: the next plan is taken whole, no merge (the marker is read by draft.complete).
@@ -3603,7 +3605,7 @@ class Agent:
         if repeats == 1:
             ids = [str(c.get("id")) for c in ((draft.get("ir") or {}).get("constraints") or []) if isinstance(c, dict)]
             return verdict + REPEATED_HINT.format(rules=", ".join(ids) or "none")
-        return verdict + (STAGE_HINT if whole else PATCH_HINT)
+        return verdict + (STAGE_HINT if whole and stages_on() else PATCH_HINT)
 
     def _check_plan_whole(self, args: dict) -> str:
         # The person's own go-ahead ("you decide the rest and go ahead") is the discussion: the evaluation's

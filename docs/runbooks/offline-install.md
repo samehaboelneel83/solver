@@ -107,8 +107,10 @@ The Assistant talks to an OpenAI-compatible chat server named by `LLM_BASE_URL` 
 network, never on the public internet. Everything else — the editor, the solvers, maps, exports, the API — works
 without it; the Assistant alone then answers "cannot reach the model at …" and the person uses the editor.
 `bash scripts/egress-check.sh` probes the model from inside the backend container and prints OK or WARN.
-One slow reply is cut at `LLM_REPLY_SECONDS` (420 s) and asked again shorter; a model that never answers ends
-the turn with that message, never the platform.
+One slow reply is cut at `LLM_REPLY_SECONDS` (240 s) and asked again shorter; a model that never answers ends
+the turn with that message, never the platform. `LLM_BUILD_STAGES` (off by default) makes the Assistant build a
+plan in stages, each checked as it comes; on the reference model it was measured slower and no more accurate than
+the default (14 Oct 2026), so turn it on only with a faster model, and measure.
 
 ## What is not yet done
 

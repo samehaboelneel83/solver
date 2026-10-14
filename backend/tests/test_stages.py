@@ -160,10 +160,12 @@ def test_propose_with_no_spec_is_the_draft_assembled_from_the_stages():
     assert any("assembled from the stages: 1 rule(s), 1 decision(s), the goal" in n for n in notes)
 
 
-def test_the_assistant_runs_the_stages_as_tools():
+def test_the_assistant_runs_the_stages_as_tools(monkeypatch):
     """The four tools through the Assistant's dispatch, each reading the draft the calls before it left, with the
-    call being executed named by its id."""
+    call being executed named by its id (with the protocol on: LLM_BUILD_STAGES)."""
     from app.agent import core
+
+    monkeypatch.setenv("LLM_BUILD_STAGES", "on")
     from app.api import agent as agent_api
 
     agent = core.Agent(core.Settings(), agent_api._index, lambda *a, **k: {"ok": False, "status": 404, "body": {}},
@@ -301,3 +303,20 @@ def test_a_revision_given_the_built_workspace_by_id_still_gets_the_next_version_
     assert again == {"domain_id": 9, "problem_name": "Weekly plan (version 2)"}
     other = {"domain_id": 12, "problem_name": "Weekly plan"}
     assert stages.as_revision(other, messages, {"domain_id": 9}) == [] and other["problem_name"] == "Weekly plan"
+
+
+def test_the_protocol_is_a_setting_off_by_default(monkeypatch):
+    """14 Oct: measured on this model the protocol did not raise the right answers; it is kept behind a setting."""
+    from app.agent import core
+    from app.api import agent as agent_api
+
+    monkeypatch.delenv("LLM_BUILD_STAGES", raising=False)
+    sheet = core.model_prompt(core.Context("x", mode="model"))
+    agent = core.Agent(core.Settings(), agent_api._index, lambda *a, **k: {"ok": False}, core.Context("x", mode="model"))
+    assert "PHASE 2 - PROPOSE" in sheet and "stage_data" not in sheet and "CONSTRUCTS:" not in sheet
+    assert not {"stage_data", "add_rule"} & agent.tool_names
+    monkeypatch.setenv("LLM_BUILD_STAGES", "on")
+    sheet = core.model_prompt(core.Context("x", mode="model"))
+    agent = core.Agent(core.Settings(), agent_api._index, lambda *a, **k: {"ok": False}, core.Context("x", mode="model"))
+    assert "PHASE 2 - BUILD THE PLAN IN STAGES" in sheet and "CONSTRUCTS:" in sheet and '{"drop": "<id>"}' in sheet
+    assert {"stage_data", "stage_decisions", "add_rule", "stage_goal"} <= agent.tool_names
