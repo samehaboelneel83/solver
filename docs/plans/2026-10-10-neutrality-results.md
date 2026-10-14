@@ -1143,3 +1143,13 @@ the stack, `run_step11.sh` -- three tuning runs, three cases at a time, 30 minut
 model reply is logged (`assistant.reply seconds= read= wrote= thinking=`), so the run also says where a case's
 time goes. If the three-run mean is below step 7's 4.7 or silent wrong answers exceed 2 of 30, step 7 goes
 back on the stack.
+
+### Step 11, run 1 (19:29): 3 right of 10; built 5; wrong but solved 2 (warned 1) -- and a flaw in the comparison
+
+The reply log (155 replies in this run's first hour): thinking off on every reply, **mean 48 s and 2,131 tokens
+written per reply**, 25 replies over 4,000 tokens. Alone, the server writes about 80 tokens a second; here each
+reply got about 44 -- three cases share it. **Steps 9, 10 and 11 were all measured three cases at a time; step 7's
+4.7 was measured one case at a time.** Every comparison since the morning was tilted against the newer images
+on time alone (most of their losses were cases out of time). Step 11 stopped after run 1; step 7's image is back
+on the stack and measured once under the same conditions (`run_step7p.sh`: three at a time, 30 minutes), so the
+images can be compared fairly.
