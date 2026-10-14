@@ -245,3 +245,29 @@ def test_a_plan_built_in_stages_names_its_workspace_and_problem_beside_the_summa
     spec, _ = canon.canonical({"summary": "s", "domain_name": "New one", "problem_name": "P"}, messages=messages,
                               call_id="p", domain_id=7)
     assert spec["domain_name"] == "New one" and spec["problem_name"] == "P" and "domain_id" not in spec
+
+
+def test_the_stages_find_what_the_final_proposal_would_refuse():
+    """14 Oct, step 9's third start: 7 refusals at propose_plan for faults a stage could have found."""
+    seed = {"entity_types": [{"name": "a"}], "entities": [{"type": "a", "key": "a1"}],
+            "relationships": [{"type": "next", "from": ["a", "a1"], "to": ["a", "a1"]}],
+            "parameter_values": [{"parameter": "rate", "entities": [["a", "a1"]], "value": 2}]}
+    faults = stages.seed_faults(seed)
+    assert any('link type "next" is used by 1 entry but not declared' in f for f in faults)
+    assert any('"rate" has 1 value entry but is not declared' in f for f in faults)
+    assert stages.seed_faults(seed, {"relationship_types": [{"name": "next"}], "data_values": [{"name": "rate"}]}) == []
+    draft = {"seed": {"entity_types": [{"name": "a"}], "entities": [{"type": "a", "key": "a1"}],
+                      "parameters": [{"name": "cost", "index": ["a"], "default_value": 0}]},
+             "ir": {"variables": {"x": {"index": ["a"], "domain": "binary"}},
+                    "parameters": {"cost": {"index": ["a"]}, "margin": {"index": ["a"]}}}}
+    with pytest.raises(stages.StageRefused) as got:
+        stages.check_decisions(draft)
+    assert "parameter margin is declared for the model but the data stage does not hold it" in str(got.value)
+    assert "parameter cost[a] has no values" in str(got.value)
+    draft["seed"]["parameters"].append({"name": "margin", "index": ["a"], "default_value": 3})
+    draft["seed"]["parameter_values_from_file"] = [{"file": "f.csv", "parameter": "cost"}]
+    assert stages.check_decisions(draft).startswith("Decisions staged:")
+    # Data no rule or goal reads is named at the goal stage, before the proposal refuses it.
+    said = stages.check_goal(draft, {"sense": "maximize", "terms": [{"id": "o", "weight": 1, "expression": {
+        "sum": {"var": "x", "index": ["i"]}, "over": [{"index": "i", "set": "a"}]}}]})
+    assert "BEFORE propose_plan, fix" in said and "parameter cost holds data but no rule or goal reads it" in said

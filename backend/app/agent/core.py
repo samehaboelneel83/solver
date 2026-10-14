@@ -3252,6 +3252,10 @@ class Agent:
                     "or relationships_from_file")
         spec: dict = {"seed": seed}
         notes = agent_canon.misplaced(spec) + agent_canon.joined_keys(spec)
+        merged = agent_draft.merge(self._draft_before(), {"seed": spec["seed"]})
+        faults = agent_stages.seed_faults(merged.get("seed") or {}, self._selected_workspace())
+        if faults:
+            return "Not staged: " + "; ".join(faults)
         try:
             loaded = self._expand_seed(spec["seed"])
         except agent_files.FileRefused as e:
@@ -3286,7 +3290,7 @@ class Agent:
     def _stage_decisions(self, args: dict) -> str:
         draft = agent_draft.merge(self._draft_before(), agent_draft.stage_patch("stage_decisions", args))
         try:
-            said = agent_stages.check_decisions(draft, self._workspace_counts(draft))
+            said = agent_stages.check_decisions(draft, self._workspace_counts(draft), self._selected_workspace())
         except agent_files.FileRefused as e:
             return f"Not staged: {e}"
         return said + "\nNext: add_rule, one rule per call, quoting the sentence of the request it holds."
@@ -3304,7 +3308,7 @@ class Agent:
     def _stage_goal(self, args: dict) -> str:
         draft = self._draft_before()
         try:
-            said = agent_stages.check_goal(draft, args.get("objective"))
+            said = agent_stages.check_goal(draft, args.get("objective"), self._selected_workspace())
         except agent_files.FileRefused as e:
             return f"Not staged: {e}"
         return said + "\nNext: propose_plan with the summary for the person (no spec: the platform assembles it)."
@@ -3312,9 +3316,23 @@ class Agent:
     def _workspace_counts(self, draft: dict | None) -> dict[str, int]:
         """Records per kind the workspace already holds, when one is selected (a stage may build on them)."""
         try:
-            return self._existing_records(draft or {})
+            return self._existing_records(draft or {}, self._selected_workspace())
         except Exception:  # noqa: BLE001 -- no workspace, or none reachable: the staged data alone counts
             return {}
+
+    def _selected_workspace(self) -> dict | None:
+        """What the selected workspace holds, read once per turn (a stage may use its records, link types and
+        values); None with none selected."""
+        if not self.ctx.domain_id:
+            return None
+        cached = getattr(self, "_selected_ws", None)
+        if cached is None or cached[0] != self.ctx.domain_id:
+            try:
+                body = self._workspace({"domain_id": self.ctx.domain_id})
+            except Exception:  # noqa: BLE001 -- unreachable: the staged data alone counts
+                body = None
+            self._selected_ws = (self.ctx.domain_id, body or {})
+        return self._selected_ws[1] or None
 
     def _check_spec(self, args: Any) -> str:
         try:

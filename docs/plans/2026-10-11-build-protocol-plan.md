@@ -382,3 +382,12 @@ The neutrality plan's step 5 and step 3b measurements run on within Phase 0; the
   path stays accepted when it passes, so nothing is lost); **(c) stage and propose calls in one reply** --
   today the turn loop keeps only the propose_plan and drops the rest; the stage calls beside it should run
   first. (b) and (c) are written only if (a) shows the need.
+- **14 Oct, 08:45 — a stop rule, and one change per measured step (the owner: "we are going down").** The
+  mean has gone 3.7, 4.3, 4.7, 4.3 over steps 5-8, and step 8's unwarned-wrong count tripled (2 -> 6 of 30)
+  after four changes at once. From here: (1) step 9 is judged against **step 7** (4.7 right, 2 wrong unwarned
+  of 30), the best so far; if its first run is below 4.7 right or has more than 2 wrong unwarned of 10, the
+  step 7 image goes back on the stack and the protocol is worked on offline; (2) one change per measured step;
+  (3) next change (built while step 9 runs, not deployed): the order checks that today fire only at the final
+  proposal run at the stage they belong to -- undeclared or valueless parameters at stage_decisions, links of
+  an undeclared type at stage_data, data no rule reads named at stage_goal -- since 7 of step 9's third start's
+  refusals were of these kinds, found at the end.

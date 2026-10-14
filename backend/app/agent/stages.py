@@ -18,6 +18,7 @@ turns), and `assemble` turns the draft into the spec the canonical pass and the 
 from __future__ import annotations
 
 import copy
+import json
 from typing import Any
 
 from app.agent import canon, constructs, readback
@@ -26,6 +27,7 @@ from app.agent.files import FileRefused
 from app.ir.validate import Refusal, check_shape
 from app.solve.lint import _names_read
 
+NEWLINE = chr(10)
 #: The stages in order; a stage called before the one it needs is refused with the one to call.
 ORDER = ("stage_data", "stage_decisions", "add_rule", "stage_goal", "propose_plan")
 
@@ -180,7 +182,85 @@ def _shape_problem(spec: dict[str, Any], *, without_goal_ok: bool) -> str | None
     return _refusal_said(refusal)
 
 
-def check_decisions(draft: dict[str, Any] | None, workspace_counts: dict[str, int] | None = None) -> str:
+def _valued(seed: dict[str, Any]) -> set[str]:
+    """The parameters the data stage gives values: typed cells, or a *_from_file entry (loaded at propose)."""
+    out = {str(v.get("parameter")) for v in seed.get("parameter_values") or [] if isinstance(v, dict)}
+    out |= {str(e.get("parameter")) for e in seed.get("parameter_values_from_file") or [] if isinstance(e, dict)}
+    return out
+
+
+def seed_faults(seed: dict[str, Any], workspace: dict[str, Any] | None = None) -> list[str]:
+    """What the build refuses of a seed, found at the data stage instead of at the final proposal (14 Oct, step
+    9's third start: links typed before their link type existed were refused only at propose_plan): links of
+    an undeclared type, values of an undeclared parameter."""
+    workspace = workspace or {}
+    types = {str(r.get("name")) for r in seed.get("relationship_types") or [] if isinstance(r, dict)}
+    types |= {str(r.get("name")) for r in workspace.get("relationship_types") or [] if isinstance(r, dict)}
+    params = {str(p.get("name")) for p in seed.get("parameters") or [] if isinstance(p, dict)}
+    params |= {str(p.get("name")) for p in workspace.get("data_values") or [] if isinstance(p, dict)}
+    faults: list[str] = []
+    used: dict[str, int] = {}
+    for key in ("relationships", "relationships_from_file"):
+        for r in seed.get(key) or []:
+            if isinstance(r, dict) and r.get("type") and str(r["type"]) not in types:
+                used[str(r["type"])] = used.get(str(r["type"]), 0) + 1
+    for name, n in used.items():
+        faults.append(f'the link type "{name}" is used by {n} entr{"y" if n == 1 else "ies"} but not declared: add '
+                      f'{{"name": "{name}", "from": <kind>, "to": <kind>}} to relationship_types')
+    given: dict[str, int] = {}
+    for key in ("parameter_values", "parameter_values_from_file"):
+        for v in seed.get(key) or []:
+            if isinstance(v, dict) and v.get("parameter") and str(v["parameter"]) not in params:
+                given[str(v["parameter"])] = given.get(str(v["parameter"]), 0) + 1
+    for name, n in given.items():
+        faults.append(f'"{name}" has {n} value entr{"y" if n == 1 else "ies"} but is not declared: add {{"name": '
+                      f'"{name}", "index": [<kinds>], "default_value": ...}} to parameters')
+    return faults
+
+
+def parameter_faults(draft: dict[str, Any] | None, workspace: dict[str, Any] | None = None) -> list[str]:
+    """The model's parameters the data stage does not hold, or holds with no value (14 Oct, step 9's third start:
+    "there is no parameter called ... in this problem's domain" and "used by the model but no value is loaded",
+    each refused only at the final proposal)."""
+    seed, ir = _seed(draft), _ir(draft)
+    declared = {str(p.get("name")): p for p in seed.get("parameters") or [] if isinstance(p, dict)}
+    in_workspace = {str(p.get("name")) for p in (workspace or {}).get("data_values") or [] if isinstance(p, dict)}
+    valued = _valued(seed)
+    faults: list[str] = []
+    for name, decl in (ir.get("parameters") or {}).items():
+        index = (decl or {}).get("index") if isinstance(decl, dict) else None
+        if name not in declared and name not in in_workspace:
+            faults.append(f'parameter {name} is declared for the model but the data stage does not hold it: add '
+                          f'{{"name": "{name}", "index": {json.dumps(index or [])}, "default_value": ...}} to '
+                          "stage_data's parameters with its values (typed, or parameter_values_from_file)")
+            continue
+        p = declared.get(name)
+        if not p or not p.get("index") or name in valued:
+            continue
+        try:
+            default = abs(float(p.get("default_value") or 0))
+        except (TypeError, ValueError):
+            default = 0.0
+        if not 0 < default < 1e6:  # one value meant for every cell is a value; 0 or a huge stand-in is not
+            faults.append(f"parameter {name}[{', '.join(map(str, p.get('index') or []))}] has no values: every cell "
+                          f"would be its default {p.get('default_value', 0)}; give its values in stage_data (typed, "
+                          "or parameter_values_from_file)")
+    return faults
+
+
+def unread_data(spec: dict[str, Any]) -> list[str]:
+    """Parameters given values that no rule or goal reads, on the expanded model (refused at the final proposal;
+    named at the goal stage instead, the last stage before it)."""
+    seed, ir = _seed(spec), _ir(spec)
+    attrs: set[str] = set()
+    pars: set[str] = set()
+    _names_read([ir.get("constraints"), ir.get("objective")], attrs, pars)
+    declared = {str(p.get("name")) for p in seed.get("parameters") or [] if isinstance(p, dict)}
+    return sorted(n for n in _valued(seed) & declared if n not in pars)
+
+
+def check_decisions(draft: dict[str, Any] | None, workspace_counts: dict[str, int] | None = None,
+                    workspace: dict[str, Any] | None = None) -> str:
     """stage_decisions: every set a decision or parameter is declared over has records (in the staged data or
     the workspace), bounds are numbers in order; returns the decisions read back, or raises StageRefused."""
     ir = _ir(draft)
@@ -203,6 +283,7 @@ def check_decisions(draft: dict[str, Any] | None, workspace_counts: dict[str, in
         lo, hi = v.get("lower"), v.get("upper")
         if isinstance(lo, (int, float)) and isinstance(hi, (int, float)) and lo > hi:
             problems.append(f"{name}: lower {lo} is above upper {hi}")
+    problems.extend(parameter_faults(draft, workspace))
     if problems:
         raise StageRefused("; ".join(problems))
     spec = assemble(draft)
@@ -279,7 +360,7 @@ def merge_rule(draft: dict[str, Any] | None, rule: dict[str, Any]) -> dict[str, 
                  {"ir": {"constraints": [rule]}})
 
 
-def check_goal(draft: dict[str, Any] | None, objective: Any) -> str:
+def check_goal(draft: dict[str, Any] | None, objective: Any, workspace: dict[str, Any] | None = None) -> str:
     """stage_goal: the goal checked in the draft's model (the sense, every term's data); the read-back."""
     if not isinstance(_ir(draft).get("variables"), dict) or not _ir(draft)["variables"]:
         raise StageRefused("declare the decisions first with stage_decisions, then the goal")
@@ -308,8 +389,13 @@ def check_goal(draft: dict[str, Any] | None, objective: Any) -> str:
         raise StageRefused(f"the goal reads {', '.join(missing)}, which no stage declared: declare it with "
                            "stage_decisions (parameters) and give its values in stage_data")
     terms = trial["ir"]["objective"]["terms"]
+    unread = unread_data(trial)
+    before = [f"parameter {n} holds data but no rule or goal reads it: read it with add_rule, or drop it "
+              f'(stage_data with parameters [{{"name": "{n}", "drop": true}}])' for n in unread]
+    before += parameter_faults(trial, workspace)
     said = (f"Goal staged: {objective['sense']} " + " + ".join(
         f"{t.get('weight', 1)} x {readback.term(t.get('expression'))}" if isinstance(t, dict) else "?" for t in terms)
         + (f"; reads {', '.join(sorted(attrs | pars))}" if attrs or pars else "")
-        + ("; " + "; ".join(notes) if notes else ""))
+        + ("; " + "; ".join(notes) if notes else "")
+        + (NEWLINE + "BEFORE propose_plan, fix (the plan is refused with these): " + "; ".join(before) if before else ""))
     return said
