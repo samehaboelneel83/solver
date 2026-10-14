@@ -1133,3 +1133,13 @@ runs: p05, p06, p07, p08. Five cases unbuilt at the 30-minute limit in run 3.
 time lost at the limit grew (stages mean more model calls, each slow). Step 10's hidden run was stopped at
 its first case, and **the step 7 image is back on the stack** (c37772, verified: no stage tools, migration 0122,
 health 200), the best fully measured image. The protocol stays in main, measured and documented, not live.
+
+## Step 11 (14 Oct, 18:13): the new baseline -- main with stages off, every reply logged
+
+Main is no longer step 7 (it carries step 8's changes without step 3b's lines, the protocol behind
+`LLM_BUILD_STAGES`, off, and the harness fixes), so before any time lever is tried, main itself is measured:
+`solver-backend:step11` (1aeb8e, main at 581ecfb; verified: the reply log in, `LLM_BUILD_STAGES` unset) on
+the stack, `run_step11.sh` -- three tuning runs, three cases at a time, 30 minutes a case, no hidden run. Each
+model reply is logged (`assistant.reply seconds= read= wrote= thinking=`), so the run also says where a case's
+time goes. If the three-run mean is below step 7's 4.7 or silent wrong answers exceed 2 of 30, step 7 goes
+back on the stack.
