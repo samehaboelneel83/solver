@@ -1080,6 +1080,16 @@ def llm_chat(settings: Settings, messages: list[dict], native: bool | None,
     choice = data["choices"][0]
     message = dict(choice.get("message") or {})
     message["_finish"] = choice.get("finish_reason")
+    # Every reply's time and size, and what it carried (tool names and the characters of their arguments, never
+    # the content): where a case's time goes (14 Oct: the server writes about 80 tokens a second).
+    usage = data.get("usage") or {}
+    calls = message.get("tool_calls") or []
+    logging.getLogger("solver.assistant").info(
+        "assistant.reply seconds=%.1f read=%s wrote=%s thinking=%s finish=%s text=%d calls=%s",
+        time.monotonic() - started, usage.get("prompt_tokens"), usage.get("completion_tokens"), settings.thinking,
+        choice.get("finish_reason"), len(str(message.get("content") or "")),
+        ",".join(f"{(c.get('function') or {}).get('name')}:{len(str((c.get('function') or {}).get('arguments') or ''))}"
+                 for c in calls if isinstance(c, dict)) or "-")
     return message, native is not False
 
 
