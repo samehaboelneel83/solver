@@ -72,6 +72,7 @@ from app.agent import sentences as agent_sentences
 from app.agent import stages as agent_stages
 from app.agent import readback as agent_readback
 from app.agent import canon as agent_canon
+from app.agent import constructs as agent_constructs
 from app.agent import sandbox
 from app.agent import toolcall
 
@@ -1113,7 +1114,8 @@ def thinking_for(messages: list[dict]) -> str:
     for m in done:
         content = str(m.get("content") or "")
         if m.get("name") in ("check_spec", "propose_plan") or content.startswith(
-                ("tool error", "Refused", "Could not", "Not valid yet", "The spec does not build", "No attached")) \
+                ("tool error", "Refused", "Could not", "Not valid yet", "Not staged", "The spec does not build",
+                 "No attached")) \
                 or '"ok": false' in content[:40] or (content.startswith('{"exit_code":')
                                                        and not content.startswith('{"exit_code": 0')):
             return "on"
@@ -1370,6 +1372,7 @@ def model_prompt(ctx: "Context") -> str:
                          "If the candidate API cannot express a required relationship, do not attempt client-side "
                          "generation: use a supported platform calculation or ask for source data. Never substitute "
                          "a count approximation or drop a required rule without the user's approval.")
+    constructs_text = "\n".join("- " + d for d in agent_constructs.describe())
     return f"""You are the modelling assistant of the Problem Solver platform, talking with "{ctx.username}".
 They describe a real decision problem in their own words. You understand it fully, turn it into a platform
 model, get their approval, build it, and explain what you built. {where} Reply in the user's language.
@@ -1477,8 +1480,25 @@ the model too big or slow, stop and tell the user the numbers (e.g. "0.1 m gives
 million cell links") with the options and what each costs, and wait for their answer. Never invent a threshold the
 user did not give (e.g. "within 50 m of an access point") -- compute it from the data or ask.
 
-PHASE 2 - PROPOSE: when nothing important is open, run check_spec on your spec and fix every error it reports
-(nothing is built and the user sees nothing), then call propose_plan with the same spec.
+PHASE 2 - BUILD THE PLAN IN STAGES: when nothing important is open, build the plan through the stage tools, one
+small call at a time; the platform checks each stage as it comes, so a mistake is found where it belongs and no
+reply carries the whole model.
+1. stage_data: the kinds of record and their fields, the records (typed, or *_from_file from the attached
+   sheets), the parameters with their values, the relationship types and links. Read what it reports: the
+   records per kind, the cells per parameter, the links per relationship, and every CHECK THIS line.
+2. stage_decisions: the decisions (variables: name, index kinds, domain, bounds) and the parameters the rules
+   read (parameters: name, index kinds).
+3. add_rule, ONE rule per call, with "sentence": the request's own words the rule holds, quoted. Write the rule
+   as {{"id", "forall", "left", "relation", "right", "severity"}} in the term language (SPEC below), or as a
+   CONSTRUCT (below). The platform says what the rule ranges over and reads, or refuses it with what to write.
+   Every sentence of the request that states a rule gets its add_rule: the person's card shows each sentence
+   beside the rule that holds it, and names the sentences no rule holds.
+4. stage_goal: the objective (sense and terms).
+5. propose_plan with the summary only, no spec: the platform assembles the plan from the stages, checks and
+   trial-solves it, and shows the person.
+A stage answered "Not staged" is fixed and sent again before moving on. When the person changes something, redo
+only the stage it touches (add_rule replaces a rule by its id; {{"drop": "<id>"}} removes one) and propose again.
+(propose_plan with a whole spec, after check_spec, still works, but it is slower and checked only at the end.)
 - summary (markdown the user reads), in the Model Editor's own terms, these headings in this order:
   **Problem** one paragraph in the user's words.
   **Sets** each kind of record: what it is, how many, its fields with units, where the data comes from
@@ -1489,9 +1509,8 @@ PHASE 2 - PROPOSE: when nothing important is open, run check_spec on your spec a
   (hard)"; soft rules with their weight.
   **Goals** minimise/maximise and the formula; several goals with their weights or order.
   **Assumptions** every default you chose.
-- spec: exactly what will be built (format below). The server checks it before the user sees it; if it returns
-  errors, fix the spec and call propose_plan again. The user then approves (it is built) or replies with changes
-  (adjust, then propose again).
+- spec: only for a plan not built in stages (format below). The user approves the plan (it is built) or
+  replies with changes (adjust the stage it touches, then propose again).
 
 PHASE 3 - SOLVE AND REPORT: when the result starts with BUILT, solve it straight away (the result says how), wait
 for the run to finish (a run with status "error" FAILED: read its error, tell the user, never queue it again unchanged),
@@ -1659,12 +1678,10 @@ instead); one binary visit[vehicle, stop, stop] and ONE rule {{"id":"c_routes","
 field>"}}}} (time windows add "travel":"<a time parameter>","earliest","latest","service": stop fields). Goal:
 minimise the sum over v, i, j of distance[i, j] * visit[v, i, j]. Never write the visiting, sub-tour or load rules
 yourself: the route rule holds them.
-SHORTCUTS (optional; the formulas above stay right): two of the idioms may instead be ONE rule the platform writes
-out for you -- {{"id":"c_bal","carried":{{"periods":{{"index":"p","set":"period","by":"#row"}},"level":{{"var":
-"carried","index":["p"]}},"in":[<terms>],"out":[<terms>],"initial":<the starting amount>,"owed":<optional>}}}}
-(the period links, the first period and the starting amount are made for you) and {{"id":"c_lvl","largest_of":
-{{"for":[<bindings>],"level":{{"var":...}},"options":{{"index":"o","set":"<options>"}},"value":<term>,"chosen":
-{{"var":"pick","index":["o"]}}}}}}.
+CONSTRUCTS: a rule written as one of these is expanded by the platform into the rules it stands for (the
+period links, the helper decisions and parameters are made for you); write the construct with add_rule instead of
+the algebra wherever one fits -- the mistakes the hand-written forms make cannot be expressed in them.
+{constructs_text}
 
 TOOL CALLS: only through the tool interface, never as text in your reply; valid JSON with unique keys (each list,
 e.g. entity_types or constraints, once, with all its items); keep each call small (load rows from files, never

@@ -8,6 +8,12 @@ only="${3:-}"   # optional: a comma-separated list of case ids (h07,h08) to run 
 export PW_DIR="C:/Users/user/AppData/Local/Temp/claude/D--solver/3932906e-32f9-4d3f-b0fb-ac43eb061e80/scratchpad/pw"
 export LIMIT_MIN=20
 mkdir -p runs/hidden
+if [ -f "runs/hidden/skip-${tag}" ]; then
+  # A marker dropped while a scripted series runs (14 Oct: step 8's hidden run dropped, the old path's hidden
+  # numbers being known from step 7) ends the hidden run before it starts.
+  echo "$(date +%T) SKIPPED (runs/hidden/skip-${tag})" >> "runs/hidden-${tag}.log"
+  exit 0
+fi
 for f in ../hidden/h[0-9][0-9]_*.py; do
   m="$(basename "$f" .py)"
   p="${m%%_*}"

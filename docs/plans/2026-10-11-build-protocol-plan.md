@@ -359,3 +359,17 @@ The neutrality plan's step 5 and step 3b measurements run on within Phase 0; the
   the deploy recipe cannot exclude 3b. Either measure 3b first (three tuning runs on an image built from main
   as it is, which includes 3b) or drop it (`git revert fe687b8`, then 3.3 on top). Until then the model is not
   told the protocol and the live path is unchanged.
+- **14 Oct, 06:50 — the plan adapted (the owner's "go ahead"), and 3.3 written.** Three changes: (1) step 8
+  (main at 1ddf630, step 3b included) is the old path's baseline for 3.6, not a gate -- its three tuning runs
+  finish, its hidden run is dropped (`runs/hidden/skip-step8`; `run_hidden.sh` honours the marker), the old
+  path's hidden numbers being step 7's; (2) the parallel runner is tried on the protocol image's runs, to
+  bring a run from two or three hours to about one; (3) reply time is attacked directly: thinking stays off
+  after a stage that was accepted and on after one refused ("Not staged"), beside the 120-second stage cap.
+  **3.3:** the sheet's PHASE 2 is the protocol -- stage_data, stage_decisions, add_rule one rule per call with
+  the request's sentence, stage_goal, propose_plan with the summary only; a refused stage is fixed before
+  moving on; a change redoes only the stage it touches; the whole-spec way still works but is named as slower.
+  The SHORTCUTS block (step 3b's six lines) is replaced by the constructs' own descriptions
+  (`constructs.describe()`, rendered into the sheet); PATTERNS stays until the protocol's three-run mean is
+  at least the old path's. The sheet is 39,100 characters (from 34,000); 154 tests pass, the neutrality scan
+  of the rendered sheet among them. Next: the protocol image (step 9) built from main once step 8's run 3 is
+  in, its three tuning runs in parallel, read against step 8's.
