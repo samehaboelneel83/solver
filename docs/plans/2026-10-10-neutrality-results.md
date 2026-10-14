@@ -1022,3 +1022,12 @@ b9c4983).** Three findings in its first four minutes:
    (the two send-backs of the first start came from a whole-spec `propose_plan`). Every tool call is now logged
    by name and outcome (`assistant.tool <name> ok|refused [whole-spec]`, no arguments or data).
 The first start's workspaces are left in place under their own clock-suffixed names; nothing of them is scored.
+
+**Step 9, second start stopped at 08:16 and restarted at 08:23 on image 6bef01 (main at 4298899).** The tool
+log of its first 17 minutes (five cases begun, three scored: p01 right, p04 right, p02 wrong) showed the
+protocol barely used and broken where used: of 5 cases 1 built in stages (p02); 29 whole-spec proposals, 23
+refused. p02's stages exposed two defects: a goal staged after an `only_if` rule was refused because the
+stage checks did not expand constructs; and propose_plan with no spec had nowhere to name the new workspace,
+so it was refused for reusing the selected one and the model fell back to the whole spec. Both fixed, with
+tests; and a refused whole-spec plan now answers with the stage that fixes it. The second start's scores
+are discarded (the image under them had both defects).
