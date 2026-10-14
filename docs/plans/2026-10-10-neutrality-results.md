@@ -1191,3 +1191,23 @@ order fault went back before the build check ran, so the next round met the next
 check's refusals together. It goes live after R1 ends and is judged on three serial runs against R1, by the
 number of whole proposals per case as well as right answers. (The tag `reliable-2026-10-14` still pins the
 reliable version itself.)
+
+### R1 (15 Oct, 00:05; the reliable version + the reply logs; one case at a time, 30 min): 5 right of 10; built 7; wrong but solved 2 (warned 0)
+
+| case | built | first | right | viol | warned | min |
+|---|---|---|---|---|---|---|
+| p01 | yes | yes | yes | 0 | 0 | 3.2 |
+| p02 | yes | yes | no | 2 | 0 | 2.4 |
+| p03 | yes | no | yes | 0 | 3 | 6.4 |
+| p04 | yes | no | yes | 0 | 1 | 3.8 |
+| p05 | no | no | no | 0 | 0 | 17.4 |
+| p06 | no | no | no | 0 | 0 | 30.1 |
+| p07 | yes | yes | no | 1 | 0 | 10.4 |
+| p08 | yes | yes | yes | 0 | 0 | 12.4 |
+| p09 | yes | yes | yes | 0 | 0 | 3.5 |
+| p10 | no | no | no | 0 | 0 | 18.1 |
+
+The reliable version alone, one case at a time, at its usual level (step 7's runs: 5, 4, 5). Whole-plan proposals
+in the run: 49. **R2 deployed 00:20** (`solver-backend:reliable-r2`, 241777, release/reliable 538fb39; verified),
+`run_r2.sh` -- three serial runs. R2 is kept if its three runs are at least R1's level on right answers with no
+more silent wrong ones, and fewer whole proposals per case.
