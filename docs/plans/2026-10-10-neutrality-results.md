@@ -1005,3 +1005,8 @@ was refused by this session's permission check, so it waits for the owner:
 
 Then `backend/bench/phase1/run_step9.sh` (three tuning runs through the parallel runner, three cases at a
 time, then the hidden set; 30 minutes a case), read against step 8: mean 4.3, 6 wrong unwarned of 30.
+
+**Step 9 deployed 14 Oct, 07:50** (the owner's go-ahead: "run with all authorities and permissions"):
+`solver-backend:step9` (066dc4) on backend and the three workers; verified in the container: the protocol's
+PHASE 2 text present, step 3b's SHORTCUTS block gone, migration 0122, health 200. `run_step9.sh` started at
+07:51, detached: three cases at a time (p02, p04, p06 first).
