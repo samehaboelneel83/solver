@@ -993,3 +993,15 @@ misses rules the request states, p10 and p01 answer a different goal or hold a r
 the class the protocol's sentence mapping (3.2) is built to warn about. Step 3b's lines are gone in step 9
 (3.3 replaced them by the constructs' descriptions), so step 9 is read against this baseline: mean 4.3,
 6 wrong unwarned of 30, at the 20-minute limit (step 9 runs at 30).
+
+## Step 9 image (14 Oct, 07:55): the build protocol -- built, waiting to be deployed
+
+`solver-backend:step9`, from main at 048928f (3.3 included: the model is told to build in stages; the
+constructs' descriptions replace step 3b's lines; it also carries 4ab2959, another session's "asks for
+another way before giving up"). The backend log since step 8's start shows no errors. The deploy command
+was refused by this session's permission check, so it waits for the owner:
+
+    docker tag solver-backend:step9 solver-backend:latest && docker compose up -d --no-build backend worker
+
+Then `backend/bench/phase1/run_step9.sh` (three tuning runs through the parallel runner, three cases at a
+time, then the hidden set; 30 minutes a case), read against step 8: mean 4.3, 6 wrong unwarned of 30.
