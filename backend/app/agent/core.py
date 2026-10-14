@@ -3847,6 +3847,12 @@ class Agent:
                               "function": {"name": name, "arguments": json.dumps(args, ensure_ascii=False)}})
             return calls, errors
         found, _prose, errors = toolcall.extract_tool_calls(content, self.tool_names, allow_repair=finish != "length")
+        # What a reply written as text is made of: the prose around the calls, and each call's size (14 Oct: the
+        # server has no native tool calling, so every call travels as text; this says which part costs the time).
+        logging.getLogger("solver.assistant").info(
+            "assistant.reply_parts text=%d prose=%d calls=%s", len(content or ""), len(_prose or ""),
+            ",".join(f"{f.get('name')}:{len(json.dumps(f.get('arguments') or {}, ensure_ascii=False))}"
+                     for f in found if isinstance(f, dict)) or "-")
         self.joined.extend(e[5:].strip() for e in errors if e.startswith("note:"))
         errors = [e for e in errors if not e.startswith("note:")]
         for f in found:
