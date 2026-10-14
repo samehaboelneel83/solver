@@ -10,7 +10,11 @@ export PW_DIR="C:/Users/user/AppData/Local/Temp/claude/D--solver/3932906e-32f9-4
 export LIMIT_MIN=30
 cases=(p02_supply_chain p04_factory p06_timetable p01_hospital p08_cyber p07_grid p09_cloud p05_ambulance p03_camp p10_disaster)
 one() {
-  local m="$1" p="${1%%_*}" out="runs/${p}-S-${tag}"
+  # Three statements: in one `local`, bash expands ${p} before p is assigned (14 Oct: every case wrote to
+  # runs/-S-<tag>, and the three drivers overwrote each other).
+  local m="$1"
+  local p="${m%%_*}"
+  local out="runs/${p}-S-${tag}"
   echo "$(date +%T) start $p" >> "runs-${tag}.log"
   node drive_case.mjs "cases/${p}/S" "$out" "P1 ${p} S ${tag} $(date +%H%M%S)" > "${out}.out" 2>&1
   MSYS_NO_PATHCONV=1 docker run --rm -v "D:/solver/backend:/app" -w /app solver-backend-test \

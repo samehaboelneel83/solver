@@ -3691,6 +3691,13 @@ class Agent:
                                          "No data source", "The data source", "The extraction of"))
                       or '"ok": false' in result[:40] or '"exit_code": -' in result[:30]
                       or (result.startswith('{"exit_code":') and not result.startswith('{"exit_code": 0')))
+            # Every tool call in the log, by name and outcome only (no arguments, no data): how a turn spent its
+            # steps can be read back, and whether the build protocol's stages were used (14 Oct: only the
+            # send-backs were logged, and step 9 could not tell).
+            logging.getLogger("solver.assistant").info(
+                "assistant.tool %s %s%s", name, "ok" if ok else "refused",
+                " whole-spec" if name in ("propose_plan", "check_spec") and isinstance(args.get("spec"), (dict, str))
+                and args.get("spec") else "")
             if ok and (name == "place_file" or (name == "propose_plan" and allow and self.built)
                        or (name == "call_api" and str(args.get("method", "GET")).upper() != "GET"
                            and '"ok": true' in result[:40])):
@@ -4327,8 +4334,14 @@ class Agent:
                 plan = plans[-1]
                 messages[-1]["tool_calls"] = [plan]
                 args = _args(plan)
+                # The plan is the call being checked: the draft is every stage call before it (14 Oct: left
+                # unset here, the fold stopped at the last stage call executed, and dropped that stage).
+                self._call_id = plan.get("id")
                 yield {"type": "tool", "name": "propose_plan", "args": _shown("propose_plan", args)}
                 verdict = self._check_plan(args)
+                logging.getLogger("solver.assistant").info(
+                    "assistant.tool propose_plan %s%s", "ok" if verdict.startswith("PLAN_OK") else "refused",
+                    " whole-spec" if args.get("spec") else "")
                 if verdict.startswith("PLAN_OK"):
                     body = json.loads(verdict[8:]) if verdict[8:].strip() else {}
                     counts = body.get("would_create", {})

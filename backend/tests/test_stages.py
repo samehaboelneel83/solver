@@ -204,3 +204,19 @@ def test_the_assistant_runs_the_stages_as_tools():
     agent._call_id = "p"
     spec = agent._spec({"summary": "s"}, expand=False)
     assert [c["id"] for c in spec["ir"]["constraints"]] == ["c_most"]
+
+
+def test_the_plan_proposed_after_the_stages_carries_the_last_stage():
+    """The turn loop handles propose_plan itself: the draft must be every stage call before the plan, the last
+    one included (14 Oct: the fold stopped at the last stage call executed and dropped the goal)."""
+    from app.agent import canon
+
+    goal = {"objective": {"sense": "maximize", "terms": [{"id": "o", "weight": 1, "expression": {
+        "sum": {"var": "x", "index": ["i"]}, "over": [{"index": "i", "set": "a"}]}}]}}
+    messages = [_call("d", "stage_data", {"entity_types": [{"name": "a"}], "entities": [{"type": "a", "key": "a1"}]}),
+                _call("v", "stage_decisions", {"variables": {"x": {"index": ["a"], "domain": "binary"}}}),
+                _call("g", "stage_goal", goal), _call("p", "propose_plan", {"summary": "s"})]
+    stale, _ = canon.canonical({"summary": "s"}, messages=messages, call_id="g")
+    assert "objective" not in stale["ir"]  # what the stale id gave
+    spec, _ = canon.canonical({"summary": "s"}, messages=messages, call_id="p")
+    assert spec["ir"]["objective"]["sense"] == "maximize"
