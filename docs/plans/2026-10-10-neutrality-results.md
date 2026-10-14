@@ -951,3 +951,8 @@ tuning 3/5/3, 5/3/5, 5/4/5; hidden 4, 6, 4 of 16. The series stands; the fix onl
 Reading: 5 right, four of them first time; 2 wrong without a warning (p07 one violation; p10 a different
 goal, no violation); 3 unbuilt at the limit, all on slow replies (p05 two, p06 and p08 one each; two refusals
 in the whole run). Runs so far: 4, 5.
+
+**Time limit raised (14 Oct, 06:50, the owner's instruction): 20 -> 30 minutes a case** in `rerun_small.sh`,
+`run_hidden.sh` and `run_parallel.sh`. Step 8's three runs were at 20 (run 3 was already under way, on the
+limit it started with); step 9 and after are at 30, so a case that was "at the limit" under step 8 may build
+under step 9 on time alone -- the readings say the limit beside the counts from here on.

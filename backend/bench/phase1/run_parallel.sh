@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # The small tuning cases through the browser, N at a time (build-protocol plan, Phase 0.1): each case in its own
-# browser and workspace, scored as it ends. The limit is 25 minutes under concurrency (the model is shared).
+# browser and workspace, scored as it ends. The limit is 30 minutes (the model is shared).
 #   bash run_parallel.sh <tag> [N=3]     -> runs/<p>-S-<tag>/ and runs-<tag>.log, as rerun_small.sh writes them
 # Read with: python -m bench.phase1.blind runs <tag>; compare minutes with a serial run of the same image.
 cd "$(dirname "$0")"
 tag="${1:-par}"
 n="${2:-3}"
 export PW_DIR="C:/Users/user/AppData/Local/Temp/claude/D--solver/3932906e-32f9-4d3f-b0fb-ac43eb061e80/scratchpad/pw"
-export LIMIT_MIN=25
+export LIMIT_MIN=30
 cases=(p02_supply_chain p04_factory p06_timetable p01_hospital p08_cyber p07_grid p09_cloud p05_ambulance p03_camp p10_disaster)
 one() {
   local m="$1" p="${1%%_*}" out="runs/${p}-S-${tag}"
