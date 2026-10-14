@@ -1164,3 +1164,12 @@ mostly the measuring conditions (serial against parallel), not the images. Step 
 parallel: about 4 of 10 right on this model. The levers that remain are on the model's side (it writes about
 80 tokens a second, about 2,100 per reply), not in the platform's checks. Measured from here on: one image at a
 time, the same runner for both sides of a comparison, three runs before a verdict.
+
+## R1 (14 Oct, 21:38): the reliable version, every reply logged -- the owner's "unstoppable with your recommendations"
+
+From here the work follows the recommendations on the reliable version: one measured change at a time, one case
+at a time, three runs before a verdict. R1 is `release/reliable` at fbccdf7 (the reliable version plus one log
+line per model reply: seconds, tokens read and written, thinking, the reply's text length, and each tool call's
+name and argument size -- no content), image `solver-backend:reliable-r1` (ff1748), deployed and verified.
+`run_r1.sh`: one serial run, 30 minutes a case. It re-baselines the reliable version at the 30-minute limit and
+shows which replies cost the time, so the reply-shortening change (recommendation 4) is built on data.
