@@ -1110,3 +1110,9 @@ refusals the checks were right to make (p09: values the model computed itself, a
 name). The stop rule set for step 9 (at least 5 right) would revert on this run alone; with the owner's aim
 "a reliable platform", where a silent wrong answer is the failure that matters most, step 10 is judged on its
 three runs instead of one, against step 9's run 1 and step 7. Runs 2 and 3 are under way.
+
+### Step 10, run 2 (14 Oct, 12:22): 4 right of 10; built 6; wrong but solved 2 (warned 0)
+
+Right: p01, p02, p03, p09 (p09 unbuilt in run 1). Wrong without a warning: p07 (one violation), p10 (a different
+goal, no violation). Unbuilt at the 30-minute limit: p04, p05, p06, p08 -- four, the most of any run so far.
+Step 10 so far: 4, 4 right; 0 and 2 wrong unwarned. Run 3 under way.
