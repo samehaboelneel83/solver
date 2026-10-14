@@ -50,6 +50,25 @@ const result = { case: caseDir, workspace, approved: 0, continues: 0, built: fal
 // Runs made after this point are this case's (one case at a time): found through the API, not the panel's links.
 const newestRun = async () => { const [, t] = await api("/api/v1/runs?limit=1"); const items = JSON.parse(t).items || []; return items.length ? items[0].id : 0; };
 const startRun = await newestRun();
+// Cases run side by side (run_parallel.sh): never take the platform's newest run, which may be another case's.
+const PARALLEL = process.env.PARALLEL === "1";
+const problemOf = async (runId) => {
+  const [s, r] = await api(`/api/v1/runs/${runId}`);
+  if (s >= 300) return null;
+  const [s2, sc] = await api(`/api/v1/scenarios/${JSON.parse(r).scenario_id}`);
+  return s2 >= 300 ? null : JSON.parse(sc).problem_id;
+};
+const problemRuns = async (problemId) => {
+  const [s, list] = await api(`/api/v1/scenarios?problem_id=${problemId}&limit=100`);
+  if (s >= 300) return [];
+  const items = JSON.parse(list).items || JSON.parse(list);
+  const out = [];
+  for (const sc of Array.isArray(items) ? items : []) {
+    const [s2, runs] = await api(`/api/v1/runs?scenario_id=${sc.id}&limit=50`);
+    if (s2 < 300) out.push(...(JSON.parse(runs).items || []).map((x) => x.id));
+  }
+  return out;
+};
 // The plan as asked is the newest run of a scenario that changes nothing (patch {}); what-if runs the Assistant
 // solved after it ("Budget 400k") are not the answer (11 October 2026: p08 and p07 were scored on a what-if run).
 const baseRun = async (ids) => {
@@ -129,11 +148,15 @@ try {
     if (idleSince === null) { idleSince = Date.now(); continue; }
     if (Date.now() - idleSince < 12000) continue;
     const runs = [...text.matchAll(/\/runs\/(\d+)/g)].map((m) => Number(m[1]));
-    const latest = await newestRun();
-    if (latest > startRun) runs.push(latest);
-    const links = await page.locator('[aria-label="Assistant"] a[href*="/runs/"]').evaluateAll((as) => as.map((a) => a.getAttribute("href")));
+    const links = await page.locator('[aria-label="Assistant"] a[href*="/runs/"], [aria-label="Assistant"] a[href*="/problems/"]').evaluateAll((as) => as.map((a) => a.getAttribute("href")));
     for (const h of links) { const m = /\/runs\/(\d+)/.exec(h || ""); if (m) runs.push(Number(m[1])); }
-    const mine = runs.filter((r) => r > startRun);  // only runs made during this case
+    // The problems this case's own panel links to: its runs are those problems' runs. The platform's newest run
+    // is another case's when cases run side by side (14 Oct: p04 and p08 were scored on p02's and p01's runs).
+    const myProblems = new Set(links.map((h) => /\/problems\/(\d+)/.exec(h || "")).filter(Boolean).map((m) => Number(m[1])));
+    for (const p of myProblems) runs.push(...(await problemRuns(p)));
+    if (!myProblems.size && !PARALLEL) { const latest = await newestRun(); if (latest > startRun) runs.push(latest); }
+    let mine = runs.filter((r) => r > startRun);  // only runs made during this case
+    if (myProblems.size) mine = (await Promise.all(mine.map(async (r) => [r, await problemOf(r)]))).filter(([, p]) => myProblems.has(p)).map(([r]) => r);
     if (result.approved > 0 && (mine.length || /Built/.test(text))) { result.run = mine.length ? await baseRun(mine) : null; break; }
     if (result.continues >= NUDGES) { log("no more continues; stopping"); break; }
     result.continues += 1;

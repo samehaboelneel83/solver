@@ -8,6 +8,7 @@ tag="${1:-par}"
 n="${2:-3}"
 export PW_DIR="C:/Users/user/AppData/Local/Temp/claude/D--solver/3932906e-32f9-4d3f-b0fb-ac43eb061e80/scratchpad/pw"
 export LIMIT_MIN=30
+export PARALLEL=1   # drive_case.mjs: a case's runs are its own problem's, never the platform's newest
 cases=(p02_supply_chain p04_factory p06_timetable p01_hospital p08_cyber p07_grid p09_cloud p05_ambulance p03_camp p10_disaster)
 one() {
   # Three statements: in one `local`, bash expands ${p} before p is assigned (14 Oct: every case wrote to

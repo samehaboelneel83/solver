@@ -1031,3 +1031,10 @@ stage checks did not expand constructs; and propose_plan with no spec had nowher
 so it was refused for reusing the selected one and the model fell back to the whole spec. Both fixed, with
 tests; and a refused whole-spec plan now answers with the stage that fixes it. The second start's scores
 are discarded (the image under them had both defects).
+
+**Harness fault in the parallel runs, found 09:15.** p04 and p08 had been scored on p02's and p01's runs: the
+driver added "the platform's newest run" to a case's candidates, which with three cases side by side is often
+another case's. `drive_case.mjs` now takes only the runs of the problems its own panel links to (never the
+newest run when `PARALLEL=1`, which `run_parallel.sh` sets). p04 and p08 were re-fetched from their own
+workspaces (`rescue_run.py`: one run each, 753 and 759) and rescored: **p04 right** (goal 963), p08 wrong
+(one violation). Serial runs (steps 1-8) took the newest run safely, one case at a time.
