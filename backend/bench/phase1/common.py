@@ -51,15 +51,28 @@ def export_rows(export_csv: str) -> list[dict[str, str]]:
 
 
 def decision_over(rows: list[dict[str, str]], *key_sets: set[str]) -> tuple[str, dict[tuple[str, ...], float]]:
-    """The decision whose keys fall in these sets, position by position (the model names its own decisions):
-    its name and {keys: value}. ("", {}) when no decision fits."""
+    """The decision whose keys fall in these sets, in any order of the key positions (the model names its own
+    decisions and orders its own indices: step 8 run 1 keyed (machine, product, shift) where the checker read
+    (product, machine, shift)); its name and {keys: value}, the keys in the sets' order. ("", {}) when no
+    decision fits."""
+    from itertools import permutations
+
     by: dict[str, dict[tuple[str, ...], float]] = {}
+    order: dict[str, tuple[int, ...]] = {}  # per decision: which key position holds each set's keys
+    n = len(key_sets)
     for r in rows:
-        keys = tuple(r.get(f"key{i + 1}") or "" for i in range(len(key_sets)))
-        extra = [r.get(k) for k in r if k.startswith("key") and int(k[3:]) > len(key_sets) and r.get(k)]
-        if extra or not all(k in s for k, s in zip(keys, key_sets)):
+        keys = tuple(r.get(f"key{i + 1}") or "" for i in range(n))
+        extra = [r.get(k) for k in r if k.startswith("key") and int(k[3:]) > n and r.get(k)]
+        if extra:
             continue
-        by.setdefault(r["decision"], {})[keys] = float(r["value"])
+        name = r["decision"]
+        perm = order.get(name)
+        if perm is None or not all(keys[perm[j]] in key_sets[j] for j in range(n)):
+            perm = next((p for p in permutations(range(n)) if all(keys[p[j]] in key_sets[j] for j in range(n))), None)
+            if perm is None:
+                continue
+            order[name] = perm
+        by.setdefault(name, {})[tuple(keys[perm[j]] for j in range(n))] = float(r["value"])
     if not by:
         return "", {}
     # The decision holding amounts before a yes/no one over the same records (a setup beside the quantities).

@@ -906,14 +906,19 @@ count 0), which cut p04's turn; the driver exited and the three-run script with 
 Note: main gained 4ab2959 at 01:01 on 14 Oct from another session (the Assistant asks for another way before
 giving up; a probe-first lane check for LNS). The step 8 image is from 1ddf630 and does not carry it.
 
-### Step 8, run 1 (14 Oct, 03:42): 3 right of 10; built 8; wrong but solved 5 (warned 3)
+### Step 8, run 1 (14 Oct, 03:42): 4 right of 10; built 8; wrong but solved 4 (warned 2)
+
+*(First read as 3 right: p04's plan keyed its decisions (machine, product, shift) and the checker's shared
+lookup matched key positions in one fixed order. `common.decision_over` now accepts any order of the key
+positions; p04 rescored right (goal 963, no violation). Earlier runs can be rescored the same way with
+`rebase_runs.py` where a "checker could not read the plan" mark appears.)*
 
 | case | built | first | solved | right | viol | warned | min |
 |---|---|---|---|---|---|---|---|
 | p01 | yes | no | yes | yes | 0 | 0 | 11.7 |
 | p02 | yes | no | yes | no | 2 | 3 | 2.8 |
 | p03 | yes | yes | yes | yes | 0 | 0 | 11.2 |
-| p04 | yes | no | yes | no (checker could not read the plan; goal 963 = reference) | 0 | 3 | 18.9 |
+| p04 | yes | no | yes | yes (after the checker fix) | 0 | 3 | 18.9 |
 | p05 | no | no | no | no | 0 | 0 | 20.1 |
 | p06 | no | no | no | no | 0 | 0 | 20 |
 | p07 | yes | no | yes | no | 1 | 3 | 13.7 |
@@ -921,8 +926,7 @@ giving up; a probe-first lane check for LNS). The step 8 image is from 1ddf630 a
 | p09 | yes | yes | yes | no | 0 | 0 | 3.2 |
 | p10 | yes | yes | yes | no | 2 | 0 | 8.3 |
 
-Reading: 3 right (4 counting p04, whose goal is the reference but whose plan the checker could not read --
-a checker gap to look at, not a model loss); 2 wrong without a warning (p09: a different goal, no violation;
+Reading: 4 right; 2 wrong without a warning (p09: a different goal, no violation;
 p10: 2 violations, unwarned); 2 unbuilt at the limit (p05 after 6 refusals and a long reply, p06 after
 three continues). Causes: refusals 7 in all (p05's 6 are the filter shape and a quadratic product), slow
 replies 6 across the run. Within the run-to-run noise of step 7 (5, 4, 5); runs 2 and 3 decide.
