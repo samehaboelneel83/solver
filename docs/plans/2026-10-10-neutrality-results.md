@@ -1173,3 +1173,12 @@ line per model reply: seconds, tokens read and written, thinking, the reply's te
 name and argument size -- no content), image `solver-backend:reliable-r1` (ff1748), deployed and verified.
 `run_r1.sh`: one serial run, 30 minutes a case. It re-baselines the reliable version at the 30-minute limit and
 shows which replies cost the time, so the reply-shortening change (recommendation 4) is built on data.
+
+**R1 restarted 22:15** on image b3e3e8 (release/reliable + the reply-parts log). What its first 49 replies showed:
+every reply was text only (no native tool calls), about 7,000 characters and 2,140 tokens each, thinking off. The
+model server refuses native tool calls -- *"auto" tool choice requires --enable-auto-tool-choice and
+--tool-call-parser to be set* -- so the Assistant falls back to calls written inside the reply text. The new log
+line (`assistant.reply_parts prose= calls=name:size`) says how much of each reply is the call and how much the
+prose around it. **For the owner:** enabling native tool calls means restarting the vLLM server on 10.125.18.189
+with `--enable-auto-tool-choice --tool-call-parser qwen3_coder` (or `hermes`, whichever the model's template
+uses); it is on that host, not this one.
