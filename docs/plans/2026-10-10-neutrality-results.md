@@ -1116,3 +1116,20 @@ three runs instead of one, against step 9's run 1 and step 7. Runs 2 and 3 are u
 Right: p01, p02, p03, p09 (p09 unbuilt in run 1). Wrong without a warning: p07 (one violation), p10 (a different
 goal, no violation). Unbuilt at the 30-minute limit: p04, p05, p06, p08 -- four, the most of any run so far.
 Step 10 so far: 4, 4 right; 0 and 2 wrong unwarned. Run 3 under way.
+
+### Step 10, run 3 (13:46): 2 right of 10; built 5; wrong but solved 3 (warned 2) -- and the verdict
+
+Three-run tally: right per run 4, 4, 2 -> **mean 3.3**; wrong without a warning 3 of 30; never right in three
+runs: p05, p06, p07, p08. Five cases unbuilt at the 30-minute limit in run 3.
+
+| step | right per run | mean | wrong unwarned |
+|---|---|---|---|
+| 7 (old path, 20 min) | 5, 4, 5 | **4.7** | **2 of 30** |
+| 8 | 4, 5, 4 | 4.3 | 6 of 30 |
+| 9 (protocol) | 5 (one full run) | -- | 1 of 10 |
+| 10 (protocol + stage checks + revisions) | 4, 4, 2 | 3.3 | 3 of 30 |
+
+**Verdict (14:00):** step 10 is worse than step 7 on right answers and no better on silent wrong ones; the
+time lost at the limit grew (stages mean more model calls, each slow). Step 10's hidden run was stopped at
+its first case, and **the step 7 image is back on the stack** (c37772, verified: no stage tools, migration 0122,
+health 200), the best fully measured image. The protocol stays in main, measured and documented, not live.
