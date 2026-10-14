@@ -1125,6 +1125,12 @@ def llm_chat(settings: Settings, messages: list[dict], native: bool | None,
     choice = data["choices"][0]
     message = dict(choice.get("message") or {})
     message["_finish"] = choice.get("finish_reason")
+    # Every reply's time and size in the log (14 Oct: the server writes about 80 tokens a second and reads about
+    # 5,800, so a case's time is mostly what the model writes; this says which replies cost it). No content.
+    usage = data.get("usage") or {}
+    logging.getLogger("solver.assistant").info(
+        "assistant.reply seconds=%.1f read=%s wrote=%s thinking=%s finish=%s", time.monotonic() - started,
+        usage.get("prompt_tokens"), usage.get("completion_tokens"), settings.thinking, choice.get("finish_reason"))
     return message, native is not False
 
 
