@@ -1182,3 +1182,12 @@ line (`assistant.reply_parts prose= calls=name:size`) says how much of each repl
 prose around it. **For the owner:** enabling native tool calls means restarting the vLLM server on 10.125.18.189
 with `--enable-auto-tool-choice --tool-call-parser qwen3_coder` (or `hermes`, whichever the model's template
 uses); it is on that host, not this one.
+
+**R1's reply parts (first 41 replies, 22:46):** of 291,251 characters the model wrote, **74% were `propose_plan`
+calls** (24 proposals in three cases, 4,268 to 15,912 characters each -- whole plans resent after a refusal),
+18% prose, the rest small calls. The refusals behind the resends were varied and small, and a plan with an
+order fault went back before the build check ran, so the next round met the next fault. **R2 candidate**
+(release/reliable 538fb39, not deployed): one send-back carries every fault -- the order checks and the build
+check's refusals together. It goes live after R1 ends and is judged on three serial runs against R1, by the
+number of whole proposals per case as well as right answers. (The tag `reliable-2026-10-14` still pins the
+reliable version itself.)
