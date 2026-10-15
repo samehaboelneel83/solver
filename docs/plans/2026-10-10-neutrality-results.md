@@ -1211,3 +1211,17 @@ The reliable version alone, one case at a time, at its usual level (step 7's run
 in the run: 49. **R2 deployed 00:20** (`solver-backend:reliable-r2`, 241777, release/reliable 538fb39; verified),
 `run_r2.sh` -- three serial runs. R2 is kept if its three runs are at least R1's level on right answers with no
 more silent wrong ones, and fewer whole proposals per case.
+
+### R2, run 1 (15 Oct, 03:05): 4 right of 10; built 8; wrong but solved 3 (warned 2) -- R2 dropped
+
+R2's purpose was fewer whole-plan resends; it **more than doubled them: 113 whole proposals against R1's 49**
+(p02 alone went from 2.4 to 21 minutes). The longer, combined send-back seems to make the model resend more, not
+less. The mechanism failed by a margin well past case-to-case noise, so R2 was stopped after one run (03:21),
+reverted on release/reliable (061d067), and **the reliable image is back on the stack** (c37772, health 200).
+
+Where this leaves the work: every platform-side lever tried in two days -- stage-by-stage building, stage checks,
+revisions, every-fault-at-once send-backs -- left the right answers at about 4-5 in 10, and the time still goes
+into the model rewriting whole plans at about 80 tokens a second. **The next gains are on the model side and
+need the owner:** (1) start the vLLM server on 10.125.18.189 with native tool calling
+(`--enable-auto-tool-choice --tool-call-parser ...`), so calls stop travelling as text; (2) a faster or stronger
+model. Either can be measured against R1 (5 right, 2 wrong unwarned, 49 whole proposals) the same day.
