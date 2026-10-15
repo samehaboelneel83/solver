@@ -1263,3 +1263,11 @@ native calls and this fix together: the fix is what makes native calls usable at
 Against R1: right the same (5), **built 9 against 7**, faster (median about 5 minutes a built case), but 3 wrong
 without a warning against 2, and 116 whole proposals against 49 -- with cheap native calls the model proposes more
 often. No "the spec has no ir" refusal in the run. Runs 2 and 3 under way.
+
+### R3, run 2 (15 Oct, 14:06): 7 right of 10; built 8; wrong but solved 1 (warned 0)
+
+p02's plan keyed its shipments by the joined pair ("W01-C001") and the checker could not read it; its goal was the
+reference (16249). `common.decision_over` now splits a joined key into its parts when they land in the sets;
+p02 rescored right, no violation. R1 and R3 run 1 rescored with the same checker: unchanged (5 and 5). Unbuilt
+at the limit: p06, p08; wrong without a warning: p07 (69 violations). **R3 so far: 5, 7 right; 3 and 1 wrong
+unwarned** (R1: 5; 2). Run 3 under way.

@@ -65,6 +65,12 @@ def decision_over(rows: list[dict[str, str]], *key_sets: set[str]) -> tuple[str,
         extra = [r.get(k) for k in r if k.startswith("key") and int(k[3:]) > n and r.get(k)]
         if extra:
             continue
+        if n > 1 and keys[0] and not any(keys[1:]):
+            # One record keyed by its parts joined with "-" (15 Oct, R3: shipment keyed "W01-C001" for the pair
+            # (W01, C001)): split, when the parts land in the sets.
+            parts = tuple(keys[0].split("-"))
+            if len(parts) == n:
+                keys = parts
         name = r["decision"]
         perm = order.get(name)
         if perm is None or not all(keys[perm[j]] in key_sets[j] for j in range(n)):
