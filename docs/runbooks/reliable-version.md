@@ -18,7 +18,7 @@ then fell into a loop: the model copied the history's placeholder for earlier pl
 placeholder counts as no plan) and adds the per-reply log. **Do not go back to the 14 Oct image while the model
 server takes native tool calls**; it is only safe with native calls off.
 
-Measured 15 Oct with native calls, one case at a time, 30 minutes a case: **5, 7, 4 right of 10 (mean 5.3)**, 5
+Measured 15 Oct with native calls, one case at a time, 30 minutes a case: **5, 8, 4 right of 10 (mean 5.7)**, 4
 wrong answers without a warning in 30; plans built in 9, 8, 6 cases. (The 14 Oct version, text calls: mean 4.7
 at 20 minutes a case, 2 of 30 wrong without a warning; R1 at 30 minutes: 5 right, 2 wrong unwarned in 10.)
 
