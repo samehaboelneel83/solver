@@ -788,10 +788,12 @@ def test_the_same_refusal_three_times_stops_the_turn_and_shows_the_error(tenants
     assert "came back 3 times" in answer and "**continue**" in answer
     assert "Technical detail" in answer and "The part of the plan it is about:" in answer
     assert sum(1 for e in events if e["type"] == "tool" and e["name"] == "check_spec") == core.MAX_SAME_ERROR
-    # Only the latest attempt stays whole in the history.
+    # Only the latest attempt stays whole in the history; the earlier ones keep no "spec" at all (15 Oct: a
+    # placeholder there was copied by the model as its next plan once calls went native).
     history = events[-1]["messages"]
-    specs = [c["function"]["arguments"] for m in history for c in m.get("tool_calls") or []]
-    assert sum("superseded by a later attempt" in a for a in specs) == len(specs) - 1
+    specs = [json.loads(c["function"]["arguments"]) for m in history for c in m.get("tool_calls") or []]
+    assert sum("spec" not in a and "superseded" in a for a in specs) == len(specs) - 1
+    assert "spec" in specs[-1]
     del model
 
 

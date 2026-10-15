@@ -3663,16 +3663,29 @@ class Agent:
         history grew by a whole spec and its error on each of 24 retries until the 32k context overflowed."""
         at = [i for i, m in enumerate(messages) if m["role"] == "assistant" and any(
             c["function"]["name"] in ("check_spec", "propose_plan") for c in m.get("tool_calls") or [])]
+        # The latest attempt that carried a whole plan stays in full too: a later patch is completed from it
+        # (app/agent/draft.py), and it is the plan the model should start again from.
+        whole = [i for i in at if any(isinstance(_args(c).get("spec"), dict) and _args(c)["spec"].get("ir")
+                                      for c in messages[i]["tool_calls"])]
+        if not at:
+            return
+        keep = {at[-1]} | ({whole[-1]} if whole else set())
         old_ids = set()
-        for i in at[:-1]:
+        for i in at:
+            if i in keep:
+                continue
             calls = []
             for c in messages[i]["tool_calls"]:
                 if c["function"]["name"] in ("check_spec", "propose_plan"):
                     old_ids.add(c["id"])
                     args = _args(c)
-                    if args.get("spec") != "(superseded by a later attempt)":
+                    if "spec" in args:
+                        # No "spec" key in what is kept: a placeholder there was copied by the model as its next
+                        # plan once calls went native (15 Oct: "spec": "(superseded by a later attempt)", refused
+                        # as "the spec has no ir", over and over).
                         c = {**c, "function": {**c["function"], "arguments": json.dumps(
-                            {"summary": str(args.get("summary", ""))[:300], "spec": "(superseded by a later attempt)"})}}
+                            {"summary": str(args.get("summary", ""))[:300],
+                             "superseded": "an earlier attempt; a later one replaced it"})}}
                 calls.append(c)
             messages[i]["tool_calls"] = calls
         for m in messages:

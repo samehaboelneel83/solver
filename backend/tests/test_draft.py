@@ -121,3 +121,33 @@ def test_a_seed_alone_is_a_patch():
     spec, note = draft.complete(seed_only, messages)
     assert spec["ir"] == FULL["ir"] and [p["name"] for p in spec["seed"]["parameters"]] == ["q"]
     assert note == "the plan was completed from your last one: the seed changed, everything else kept"
+
+
+def test_a_copied_placeholder_is_no_plan_and_the_last_whole_plan_is_kept():
+    """15 Oct, native tool calls: the model copied the history's placeholder ("spec": "(superseded by a later
+    attempt)") as its next plan, refused as "the spec has no ir" again and again."""
+    import copy as _copy
+
+    from app.agent import core, repair
+    from app.api import agent as agent_api
+
+    def call(cid, args):
+        return {"role": "assistant", "content": "", "tool_calls": [{"id": cid, "type": "function", "function": {
+            "name": "propose_plan", "arguments": json.dumps(args)}}]}
+
+    first = {"summary": "s1", "spec": _copy.deepcopy(FULL)}
+    second = {"summary": "s2", "spec": _copy.deepcopy(FULL)}
+    messages = [call("a", first), {"role": "tool", "tool_call_id": "a", "name": "propose_plan", "content": "x" * 500},
+                call("b", second), {"role": "tool", "tool_call_id": "b", "name": "propose_plan", "content": "y" * 500}]
+    agent = core.Agent(core.Settings(), agent_api._index, lambda *a, **k: {"ok": False}, core.Context("x", mode="model"))
+    agent._compact_attempts(messages)
+    kept_first = json.loads(messages[0]["tool_calls"][0]["function"]["arguments"])
+    assert "spec" not in kept_first and kept_first["superseded"]  # no plan-shaped placeholder to copy
+    assert json.loads(messages[2]["tool_calls"][0]["function"]["arguments"])["spec"] == FULL  # the latest whole one
+    spec, notes = repair.spec_of({"summary": "s3", "spec": "(superseded by a later attempt)"})
+    assert spec == {}
+    copied = messages + [call("c", {"summary": "s3", "spec": "(superseded by a later attempt)"})]
+    from app.agent import draft
+
+    done, note = draft.complete(spec, copied)
+    assert done.get("ir") == FULL["ir"] and note

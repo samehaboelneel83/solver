@@ -247,6 +247,9 @@ def spec_of(args: Any) -> tuple[dict[str, Any], list[str]]:
     notes: list[str] = []
     args = args if isinstance(args, dict) else {}
     raw = args.get("spec")
+    if isinstance(raw, str) and raw.strip().startswith(("(superseded", "(an earlier")):
+        # The history's placeholder copied as a plan: no plan given -- completed from the last whole one.
+        raw = None
     spec: Any = raw
     if isinstance(raw, str) and raw.strip():
         try:
