@@ -1271,3 +1271,14 @@ reference (16249). `common.decision_over` now splits a joined key into its parts
 p02 rescored right, no violation. R1 and R3 run 1 rescored with the same checker: unchanged (5 and 5). Unbuilt
 at the limit: p06, p08; wrong without a warning: p07 (69 violations). **R3 so far: 5, 7 right; 3 and 1 wrong
 unwarned** (R1: 5; 2). Run 3 under way.
+
+### R3, run 3 (17:19): 4 right of 10; built 6; wrong but solved 1 -- and the verdict
+
+R3 over three runs: **5, 7, 4 right (mean 5.3)**, wrong without a warning 5 of 30; per case: p01 and p09 right
+every time, p02/p03/p04/p05/p10 twice, p06, p07, p08 never. Against the 14 Oct reliable version (4.7, 2 of 30,
+text calls) it is more often right and more often silently wrong. The decision follows from the server: with
+native tool calls on, the 14 Oct image loops on the copied placeholder, so **R3's code (release/reliable 5576c40,
+image eeed56) is the reliable version from 15 Oct** -- tagged `reliable-2026-10-15`, pinned as
+`solver-backend:reliable`, the live container verified identical to the tag. The 14 Oct one stays tagged
+for a server with native calls off. Next on the list: the silent wrong answers (p07 every run, p02 and p10
+sometimes) -- the class the plan card does not yet warn about.
