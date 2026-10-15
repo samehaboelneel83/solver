@@ -260,6 +260,22 @@ def spec_of(args: Any) -> tuple[dict[str, Any], list[str]]:
                 spec = None
         else:
             notes.append("the spec was written as a JSON string; send it as an object next time")
+    if not isinstance(spec, dict) or not isinstance(spec.get("ir"), dict):
+        # Diagnosis (15 Oct, native tool calls): what the call carried when it yields no model -- the argument
+        # keys, the spec's type and size, and for a string the JSON error and the text around it.
+        import logging
+
+        detail = ""
+        if isinstance(raw, str):
+            try:
+                json.loads(raw)
+            except ValueError as exc:
+                at = getattr(exc, "pos", 0) or 0
+                detail = f" error={exc} around={raw[max(0, at - 80): at + 80]!r}"
+        logging.getLogger("solver.assistant").info(
+            "assistant.spec_shape keys=%s spec_type=%s spec_len=%s spec_keys=%s%s", sorted(args)[:12],
+            type(raw).__name__, len(raw) if isinstance(raw, (str, dict, list)) else 0,
+            sorted(raw)[:12] if isinstance(raw, dict) else "-", detail)
     if not isinstance(spec, dict):
         top = {k: args[k] for k in SPEC_KEYS if k in args}
         if "ir" in top or "seed" in top:
