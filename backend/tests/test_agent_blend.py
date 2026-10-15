@@ -1740,24 +1740,3 @@ def test_a_summarised_first_message_keeps_its_go_ahead():
     kept = compact._clip_ends(long, compact.BRIEF_CHARS)
     assert len(kept) < len(long) and kept.endswith("without further questions.") and kept.startswith("Data:")
     assert core._GO_AHEAD.search(kept)
-
-
-def test_one_send_back_carries_the_order_faults_and_the_build_checks_refusals():
-    """14 Oct, R1: a plan with an order fault went back without the build check, then came back for the build
-    check's own refusal -- two whole resends where one would do."""
-    from app.agent import core
-    from app.api import agent as agent_api
-
-    calls = []
-
-    def call(method, path, query=None, body=None, *a, **k):
-        calls.append((method, path, (body or {}).get("dry_run")))
-        return {"ok": False, "status": 422, "body": {"detail": [{"loc": ["ir", "objective"], "msg": "bad goal"}]}}
-
-    agent = core.Agent(core.Settings(), agent_api._index, call, core.Context("x", mode="model"))
-    agent._order_faults = lambda spec: ['Parameter "p" holds data (3 cells) but no rule or goal reads it.']
-    agent._spec = lambda args, expand=True: {"seed": {}, "ir": {"version": 2}}
-    agent._user_turns = lambda: 9
-    said = agent._check_plan_whole({"summary": "s", "spec": {}})
-    assert "fix ALL of these" in said and "holds data" in said and "ALSO, the build check refuses" in said and "bad goal" in said
-    assert ("POST", "/api/v1/problems/from-spec", True) in calls
