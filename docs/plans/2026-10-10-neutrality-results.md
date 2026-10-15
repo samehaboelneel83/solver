@@ -1301,3 +1301,19 @@ blind.
 Recommendation 5: the hidden set is measured when a build beats the reliable version on the tuning set; R3 does
 (5.7 against 4.7). `run_hidden.sh r3 S` on the live reliable version (eeed56, native calls), one case at a time,
 30 minutes a case, read blind. The earlier hidden readings: step 7, 4 of 16 right at 20 minutes a case.
+
+### The hidden set on the reliable version (15 Oct, 23:41; read blind): 4 right of 16; built 10; wrong but solved 4 (warned 1)
+
+| | step 7 (14 Oct reliable, text calls, 20 min) | reliable 15 Oct (native calls, 30 min) |
+|---|---|---|
+| right of 16 | 4 | 4 |
+| built | 6 | **10** |
+| wrong without a warning | 2 | 3 |
+| at the time limit | 10 | 8 |
+
+Reading: on cases it has never seen, the 15 Oct version builds many more plans (10 against 6) but is right no
+more often; the losses are still time (8 of 16 at the 30-minute limit, slow replies on most) and plans that build
+but are wrong. Three "the spec has no ir" refusals remain, through check_spec (a whole-spec check, not the
+proposal path the fix covers) -- a small defect to close. The tuning-set gain (4.7 -> 5.7) does not carry over to
+the hidden set at this size; the reliable version stays (it builds more, it works with the server as it is),
+and the ceiling is still the model's speed and modelling quality.
