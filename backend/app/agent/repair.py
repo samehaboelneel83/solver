@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.agent.files import FileRefused
+
 BODY_KEYS = ("body", "term", "of", "expr", "expression", "value", "sum")
 SCOPE_KEYS = ("for", "forall", "bindings", "over_set", "for_each", "foreach")
 
@@ -200,6 +202,18 @@ def _bound_rules(ir: dict[str, Any], seed: dict[str, Any], notes: list[str]) -> 
                          f'{name}_{key}_{ref}: {name}[{", ".join(names)}] {relation} {ref}')
 
 
+def _json_fault(raw: str) -> str:
+    try:
+        json.loads(raw)
+        return "the spec could not be read"
+    except json.JSONDecodeError as exc:
+        at = exc.pos
+        near = raw[max(0, at - 70): at] + " <<HERE>> " + raw[at: at + 40]
+        return (f"the spec is not valid JSON: {exc.msg} at character {at} of {len(raw)}, near: ...{near}... -- "
+                "a bracket or a comma is wrong there (count the closing brackets of the item before <<HERE>>); "
+                "send the spec as a JSON object, not as a string, and resend it whole")
+
+
 SEED_ONLY = ("entity_types", "relationship_types", "entities", "entities_from_file", "relationships",
              "relationships_from_file", "relationships_in_order", "distances_from_fields", "patterns_that_fit",
              "parameter_values",
@@ -237,7 +251,7 @@ def joined_keys(spec: dict[str, Any]) -> list[str]:
 SPEC_KEYS = ("ir", "seed", "domain_name", "domain_id", "problem_name", "scenario_name")
 
 
-def spec_of(args: Any) -> tuple[dict[str, Any], list[str]]:
+def spec_of(args: Any, strict: bool = False) -> tuple[dict[str, Any], list[str]]:
     """The spec of a check_spec / propose_plan call, wherever the model put it (the production-planning trace,
     10 October 2026: a local model's spec came back "has no ir" three times running): the `spec` argument as an
     object; or as a JSON string -- parsed, and repaired as tool calls are; or, with no `spec`, the spec's own keys
@@ -261,6 +275,10 @@ def spec_of(args: Any) -> tuple[dict[str, Any], list[str]]:
                 notes.append("the spec was written as a string with JSON slips; it was read and put right")
             except Exception:  # noqa: BLE001
                 spec = None
+                if strict:
+                    # Said as what it is, with where (16 Oct: told "the spec has no ir", the model sent the same
+                    # broken string again -- one hidden case four times). Never taken as a plan.
+                    raise FileRefused(_json_fault(raw)) from None
         else:
             notes.append("the spec was written as a JSON string; send it as an object next time")
     if not isinstance(spec, dict) or not isinstance(spec.get("ir"), dict):

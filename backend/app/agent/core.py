@@ -3229,7 +3229,7 @@ class Agent:
     # -- the plan: checked before the person sees it, built exactly as approved --
     def _spec(self, args: dict, expand: bool = True) -> dict:
         """The spec as the model wrote it; expanded, its file references become rows."""
-        spec, notes = agent_repair.spec_of(args)
+        spec, notes = agent_repair.spec_of(args, strict=True)  # FileRefused: a plan string that is not JSON
         self.joined.extend(notes)
         # A plan sent with only what changes is completed from the last plan proposed (app/agent/draft.py).
         spec, completed = agent_draft.complete(spec, self.messages)

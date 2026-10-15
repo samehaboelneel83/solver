@@ -192,6 +192,12 @@ def mend_brackets(s, limit=12):
         for c in commas[-4:]:
             candidates += [text[:c] + closer + text[c:] for closer in "}]"]
         candidates += [text[:c] + text[c + 1:] for c in closers[-4:]]
+        # A closer of the wrong kind -- "set": "zone"]] where }] was meant (16 Oct: the commonest slip of the
+        # native-call plans that came back as unparseable strings): the closer at the failure, or one of the last
+        # few before it, turned into the other kind.
+        swap = {"}": "]", "]": "}"}
+        for c in ([at] if at < len(text) and text[at] in swap else []) + closers[-6:]:
+            candidates.append(text[:c] + swap[text[c]] + text[c + 1:])
         best, best_at = None, at
         for candidate in candidates:
             reach = _error_at(candidate)
