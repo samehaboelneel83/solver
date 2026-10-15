@@ -1234,3 +1234,13 @@ version + the reply logs), redeployed so the backend drops its cached "no native
 R1 is the server's. First replies: `finish=tool_calls`, about 150 characters of prose around each call (R1: about
 1,300 characters, 18% of the writing), the calls themselves still 4,000-6,500 characters. `run_r3.sh`: three
 runs, one case at a time, 30 minutes a case, read against R1 (5 right, 2 wrong unwarned, 49 whole proposals).
+
+**R3, first start stopped (09:16) -- a defect native calls exposed.** p04 and p06 were refused "the spec has no
+ir" again and again (25 times in an hour). A diagnostic log line (`assistant.spec_shape`) showed why: the model
+sent `"spec": "(superseded by a later attempt)"` -- the platform's own placeholder for earlier plan attempts in
+the history, which the model copied as its next plan once its calls were native. It also erased the earlier
+whole plans, so a patch had nothing to be completed from. **Fix** (release/reliable 5576c40, tests updated, 155
+pass): earlier attempts keep a "superseded" note and no spec; the latest attempt with a whole plan stays in full;
+a spec that is the placeholder counts as no plan and is completed from it. **R3 restarted 10:04** on image
+eeed56 (the reliable version + the logs + this fix), three serial runs, read against R1. (R3 is the server's
+native calls and this fix together: the fix is what makes native calls usable at all.)
