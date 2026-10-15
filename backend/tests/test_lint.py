@@ -158,3 +158,27 @@ def test_a_pair_parameter_given_one_way_round_only_is_named():
     found = lint.one_way(seed)
     assert [f["what"] for f in found] == ["shared"]
     assert "given one way round only (3 pairs" in found[0]["said"]
+
+
+def test_one_number_given_only_as_a_default_and_never_read_is_named():
+    """16 Oct mission, Phase D (p07, R3 run 1): battery_initial = 600 was declared as ONE number for the whole
+    problem -- a default, no cell -- and no rule read it; the first hour's stock started at 0 and the answer broke
+    the battery's limit with no warning. The cells-only check never saw it."""
+    seed = {"parameters": [{"name": "battery_initial", "index": [], "default_value": 600},
+                           {"name": "battery_capacity", "index": [], "default_value": 1200},
+                           {"name": "spare", "index": [], "default_value": 0}]}
+    ir = {"version": 2, "sets": ["hour"], "parameters": {"battery_capacity": {"index": []}},
+          "variables": {"level": {"index": ["hour"], "domain": "continuous", "lower": 0}},
+          "constraints": [{"id": "c_cap", "forall": [{"index": "h", "set": "hour"}],
+                           "left": {"var": "level", "index": ["h"]}, "relation": "<=",
+                           "right": {"par": "battery_capacity"}, "severity": "hard"}],
+          "objective": {"sense": "minimize", "terms": []}}
+    found = lint.unread(ir, seed)
+    assert [f["what"] for f in found] == ["battery_initial"]
+    assert "battery_initial = 600 is given and no rule or goal reads it" in found[0]["said"]
+    ir["constraints"][0]["right"] = {"add": [{"par": "battery_capacity"}, {"par": "battery_initial"}]}
+    assert lint.unread(ir, seed) == []
+    # Given as a cell, it is counted once, as before.
+    seed["parameter_values"] = [{"parameter": "battery_initial", "entities": [], "value": 600}]
+    ir["constraints"][0]["right"] = {"par": "battery_capacity"}
+    assert [f["what"] for f in lint.unread(ir, seed)] == ["battery_initial"]

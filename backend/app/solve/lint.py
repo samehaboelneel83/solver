@@ -194,6 +194,18 @@ def unread(ir: dict[str, Any], seed: dict[str, Any]) -> list[dict[str, Any]]:
         if name not in pars and name not in attrs:
             found.append({"kind": "unread", "what": name, "values": count,
                           "said": f"{name} is given {count} value(s) and no rule or goal reads it"})
+    # ONE number for the whole problem given only as the parameter's default (no cell): the same fault, which the
+    # cells above never see (16 Oct mission, Phase D: p07, R3 run 1 -- battery_initial = 600 declared, no rule read
+    # it, the first hour's stock started at 0, and the answer broke the battery's limit with no warning).
+    for par in seed.get("parameters") or []:
+        if not isinstance(par, dict) or par.get("index") or not isinstance(par.get("name"), str):
+            continue
+        name, value = par["name"], par.get("default_value")
+        if name in cells or name in pars or name in attrs or isinstance(value, bool)                 or not isinstance(value, (int, float)) or float(value) == 0:
+            continue
+        shown = int(value) if float(value).is_integer() else value
+        found.append({"kind": "unread", "what": name, "values": 1,
+                      "said": f"{name} = {shown} is given and no rule or goal reads it"})
     return found[:MOST]
 
 
