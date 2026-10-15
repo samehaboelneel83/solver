@@ -158,7 +158,7 @@ def test_sizes_follow_the_server_context(monkeypatch):
     assert big.s.result_chars == 262144 // 2  # kept whole on disk; the conversation gets a preview
     small, _ = _agent(monkeypatch, context=32768)
     assert small.s.result_chars == 32768 // 2
-    many = replace(core.Settings(), max_tokens=16384, plan_max_tokens=32768)
+    many = replace(core.Settings(), max_tokens=16384, plan_max_tokens=32768, reply_cap=0)
     monkeypatch.setattr(core, "server_context", lambda s: 32768)
     from app.main import app
     a = core.Agent(many, core.ApiIndex(app.openapi()), lambda *a, **k: {}, core.Context("x", mode="model"))
@@ -166,6 +166,10 @@ def test_sizes_follow_the_server_context(monkeypatch):
     monkeypatch.setattr(core, "server_context", lambda s: 262144)
     b = core.Agent(many, core.ApiIndex(app.openapi()), lambda *a, **k: {}, core.Context("x", mode="model"))
     assert b.reply_tokens == 32768
+    # With the reply cap (16 Oct, E2: LLM_REPLY_CAP, 8,192 by default) no reply is planned past it.
+    capped = core.Agent(replace(many, reply_cap=8192), core.ApiIndex(app.openapi()), lambda *a, **k: {},
+                        core.Context("x", mode="model"))
+    assert capped.reply_tokens == 8192
 
 
 def test_a_long_result_is_previewed_and_read_in_parts(monkeypatch, tmp_path):
