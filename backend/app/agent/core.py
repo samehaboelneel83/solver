@@ -50,6 +50,7 @@ Settings (environment):
 
 from __future__ import annotations
 
+import collections
 import json
 import logging
 import os
@@ -99,6 +100,11 @@ class Settings:
     #: 240 since 11 October 2026 (getting-better plan, lever 1.2): at this model's rate 4 minutes is 12,000
     #: tokens, more than any right plan needed, and one 7-minute reply already cost a case its 20 minutes.
     reply_seconds: float = field(default_factory=lambda: float(_env("LLM_REPLY_SECONDS", "240")))
+    #: The most tokens one reply may write, whatever LLM_MAX_TOKENS and LLM_PLAN_MAX_TOKENS say (0: no cap).
+    #: 8192 since 16 October 2026 (hidden-accuracy mission, E2): of 1,337 replies that finished on 15 October
+    #: only 7 wrote more than 8,192 tokens (p99 6,256), all of them long prose before a plan; the 27 that ran to
+    #: the 16,384 limit wrote prose with no call, about 220 s each, up to four in a row in one case.
+    reply_cap: int = field(default_factory=lambda: int(_env("LLM_REPLY_CAP", "8192")))
     #: Past this share of the context, the older conversation is summarized (app.agent.compact).
     compact_at: float = field(default_factory=lambda: float(_env("LLM_COMPACT_AT", "0.6")))
     #: The most a model call carries before the older conversation is summarized, whatever the context:
@@ -1090,7 +1096,21 @@ def llm_chat(settings: Settings, messages: list[dict], native: bool | None,
         choice.get("finish_reason"), len(str(message.get("content") or "")),
         ",".join(f"{(c.get('function') or {}).get('name')}:{len(str((c.get('function') or {}).get('arguments') or ''))}"
                  for c in calls if isinstance(c, dict)) or "-")
+    if choice.get("finish_reason") == "length":
+        logging.getLogger("solver.assistant").info("assistant.cut_shape %s", cut_shape(str(message.get("content") or "")))
     return message, native is not False
+
+
+def cut_shape(text: str) -> str:
+    """What a reply cut at the length limit was made of, without its words (it may be a hidden case's text): how
+    many lines, how many distinct, how often the commonest line came back, code fences, braces, and the share of
+    the text that is its last 2,000 characters repeated (a model writing the same thing in circles)."""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    top = max(collections.Counter(lines).values()) if lines else 0
+    tail = text[-2000:]
+    loops = text.count(tail[:200]) if len(text) > 4000 and tail[:200].strip() else 0
+    return (f"chars={len(text)} lines={len(lines)} distinct={len(set(lines))} top_repeat={top} "
+            f"fences={text.count('```')} braces={text.count('{')} tail_seen={loops}")
 
 
 def thinking_for(messages: list[dict]) -> str:
@@ -2466,6 +2486,8 @@ class Agent:
         self.did_work = False  # a tool changed or made something this turn (what a reply may claim)
         self.reply_tokens = min(settings.plan_max_tokens if self.modelling else settings.max_tokens,
                                 max(2048, self.s.context // 4))
+        if settings.reply_cap > 0:
+            self.reply_tokens = min(self.reply_tokens, settings.reply_cap)
         self.built: dict | None = None
         self.messages: list[dict] = []
         self.events: list[dict] = []  # raised by a tool, sent after its result (a re-placed file)
