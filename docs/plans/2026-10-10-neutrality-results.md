@@ -1244,3 +1244,22 @@ pass): earlier attempts keep a "superseded" note and no spec; the latest attempt
 a spec that is the placeholder counts as no plan and is completed from it. **R3 restarted 10:04** on image
 eeed56 (the reliable version + the logs + this fix), three serial runs, read against R1. (R3 is the server's
 native calls and this fix together: the fix is what makes native calls usable at all.)
+
+### R3, run 1 (15 Oct, 11:45; native calls + the placeholder fix; one case at a time): 5 right of 10; built 9; wrong but solved 4 (warned 1)
+
+| case | built | first | right | viol | warned | min |
+|---|---|---|---|---|---|---|
+| p01 | yes | yes | yes | 0 | 0 | 3.8 |
+| p02 | yes | yes | yes | 0 | 0 | 4.4 |
+| p03 | yes | no | yes | 0 | 3 | 5.8 |
+| p04 | yes | yes | yes | 0 | 0 | 4.5 |
+| p05 | yes | no | no | 0 | 0 | 24.7 |
+| p06 | no | no | no | 0 | 0 | 30 |
+| p07 | yes | yes | no | 79 | 0 | 6.5 |
+| p08 | yes | no | no | 1 | 3 | 5.6 |
+| p09 | yes | yes | yes | 0 | 0 | 4.8 |
+| p10 | yes | yes | no | 0 | 0 | 6.9 |
+
+Against R1: right the same (5), **built 9 against 7**, faster (median about 5 minutes a built case), but 3 wrong
+without a warning against 2, and 116 whole proposals against 49 -- with cheap native calls the model proposes more
+often. No "the spec has no ir" refusal in the run. Runs 2 and 3 under way.
