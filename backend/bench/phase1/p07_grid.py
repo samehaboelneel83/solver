@@ -189,7 +189,11 @@ def _by_word(rows, hours, gens):
             if any(w in low for w in words) and not any(a in low for a in avoid):
                 return table[name]
         return None
-    return dict(p=pick(per_gh, ("gen", "output", "power", "diesel", "prod")) or
+    # The output first by its own words, then a generator decision that is not its on/off or start (15 Oct, R3:
+    # "gen_on" matched "gen" before "gen_output" did, and a right plan was scored with 69 violations).
+    switch = ("_on", "on_", "start", "commit", "status", "run", "up")
+    return dict(p=pick(per_gh, ("output", "power", "prod", "kwh")) or
+                pick(per_gh, ("gen", "diesel"), switch) or
                 next((v for v in per_gh.values() if any(x not in (0, 1) for x in v.values())), None),
                 on=pick(per_gh, ("on", "commit", "status", "run")) ,
                 ch=pick(per_h, ("charge",), ("dis",)), dis=pick(per_h, ("dis",)),

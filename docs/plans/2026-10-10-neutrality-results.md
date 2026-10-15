@@ -1282,3 +1282,10 @@ image eeed56) is the reliable version from 15 Oct** -- tagged `reliable-2026-10-
 `solver-backend:reliable`, the live container verified identical to the tag. The 14 Oct one stays tagged
 for a server with native calls off. Next on the list: the silent wrong answers (p07 every run, p02 and p10
 sometimes) -- the class the plan card does not yet warn about.
+
+**Checker fix, p07 (17:55).** The p07 checker picked the generator output by the word "gen", and a decision named
+`gen_on` (the on/off) matched before `gen_output`: R3 run 2's p07 reached exactly the reference goal
+(26803.944784) and was scored with 69 violations. It now prefers output-like names and skips on/off and start
+decisions. Rescored: R3 run 2's p07 **right** (no violation); R3 run 1's p07 still wrong (7 real violations); all 18
+other saved p07 runs unchanged. **R3 now: 5, 8, 4 right (mean 5.7); 4 wrong without a warning in 30.** The
+reliable version (15 Oct) is this build.
