@@ -1225,3 +1225,12 @@ into the model rewriting whole plans at about 80 tokens a second. **The next gai
 need the owner:** (1) start the vLLM server on 10.125.18.189 with native tool calling
 (`--enable-auto-tool-choice --tool-call-parser ...`), so calls stop travelling as text; (2) a faster or stronger
 model. Either can be measured against R1 (5 right, 2 wrong unwarned, 49 whole proposals) the same day.
+
+## R3 (15 Oct, 08:13): the model server takes native tool calls (enabled by the owner)
+
+The owner restarted the vLLM server on 10.125.18.189 with native tool calling; checked from this machine
+(`finish_reason: tool_calls`). R3 is **R1's exact image** (`solver-backend:reliable-r1`, b3e3e8: the reliable
+version + the reply logs), redeployed so the backend drops its cached "no native tools", so the only change from
+R1 is the server's. First replies: `finish=tool_calls`, about 150 characters of prose around each call (R1: about
+1,300 characters, 18% of the writing), the calls themselves still 4,000-6,500 characters. `run_r3.sh`: three
+runs, one case at a time, 30 minutes a case, read against R1 (5 right, 2 wrong unwarned, 49 whole proposals).
