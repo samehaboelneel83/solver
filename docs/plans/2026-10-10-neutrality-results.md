@@ -1289,3 +1289,15 @@ sometimes) -- the class the plan card does not yet warn about.
 decisions. Rescored: R3 run 2's p07 **right** (no violation); R3 run 1's p07 still wrong (7 real violations); all 18
 other saved p07 runs unchanged. **R3 now: 5, 8, 4 right (mean 5.7); 4 wrong without a warning in 30.** The
 reliable version (15 Oct) is this build.
+
+**R3's silent wrong answers (4 of 30), by case:** p05 and p10 (run 1) built a different goal, no rule broken
+(checker cost 3,065,350 against the model's 154,992; 239,110 against 190,110); p07 (run 1) left out the battery's
+capacity (the level reaches 1,300 of 1,200 kWh); p02 (run 3) wrote its approved-pairs rule too loosely (C004 served
+from warehouses not approved for it). Each has its own cause; no single check would catch them, so none is patched
+blind.
+
+## The hidden set on the reliable version (15 Oct, 18:03)
+
+Recommendation 5: the hidden set is measured when a build beats the reliable version on the tuning set; R3 does
+(5.7 against 4.7). `run_hidden.sh r3 S` on the live reliable version (eeed56, native calls), one case at a time,
+30 minutes a case, read blind. The earlier hidden readings: step 7, 4 of 16 right at 20 minutes a case.
