@@ -110,6 +110,9 @@ class Settings:
     #: exp1 were the same lines over and over (11 to 121 distinct of 164 to 334), about 107 s each, ten in one
     #: case.
     stream_loops: bool = field(default_factory=lambda: _env("LLM_STREAM_LOOPS", "1") not in ("0", "false", "no"))
+    #: The temperature of the replies right after one that ran away (0: as LLM_TEMPERATURE). 0.7 since 16 October
+    #: 2026 (E4): in exp2, of 52 replies stopped as loops the same request again looped 25 times.
+    loop_temperature: float = field(default_factory=lambda: float(_env("LLM_LOOP_TEMPERATURE", "0.7")))
     #: Past this share of the context, the older conversation is summarized (app.agent.compact).
     compact_at: float = field(default_factory=lambda: float(_env("LLM_COMPACT_AT", "0.6")))
     #: The most a model call carries before the older conversation is summarized, whatever the context:
@@ -1101,11 +1104,11 @@ def llm_chat(settings: Settings, messages: list[dict], native: bool | None,
     usage = data.get("usage") or {}
     calls = message.get("tool_calls") or []
     logging.getLogger("solver.assistant").info(
-        "assistant.reply seconds=%.1f read=%s wrote=%s thinking=%s finish=%s text=%d calls=%s",
+        "assistant.reply seconds=%.1f read=%s wrote=%s thinking=%s finish=%s text=%d calls=%s temp=%s",
         time.monotonic() - started, usage.get("prompt_tokens"), usage.get("completion_tokens"), settings.thinking,
         choice.get("finish_reason"), len(str(message.get("content") or "")),
         ",".join(f"{(c.get('function') or {}).get('name')}:{len(str((c.get('function') or {}).get('arguments') or ''))}"
-                 for c in calls if isinstance(c, dict)) or "-")
+                 for c in calls if isinstance(c, dict)) or "-", settings.temperature)
     if choice.get("finish_reason") == "length":
         logging.getLogger("solver.assistant").info(
             "assistant.cut_shape %s%s", cut_shape(str(message.get("content") or "")),
@@ -3867,7 +3870,11 @@ class Agent:
                 continue
             if not result.startswith(("Not valid yet", "The spec does not build")):
                 continue
-            key = re.sub(r"\d+", "#", result.split(SAME_AGAIN)[0])[:400]
+            # A plan string that is not valid JSON is a slip of transcription, a different one each time: only the
+            # same string sent again (the same fault at the same character) is "the same" (16 Oct, exp2: three
+            # different slips, masked to one key, ended h15's turn four times -- a case right in both baseline runs).
+            key = (result.split(SAME_AGAIN)[0][:900] if "not valid JSON" in result
+                   else re.sub(r"\d+", "#", result.split(SAME_AGAIN)[0])[:400])
             self.refusals[key] = self.refusals.get(key, 0) + 1
             if self.refusals[key] < MAX_SAME_ERROR:
                 continue
@@ -4176,13 +4183,16 @@ class Agent:
                 # Ran to the limit and called nothing: thinking that never ended, or a spec drafted in prose.
                 # Never shown. First the same step again with thinking off (the history is unchanged), then
                 # the model is told; at the end, a short honest line instead of the ramble.
+                hot = (replace(self.s, temperature=max(self.s.temperature, self.s.loop_temperature))
+                       if self.s.loop_temperature > 0 else self.s)
                 if not rethought:
-                    rethought, settings = True, replace(self.s, thinking="off")
+                    rethought, settings = True, replace(hot, thinking="off")
                     yield {"type": "note", "text": "The model's reply ran too long; asking again, without thinking aloud."}
                     continue
                 if nudge("rambled"):
                     messages.append({"role": "assistant", "content": "(a reply that ran to the length limit; not shown)"})
                     messages.append({"role": "user", "content": RAMBLED})
+                    settings = hot
                     continue
                 content = ("I could not finish this step: my replies kept running too long. Say \"continue\" and "
                            "I will try again, or tell me which part to do first.")
