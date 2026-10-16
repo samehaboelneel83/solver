@@ -105,6 +105,11 @@ class Settings:
     #: only 7 wrote more than 8,192 tokens (p99 6,256), all of them long prose before a plan; the 27 that ran to
     #: the 16,384 limit wrote prose with no call, about 220 s each, up to four in a row in one case.
     reply_cap: int = field(default_factory=lambda: int(_env("LLM_REPLY_CAP", "8192")))
+    #: Stream each reply and stop it once it repeats itself (0: wait for the whole reply). 1 since 16 October
+    #: 2026 (hidden-accuracy mission, E3): all 27 replies cut at the limit in the first ten hidden cases of
+    #: exp1 were the same lines over and over (11 to 121 distinct of 164 to 334), about 107 s each, ten in one
+    #: case.
+    stream_loops: bool = field(default_factory=lambda: _env("LLM_STREAM_LOOPS", "1") not in ("0", "false", "no"))
     #: Past this share of the context, the older conversation is summarized (app.agent.compact).
     compact_at: float = field(default_factory=lambda: float(_env("LLM_COMPACT_AT", "0.6")))
     #: The most a model call carries before the older conversation is summarized, whatever the context:
@@ -1059,6 +1064,9 @@ def llm_chat(settings: Settings, messages: list[dict], native: bool | None,
     if native is not False:
         payload["tools"] = tools or TOOLS
         payload["tool_choice"] = "auto"
+    if settings.stream_loops:
+        payload["stream"] = True
+        payload["stream_options"] = {"include_usage": True}
     req = urllib.request.Request(
         settings.base_url + "/chat/completions", data=json.dumps(payload).encode(), method="POST",
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {settings.api_key}"})
@@ -1068,7 +1076,9 @@ def llm_chat(settings: Settings, messages: list[dict], native: bool | None,
         cap = min(settings.timeout, settings.reply_seconds) if settings.reply_seconds > 0 else settings.timeout
         started = time.monotonic()
         with urllib.request.urlopen(req, timeout=cap) as r:
-            data = json.loads(r.read())
+            streamed = payload.get("stream") and "event-stream" in str(
+                (getattr(r, "headers", None) or {}).get("Content-Type", ""))
+            data = _read_stream(r, settings, started, cap) if streamed else json.loads(r.read())
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", "replace")
         if native is None and e.code == 400 and "tool" in body.lower():
@@ -1097,8 +1107,81 @@ def llm_chat(settings: Settings, messages: list[dict], native: bool | None,
         ",".join(f"{(c.get('function') or {}).get('name')}:{len(str((c.get('function') or {}).get('arguments') or ''))}"
                  for c in calls if isinstance(c, dict)) or "-")
     if choice.get("finish_reason") == "length":
-        logging.getLogger("solver.assistant").info("assistant.cut_shape %s", cut_shape(str(message.get("content") or "")))
+        logging.getLogger("solver.assistant").info(
+            "assistant.cut_shape %s%s", cut_shape(str(message.get("content") or "")),
+            " stopped=loop" if data.get("_loop") else "")
     return message, native is not False
+
+
+#: A reply is going in circles when the last LOOP_PROBE characters have already been written LOOP_SEEN times,
+#: once it is LOOP_FROM characters long. A plan, a table or an answer does not repeat 200 characters word for
+#: word four times; the 27 loops of 16 October repeated their last 200 characters 11 to 46 times.
+LOOP_PROBE, LOOP_SEEN, LOOP_FROM = 200, 4, 4000
+
+
+def in_a_loop(text: str) -> bool:
+    if len(text) < LOOP_FROM:
+        return False
+    probe = text[-LOOP_PROBE:]
+    return bool(probe.strip()) and text.count(probe) >= LOOP_SEEN
+
+
+def _read_stream(r, settings: Settings, started: float, cap: float) -> dict:
+    """A streamed reply put back together as the one-piece reply the rest reads: content, thinking, tool calls
+    (their pieces joined by index), finish reason and usage. A reply that repeats itself is stopped there and
+    comes back as cut at the length limit, marked `_loop` (closing the stream ends it on the server too)."""
+    content, thought = [], []
+    calls: dict[int, dict] = {}
+    finish, usage, loop = None, {}, False
+    size = checked = 0
+    for raw in r:
+        line = raw.decode("utf-8", "replace").strip()
+        if not line.startswith("data:"):
+            continue
+        body = line[5:].strip()
+        if body == "[DONE]":
+            break
+        try:
+            chunk = json.loads(body)
+        except ValueError:
+            continue
+        usage = chunk.get("usage") or usage
+        for choice in chunk.get("choices") or []:
+            delta = choice.get("delta") or {}
+            if delta.get("content"):
+                content.append(delta["content"])
+                size += len(delta["content"])
+            if delta.get("reasoning_content") or delta.get("reasoning"):
+                piece = delta.get("reasoning_content") or delta.get("reasoning")
+                thought.append(piece)
+                size += len(piece)
+            for tc in delta.get("tool_calls") or []:
+                slot = calls.setdefault(int(tc.get("index", len(calls))),
+                                        {"id": None, "type": "function", "function": {"name": "", "arguments": ""}})
+                if tc.get("id"):
+                    slot["id"] = tc["id"]
+                fn = tc.get("function") or {}
+                if fn.get("name"):
+                    slot["function"]["name"] += fn["name"]
+                if fn.get("arguments"):
+                    slot["function"]["arguments"] += fn["arguments"]
+            finish = choice.get("finish_reason") or finish
+        if size - checked >= 1000:
+            checked = size
+            if not calls and (in_a_loop("".join(content)) or in_a_loop("".join(thought))):
+                finish, loop = "length", True
+                break
+        if cap and time.monotonic() - started > cap:
+            raise _slow_or_down(settings, started)
+    message: dict[str, Any] = {"role": "assistant", "content": "".join(content) or None}
+    if thought:
+        message["reasoning_content"] = "".join(thought)
+    if calls:
+        message["tool_calls"] = [dict(c, id=c["id"] or "call_" + uuid.uuid4().hex[:10])
+                                 for _, c in sorted(calls.items())]
+    if loop and not usage.get("completion_tokens"):
+        usage = dict(usage, completion_tokens=f"~{size // 4}")  # prose: about 4 characters a token
+    return {"choices": [{"message": message, "finish_reason": finish}], "usage": usage, "_loop": loop}
 
 
 def cut_shape(text: str) -> str:
