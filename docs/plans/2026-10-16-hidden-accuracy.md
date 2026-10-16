@@ -16,14 +16,16 @@ says so.
 |---|---|---|---|---|---|
 | 14 Oct (reliable-2026-10-14, text calls) | c37772 | 4 | 6 | 2 | 10 |
 | 15 Oct `r3` (reliable-2026-10-15, native calls) | eeed56 | 4 | 10 | 3 | 8 |
-| 16 Oct `rel15b` (same image, same settings, rerun) | eeed56 | *running* | | | |
+| 16 Oct `rel15b` (same image, same settings, rerun) | eeed56 | 6 | 10 | 3 | 6 |
 
 Settings in the live container: native tool calls (`LLM_TOOL_MODE=auto`), thinking off, `LLM_MAX_TOKENS=16384`,
 `LLM_PLAN_MAX_TOKENS=32768`, temperature 0.2, 30 minutes a case, one case at a time.
 
-**Determinism.** The model samples at temperature 0.2 with no seed, so a rerun is not the same run: the practice
-set read 5, 8, 4 right in three runs of this image. A difference of one or two hidden cases between two runs is
-within that spread; a verdict needs repeated runs.
+**Determinism.** The model samples at temperature 0.2 with no seed, so a rerun is not the same run. The rerun of
+the same image on the same settings read **6** right where the 15 Oct run read 4: h02, h07 and h14 went from
+timeout to right, h12 from right to wrong (23 violations), h01 from wrong to timeout. Only h03, h06 and h15 were
+right both times. **The baseline is therefore 4 to 6 of 16 (mean 5)**, and a change must beat that by more than
+two cases in one run, or be measured in repeated runs, before it is called an improvement.
 
 **Scoring fixes of 15 Oct (p02, p07).** Kept and covered by `backend/tests/test_bench_checkers.py` (4 tests, pass):
 a decision keyed by a joined pair ("W01-C001"), keys in another order, a joined key outside the sets (not taken),
@@ -115,4 +117,18 @@ skipping it would only replace one reply with another. It was not done.
 
 ## 6. Results
 
-*Pending: the baseline rerun and the experiment runs.*
+### exp1 (E1 + E2 + D1; image dbd155, commit 1efa04d), hidden run, first ten cases
+
+Right: h03, h06, h07 (3 of 10; the baseline runs had 3 and 4 of the same ten). The JSON-fault refusal of E1 was
+sent 12 times. **All 27 replies cut at the new 8,192 limit had no call and were loops**, by their logged shape:
+11 to 121 distinct lines of 164 to 334, the last 200 characters seen 11 to 46 times. Each cost about 107 s
+(before: about 220 s), but there were more of them: 10 in h09, 7 in h10, 6 in h05, all three timeouts.
+
+**E3 (commit 8e38bef)**, from that evidence: replies are streamed, and one whose last 200 characters have already
+been written four times (from 4,000 characters on) is stopped there and handled as a reply cut at the limit.
+Tests: `backend/tests/test_reply_loops.py` (a loop is stopped before 8,000 characters; an 800-row reply that
+does not repeat is kept whole; no gold model written out as pretty-printed JSON trips it at any length; a
+streamed tool call is joined from its pieces; with the setting off nothing is streamed). Checked live against the
+model server: a streamed tool call and a streamed text reply read back whole.
+
+exp2 = exp1 + E3 (image 9f2d19, commit 8e38bef): measured next, on the hidden set twice and the practice set once.
