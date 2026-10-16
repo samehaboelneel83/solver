@@ -139,6 +139,13 @@ model server: a streamed tool call and a streamed text reply read back whole.
 | rel15b (baseline rerun) | eeed56 | 6 | 10 | 3 | 6 | 0 |
 | exp1 (E1+E2+D1) | dbd155 | 5 | 10 | 3 | 6 | 0 |
 | exp2 (+E3) | 9f2d19 | 5 | 9 | 3 | 2 | 5 |
+| exp2b (exp2 again) | 9f2d19 | 6 | 13 | 5 | 2 | 3 |
+
+exp2 over two runs: mean 5.5 right (baseline 5), built 11 (baseline 10), timeouts 2 (baseline 7), wrong without a
+warning 4 (baseline 3). In exp2b h01 was solved to optimality but the driver found no "alternatives" button, so
+the checker could not read the plan; it counts as not right (a harness gap, not read further: the case is hidden).
+More plans now get built in time, and more of the extra ones are wrong: the remaining limit is the model's
+formulation, not time.
 
 Practice (one case at a time, 30 min): exp2 read 5 right of 10, built 9, 2 wrong without a warning (R3 runs of the
 baseline: 5, 8, 4). Neither experiment is outside the baseline's spread.
