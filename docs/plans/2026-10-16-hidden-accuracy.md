@@ -131,4 +131,35 @@ does not repeat is kept whole; no gold model written out as pretty-printed JSON 
 streamed tool call is joined from its pieces; with the setting off nothing is streamed). Checked live against the
 model server: a streamed tool call and a streamed text reply read back whole.
 
-exp2 = exp1 + E3 (image 9f2d19, commit 8e38bef): measured next, on the hidden set twice and the practice set once.
+### Hidden results so far (`python -m bench.phase1.blind`)
+
+| Run | Image | Right | Built | Wrong, no warning | Timeouts (30 min) | Ended early, not built |
+|---|---|---|---|---|---|---|
+| r3 (baseline, 15 Oct) | eeed56 | 4 | 10 | 3 | 8 | 0 |
+| rel15b (baseline rerun) | eeed56 | 6 | 10 | 3 | 6 | 0 |
+| exp1 (E1+E2+D1) | dbd155 | 5 | 10 | 3 | 6 | 0 |
+| exp2 (+E3) | 9f2d19 | 5 | 9 | 3 | 2 | 5 |
+
+Practice (one case at a time, 30 min): exp2 read 5 right of 10, built 9, 2 wrong without a warning (R3 runs of the
+baseline: 5, 8, 4). Neither experiment is outside the baseline's spread.
+
+**What exp2 showed.** E3 works as built: 52 replies were stopped as loops, after a median of 30 s (before: 107 s at
+the 8,192 cap, 220 s at 16,384). Timeouts fell from 6-8 to 2. But five cases now ended early without a plan
+(h05, h09, h10, h14, h15): their turns ended on the platform's own stops, and the test driver stops after three
+"continue"s. By the turn log: 9 of 16 cases ended at least one turn on "the same refusal three times" or "my
+replies kept running too long". Two causes, both from the evidence:
+
+- **h15** (right in both baseline runs) ended four turns on "the same refusal three times", and every one was the
+  E1 JSON-fault refusal: three *different* slips, the digits masked, read as one refusal. Before E1 the broken
+  string was answered "has no ir", which the stop never counted, and the model got there in the end.
+- After a reply stopped as a loop, **the same request again looped 25 times of 52**; the faster stop meant the
+  rambling stop came within minutes.
+
+**E4 (commit d295f35).** A JSON-fault refusal counts as "the same" only when the same string comes back (the same
+fault at the same character). The replies right after a runaway are sampled at temperature 0.7
+(`LLM_LOOP_TEMPERATURE`; 0 keeps the usual 0.2); every reply's log line now carries its temperature. Tests:
+`backend/tests/test_e4_stops.py` (4 pass: different slips do not end the turn; the same broken string three times
+still does; the replies after a runaway are at 0.7 and the next ordinary one back at 0.2; 0 keeps 0.2). The
+assistant's test files, 255, pass.
+
+exp3 = exp2 + E4 (image 8e91ce): queued after exp2's repeat, on the hidden set twice and the practice set once.
