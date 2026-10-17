@@ -41,6 +41,21 @@ has the fewest moving parts. The hidden set read 4 of 16 right on it (13 Oct).
 normalised) is identical to `release/reliable`; the live frontend bundle carries the last frontend commit on the
 branch (70004a0); health 200; migration 0122.
 
+## Candidate of 17 October 2026 (not yet the reliable version)
+
+Tag `candidate-2026-10-17` (d295f35, branch `exp/hidden-accuracy`), image `solver-backend:exp3` (8e91ce): the
+reliable version plus five measured changes (`docs/plans/2026-10-16-hidden-accuracy.md`). Hidden set: 10, 7, 8
+right of 16 (reliable: 4, 6); timeouts 3, 3, 4 (reliable: 8, 6); practice the same as reliable. It becomes the
+reliable version only by the owner's decision; until then the live image stays eeed56. To try it:
+
+```bash
+docker tag solver-backend:exp3 solver-backend:latest
+docker compose up -d --no-build backend worker
+```
+
+Back with "Go back to it" below. Rebuild from source: `git worktree add -f ../solver-exp3 candidate-2026-10-17
+--detach` and `docker build -t solver-backend:exp3 backend` there.
+
 ## Check what is running
 
 ```bash

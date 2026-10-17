@@ -142,6 +142,7 @@ model server: a streamed tool call and a streamed text reply read back whole.
 | exp2b (exp2 again) | 9f2d19 | 6 | 13 | 5 | 2 | 3 |
 | exp3 (+E4) | 8e91ce | **10** | 12 | 1 | 3 | 1 |
 | exp3b (exp3 again) | 8e91ce | **7** | 11 | 3 | 3 | 2 |
+| exp3c (exp3, third run) | 8e91ce | **8** | 11 | 3 | 4 | 1 |
 
 exp2 over two runs: mean 5.5 right (baseline 5), built 11 (baseline 10), timeouts 2 (baseline 7), wrong without a
 warning 4 (baseline 3). In exp2b h01 was solved to optimality but the driver found no "alternatives" button, so
@@ -206,4 +207,57 @@ single-value warning (D1) did not appear in any send-back of exp3; it may have s
 logged). The cases that never came right in any of the seven runs, h05, h09, h10, h13, h16, are where the work is:
 four of them loop most (h05, h09, h10, h13: 3 to 17 loops a run) and h16 is refused about 40 times a run.
 
-A third exp3 hidden run and a second practice run are under way.
+
+
+## 7. Final comparison with `reliable-2026-10-15`
+
+Candidate: tag `candidate-2026-10-17` = commit d295f35 on `exp/hidden-accuracy`, image `solver-backend:exp3`
+(8e91ce). Model, server and every setting the same as the baseline (qwen3.5, native tool calls, thinking off,
+temperature 0.2, 30 minutes a case, one case at a time); the new settings take their defaults
+(`LLM_REPLY_CAP=8192`, `LLM_STREAM_LOOPS=1`, `LLM_LOOP_TEMPERATURE=0.7`). No seed exists on this server.
+
+| Hidden set (16) | Baseline: r3, rel15b | Candidate: exp3, exp3b, exp3c |
+|---|---|---|
+| Right | 4, 6 (mean 5.0) | **10, 7, 8 (mean 8.3)** |
+| Built | 10, 10 | 12, 11, 11 |
+| Wrong without a warning | 3, 3 (mean 3.0) | 1, 3, 3 (mean 2.3) |
+| Timeouts at 30 minutes | 8, 6 (mean 7.0) | 3, 3, 4 (mean 3.3) |
+| Ended early, not built | 0, 0 | 1, 2, 1 |
+
+| Practice set (10) | Baseline R3 (3 runs) | Candidate (2 runs) |
+|---|---|---|
+| Right | 5, 8, 4 (mean 5.7) | 6, 5 (mean 5.5) |
+| Wrong without a warning | 3, 0, 1 | 0, 2 |
+
+Every candidate run is above the best baseline run on the hidden set; on the practice set the two are the same
+within their spread. The p02/p07 scoring fixes are unchanged (`test_bench_checkers.py`, 4 pass) and the hidden
+checkers were not touched.
+
+**Regression tests.** `test_spec_json.py` 13, `test_reply_cap.py` 5, `test_reply_loops.py` 5, `test_e4_stops.py` 4,
+`test_lint.py` 10 (one new), `test_agent_compact.py` 14 (one updated): all pass. The assistant's test files: 255
+pass. The full backend suite on the branch (before E3 and E4): 5,622 pass; 5 fail the same way on main (they need
+`scripts/` and `deploy/` mounted).
+
+**Commits on `exp/hidden-accuracy`.** 9ee0083 E1, 58dbabb E2, 1efa04d D1, f0e55e9 (test), 8e38bef E3, d295f35 E4.
+
+**Remaining blockers (from the evidence).**
+- h05, h09, h13: never right in nine runs. They loop most (3 to 17 stopped loops a run); after a loop the reply at
+  0.7 still loops about 4 times in 10.
+- h16: never right; refused about 40 times a run, the refusals vary.
+- h10 and h12: the same wrong plan over and over (11 and 23 violations in every run that built them): a rule of
+  the problem the model consistently writes wrong. Their formulation was not opened (hidden).
+- h01: once a plan the checker could not read (no "alternatives" button in the driver).
+- The model server is the time: 94-95% of a case's wall time is waiting for the model.
+
+**Next highest-value action.** The consistent wrong plans (h10, h12, and practice p05, p07, p08 that fail the same way
+in run after run) need the model to see its rules on the data: one written-out row of each rule (for example
+`pick[CTL006] <= pick[CTL004]` beside the link `CTL004 -> CTL006`, which shows the p08 dependency reversed, and the
+first hour of p07's battery balance, which shows the starting level missing). It is deterministic, measured first on
+the practice cases that fail that way, then on the hidden set as here.
+
+**The model.** Only qwen3.5 is served (10.125.18.189, context 262,144); nothing else runs on this machine (no GPU, no
+other model server), so no other model could be measured. What a change would buy, from these runs: model time is
+94-95% of wall time at about 80 tokens a second, so a server twice as fast would roughly halve each case's time;
+the cases that fail do so by the model's formulation (consistent wrong rules, loops), which only a stronger model
+or the next action above can change. Any larger model needs the owner's decision on hardware and download first;
+none was downloaded or configured.
