@@ -235,8 +235,8 @@ checkers were not touched.
 
 **Regression tests.** `test_spec_json.py` 13, `test_reply_cap.py` 5, `test_reply_loops.py` 5, `test_e4_stops.py` 4,
 `test_lint.py` 10 (one new), `test_agent_compact.py` 14 (one updated): all pass. The assistant's test files: 255
-pass. The full backend suite on the branch (before E3 and E4): 5,622 pass; 5 fail the same way on main (they need
-`scripts/` and `deploy/` mounted).
+pass. The full backend suite on the candidate (d295f35, with `scripts/` and `deploy/` mounted, 17 Oct): **5,638 pass, 0
+fail**, 34 skipped.
 
 **Commits on `exp/hidden-accuracy`.** 9ee0083 E1, 58dbabb E2, 1efa04d D1, f0e55e9 (test), 8e38bef E3, d295f35 E4.
 
