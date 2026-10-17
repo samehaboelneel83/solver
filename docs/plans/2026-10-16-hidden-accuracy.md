@@ -140,6 +140,8 @@ model server: a streamed tool call and a streamed text reply read back whole.
 | exp1 (E1+E2+D1) | dbd155 | 5 | 10 | 3 | 6 | 0 |
 | exp2 (+E3) | 9f2d19 | 5 | 9 | 3 | 2 | 5 |
 | exp2b (exp2 again) | 9f2d19 | 6 | 13 | 5 | 2 | 3 |
+| exp3 (+E4) | 8e91ce | **10** | 12 | 1 | 3 | 1 |
+| exp3b (exp3 again) | 8e91ce | **7** | 11 | 3 | 3 | 2 |
 
 exp2 over two runs: mean 5.5 right (baseline 5), built 11 (baseline 10), timeouts 2 (baseline 7), wrong without a
 warning 4 (baseline 3). In exp2b h01 was solved to optimality but the driver found no "alternatives" button, so
@@ -169,4 +171,39 @@ fault at the same character). The replies right after a runaway are sampled at t
 still does; the replies after a runaway are at 0.7 and the next ordinary one back at 0.2; 0 keeps 0.2). The
 assistant's test files, 255, pass.
 
-exp3 = exp2 + E4 (image 8e91ce): queued after exp2's repeat, on the hidden set twice and the practice set once.
+### exp3 (E1 + E2 + D1 + E3 + E4; image 8e91ce, commit d295f35)
+
+Hidden: **10 and 7 right of 16 (mean 8.5)**; both runs above the best baseline run (6). Practice: 6 right of 10,
+built 9, **no wrong answer without a warning** (baseline R3: 5, 8, 4; 3, 0, 1 unwarned).
+
+Right, case by case (R = right; seven hidden runs):
+
+| Case | r3 | rel15b | exp1 | exp2 | exp2b | exp3 | exp3b | Baseline right | exp3 right |
+|---|---|---|---|---|---|---|---|---|---|
+| h01 | | | | | | | R | 0/2 | 1/2 |
+| h02 | | R | | R | R | R | R | 1/2 | 2/2 |
+| h03 | R | R | R | R | R | R | | 2/2 | 1/2 |
+| h04 | | | | R | | R | R | 0/2 | 2/2 |
+| h05 | | | | | | | | 0/2 | 0/2 |
+| h06 | R | R | R | R | R | R | R | 2/2 | 2/2 |
+| h07 | | R | R | | | R | | 1/2 | 1/2 |
+| h08 | | | | | R | R | R | 0/2 | 2/2 |
+| h09 | | | | | | | | 0/2 | 0/2 |
+| h10 | | | | | | | | 0/2 | 0/2 |
+| h11 | | | | | | R | | 0/2 | 1/2 |
+| h12 | R | | | R | | R | | 1/2 | 1/2 |
+| h13 | | | | | | | | 0/2 | 0/2 |
+| h14 | | R | R | | R | R | R | 1/2 | 2/2 |
+| h15 | R | R | R | | R | R | R | 2/2 | 2/2 |
+| h16 | | | | | | | | 0/2 | 0/2 |
+
+**What is measured and what is not.** Measured: timeouts at 30 minutes fell from 8 and 6 to 3 and 3; replies stopped
+as loops now cost a median of 30 s; after a loop, the reply at 0.7 succeeded 53 times of 87 (61%; at 0.2 in exp2,
+26 of 52, 50%); the JSON-fault refusal replaced the "has no ir" loop. Not established: which change gave which
+right answer. h04 and h08, right in both exp3 runs, had no loop, no JSON fault and no new warning in their log in
+either run, and each was right once in exp2 as well: their gain is at least partly the run-to-run spread. The new
+single-value warning (D1) did not appear in any send-back of exp3; it may have shown on a card (cards are not
+logged). The cases that never came right in any of the seven runs, h05, h09, h10, h13, h16, are where the work is:
+four of them loop most (h05, h09, h10, h13: 3 to 17 loops a run) and h16 is refused about 40 times a run.
+
+A third exp3 hidden run and a second practice run are under way.
