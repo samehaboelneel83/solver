@@ -260,3 +260,58 @@ def findings(ir: dict[str, Any], seed: dict[str, Any], compiled: Compiled | None
     """The checks; a model that did not compile has only those of its data."""
     out = never_helps(compiled) if compiled is not None else []
     return out + unread(ir, seed) + as_default(seed) + one_way(seed)
+
+
+#: The rules shown written out on the data, one row each (16-17 Oct mission, next action): a rule written the wrong
+#: way round reads right as a formula and wrong on a row -- p08, R3 run 1: "for every c, n linking to c by
+#: needs_control: pick[c] <= pick[n]" read on CTL004 -> CTL006 (CTL004 needs CTL006) is pick[CTL006] <= pick[CTL004];
+#: p07, R3 run 1: the first hour's battery row had no starting level.
+ROWS_SHOWN = 14
+TERMS_SHOWN = 8
+
+
+def _number(value: Any) -> str:
+    v = float(value)
+    return str(int(v)) if v.is_integer() else f"{v:.6g}"
+
+
+def _cell(key: Any) -> str:
+    name, index = key
+    return f"{name}[{', '.join(str(i) for i in index)}]" if index else str(name)
+
+
+def _side(linear: Any) -> str:
+    parts: list[str] = []
+    terms = [(k, c) for k, c in linear.coeffs.items() if c and not str(k[0]).startswith("__")]
+    for key, coeff in terms[:TERMS_SHOWN]:
+        c = float(coeff)
+        size = "" if abs(c) == 1 else _number(abs(c)) + " "
+        sign = "-" if c < 0 else "+"
+        parts.append(f"{sign} {size}{_cell(key)}")
+    if len(terms) > TERMS_SHOWN:
+        parts.append(f"+ ... ({len(terms) - TERMS_SHOWN} more terms)")
+    if linear.const or not parts:
+        c = float(linear.const)
+        parts.append(f"{'-' if c < 0 else '+'} {_number(abs(c))}")
+    text = " ".join(parts)
+    return text[2:] if text.startswith("+ ") else "-" + text[2:] if text.startswith("- ") else text
+
+
+def example_rows(compiled: Compiled | None) -> list[dict[str, Any]]:
+    """The first row of each rule, written out on the data: its records and every term with its number."""
+    if compiled is None:
+        return []
+    out: list[dict[str, Any]] = []
+    seen: dict[str, int] = {}
+    for c in compiled.constraints:
+        seen[c.id] = seen.get(c.id, 0) + 1
+        if seen[c.id] > 1 or len(out) >= ROWS_SHOWN:
+            continue
+        where = ", ".join(f"{k}={v}" for k, v in (c.index or {}).items())
+        row = f"{_side(c.left)} {c.relation} {_side(c.right)}"
+        if c.quadratic:
+            row += "  (and a product of decisions)"
+        out.append({"rule": c.id, "where": where, "row": row})
+    for item in out:
+        item["rows"] = seen[item["rule"]]
+    return out

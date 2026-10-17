@@ -619,8 +619,12 @@ def build_from_spec(
                     shape = lint.findings(spec.ir, spec.seed, kept.get("compiled"))
                 except Exception:  # noqa: BLE001 -- a check that fails says nothing
                     shape = []
+                try:
+                    rows = lint.example_rows(kept.get("compiled"))
+                except Exception:  # noqa: BLE001 -- rows that cannot be written are not shown
+                    rows = []
             return {"ok": True, "dry_run": True, "would_create": counts, **({"trial": trial} if trial else {}),
-                    **({"shape": shape} if shape else {})}
+                    **({"shape": shape} if shape else {}), **({"rows": rows} if spec.trial and rows else {})}
 
         version_id = db.execute(
             insert(ModelVersion.__table__)

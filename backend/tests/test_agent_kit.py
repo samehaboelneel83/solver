@@ -27,6 +27,13 @@ from tests.test_tenancy import tenants  # noqa: F401
 from tests.test_v1_problem_run import db  # noqa: F401
 
 
+@pytest.fixture(autouse=True)
+def _no_rule_rows(monkeypatch):
+    """These tests script a plan shown at once; the one-time rule-row review (LLM_RULE_ROWS, 17 Oct) has its own
+    tests in test_rule_rows.py."""
+    monkeypatch.setenv("LLM_RULE_ROWS", "0")
+
+
 class RawLLM:
     """Plays the model with exact replies: ("text", content[, finish]) or ("native", name, arguments-as-string)."""
 

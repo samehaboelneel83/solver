@@ -113,6 +113,9 @@ class Settings:
     #: The temperature of the replies right after one that ran away (0: as LLM_TEMPERATURE). 0.7 since 16 October
     #: 2026 (E4): in exp2, of 52 replies stopped as loops the same request again looped 25 times.
     loop_temperature: float = field(default_factory=lambda: float(_env("LLM_LOOP_TEMPERATURE", "0.7")))
+    #: Before a plan that builds and solves is shown, send the model one row of each rule written out on the data,
+    #: once a turn (17 Oct, next action after the hidden-accuracy mission: plans wrong the same way run after run).
+    rule_rows: bool = field(default_factory=lambda: _env("LLM_RULE_ROWS", "1") not in ("0", "false", "no"))
     #: Past this share of the context, the older conversation is summarized (app.agent.compact).
     compact_at: float = field(default_factory=lambda: float(_env("LLM_COMPACT_AT", "0.6")))
     #: The most a model call carries before the older conversation is summarized, whatever the context:
@@ -1983,6 +1986,22 @@ def shape_sent_back(shape: Any) -> str:
             "it will be shown with these findings for them to judge.")
 
 
+def rows_sent_back(rows: Any) -> str:
+    """One row of each rule written out on the data, sent to the model once before the person sees the plan (17 Oct
+    mission, next action): a rule the wrong way round, or a first period without its starting amount, reads right as
+    a formula and wrong on a row. Empty when there are no rows."""
+    lines = [f"- {r.get('rule')} ({r.get('where') or 'one row'}{'; 1 of ' + str(r.get('rows')) if (r.get('rows') or 1) > 1 else ''}): "
+             f"{r.get('row')}" for r in rows or [] if isinstance(r, dict) and r.get("row")]
+    if not lines:
+        return ""
+    return ("The plan was NOT shown to the user yet. It builds and solves. Here is ONE row of each rule, written out on "
+            "the user's data by the platform:" + chr(10) + chr(10).join(lines) + chr(10) + "Read each row against the user's words: "
+            "is it the right way round (who needs whom, which side is the limit), does the first period start from "
+            "the starting amount the user gave, is every cost, limit and record the user named in its row with the "
+            "right number? If a row is wrong, fix that rule and call propose_plan again. If every row is right, call "
+            "propose_plan again with the same spec.")
+
+
 _LIST_MARK = re.compile(r"(?m)^\s*\(?\d+[.)]\s")
 _FOR_THE_REPORT = re.compile(r"\b(?:compar\w*|report\w*|against|versus|vs\.?|today|currently|current(?:ly)?|now|"
                              r"as (?:it is|things are)|at present|baseline|last (?:year|month|week|time)|"
@@ -2586,6 +2605,7 @@ class Agent:
         #: Plans sent back because their trial solve had no answer (once; see `_check_plan`).
         self.trials_sent_back = 0
         self.shape_sent_back = False
+        self.rows_sent_back = False
         self.api_rejections: dict[str, int] = {}
         self.total_api_rejections = 0
         import threading
@@ -3593,6 +3613,10 @@ class Agent:
             back = shape_sent_back((res.get("body") or {}).get("shape"))
             if back and not self.shape_sent_back:
                 self.shape_sent_back = True
+                return back
+            back = rows_sent_back((res.get("body") or {}).get("rows")) if self.s.rule_rows else ""
+            if back and not self.rows_sent_back:
+                self.rows_sent_back = True
                 return back
             return "PLAN_OK " + json.dumps(res.get("body"), default=str)
         return ("The spec does not build yet; fix these and call propose_plan again (the user has not "
