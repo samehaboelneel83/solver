@@ -261,3 +261,32 @@ other model server), so no other model could be measured. What a change would bu
 the cases that fail do so by the model's formulation (consistent wrong rules, loops), which only a stronger model
 or the next action above can change. Any larger model needs the owner's decision on hardware and download first;
 none was downloaded or configured.
+
+## 8. R1, the rule-row review: rejected (17-18 Oct)
+
+Branch `exp/rule-rows`, commit 1f99f55, image `solver-backend:exp4` (b5e836): the candidate plus one change. Before a
+plan that builds and solves is shown, the model is sent one row of each rule written out on the data, once a turn,
+and asked to propose again if every row is right (`LLM_RULE_ROWS`). Tests: `test_rule_rows.py` 3, `test_lint.py` +1,
+the assistant's tests 259, all pass.
+
+| | Candidate (exp3) | R1 (exp4) |
+|---|---|---|
+| Hidden: right | 10, 7, 8 | **3, 4** |
+| Hidden: built | 12, 11, 11 | 7, 8 |
+| Hidden: wrong without a warning | 1, 3, 3 | 4, 4 |
+| Hidden: timeouts at 30 minutes | 3, 3, 4 | 6, 7 |
+| Practice: right | 6, 5 | 4, 8 |
+| Practice: wrong without a warning | 0, 2 | 0, 0 |
+
+On practice it did what it was built for once: p07 and p08 came right in the second run. On the hidden set it cost
+far more than it gave. Of the 37 reviews sent in the first hidden run, the model proposed the plan again 15 times;
+16 times it went on to other calls (checking and rebuilding a plan that solved), and 6 times it stopped and
+talked to the user. The review is sent again on every new turn, so a case that continued was reviewed each time.
+Plans built fell from 11-12 to 7-8.
+
+**Verdict: rejected; nothing of it goes into the candidate.** The candidate (`candidate-2026-10-17`) stays the best
+measured build. The branch is kept as a record. If the idea is tried again, the rows belong where the model already
+looks without being stopped -- in the check_spec reply, which the model calls of its own accord -- not as a gate in
+front of a plan that solves.
+
+The live service runs the reliable version again (eeed56; health 200, checked 18 Oct after the chain).
