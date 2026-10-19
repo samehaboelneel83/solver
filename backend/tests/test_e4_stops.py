@@ -75,3 +75,40 @@ def test_loop_temperature_zero_keeps_the_temperature(tenants, monkeypatch):
     monkeypatch.setattr(core, "llm_chat", model)
     _chat(tenants["b"], text="choose my warehouses")
     assert model.temps == [0.2, 0.2]
+
+
+class _ThinkModel(_Model):
+    def __init__(self, replies):
+        super().__init__(replies)
+        self.thinking = []
+
+    def __call__(self, settings, messages, native, tools=None, max_tokens=None):
+        self.thinking.append(settings.thinking)
+        return super().__call__(settings, messages, native, tools, max_tokens)
+
+
+def test_e5_the_replies_after_a_runaway_think_in_their_own_channel(tenants, monkeypatch):
+    """E5 (19 Oct): every runaway was prose written with thinking off; the replies after one think."""
+    from app.api import agent as agent_api
+
+    monkeypatch.setattr(agent_api, "make_caller", _in_process_caller)
+    monkeypatch.setenv("LLM_THINKING", "off")
+    monkeypatch.delenv("LLM_LOOP_THINKING", raising=False)
+    model = _ThinkModel([(RAMBLE, "length"), (RAMBLE, "length"), ("Which warehouses?", "stop"),
+                         ("Noted.", "stop")])
+    monkeypatch.setattr(core, "llm_chat", model)
+    events = _chat(tenants["b"], text="choose my warehouses")
+    assert [e["text"] for e in events if e["type"] == "answer"] == ["Which warehouses?"]
+    assert model.thinking[:3] == ["off", "on", "on"]
+
+
+def test_e5_off_keeps_thinking_off(tenants, monkeypatch):
+    from app.api import agent as agent_api
+
+    monkeypatch.setattr(agent_api, "make_caller", _in_process_caller)
+    monkeypatch.setenv("LLM_THINKING", "off")
+    monkeypatch.setenv("LLM_LOOP_THINKING", "off")
+    model = _ThinkModel([(RAMBLE, "length"), ("Which warehouses?", "stop")])
+    monkeypatch.setattr(core, "llm_chat", model)
+    _chat(tenants["b"], text="choose my warehouses")
+    assert model.thinking == ["off", "off"]

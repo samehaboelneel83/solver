@@ -113,6 +113,10 @@ class Settings:
     #: The temperature of the replies right after one that ran away (0: as LLM_TEMPERATURE). 0.7 since 16 October
     #: 2026 (E4): in exp2, of 52 replies stopped as loops the same request again looped 25 times.
     loop_temperature: float = field(default_factory=lambda: float(_env("LLM_LOOP_TEMPERATURE", "0.7")))
+    #: Thinking for the replies right after one that ran away: "on", "off", or "" to keep LLM_THINKING. "on" since
+    #: 19 Oct 2026 (E5): every runaway was prose with no code and no braces, written with thinking off -- the
+    #: model thinking aloud in the reply, with no channel for it; the stream's loop stop watches the thinking too.
+    loop_thinking: str = field(default_factory=lambda: _env("LLM_LOOP_THINKING", "on").lower())
     #: Past this share of the context, the older conversation is summarized (app.agent.compact).
     compact_at: float = field(default_factory=lambda: float(_env("LLM_COMPACT_AT", "0.6")))
     #: The most a model call carries before the older conversation is summarized, whatever the context:
@@ -4185,9 +4189,11 @@ class Agent:
                 # the model is told; at the end, a short honest line instead of the ramble.
                 hot = (replace(self.s, temperature=max(self.s.temperature, self.s.loop_temperature))
                        if self.s.loop_temperature > 0 else self.s)
+                if self.s.loop_thinking in ("on", "off"):
+                    hot = replace(hot, thinking=self.s.loop_thinking)
                 if not rethought:
-                    rethought, settings = True, replace(hot, thinking="off")
-                    yield {"type": "note", "text": "The model's reply ran too long; asking again, without thinking aloud."}
+                    rethought, settings = True, hot
+                    yield {"type": "note", "text": "The model's reply ran too long; asking again."}
                     continue
                 if nudge("rambled"):
                     messages.append({"role": "assistant", "content": "(a reply that ran to the length limit; not shown)"})

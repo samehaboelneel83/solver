@@ -220,12 +220,14 @@ RAMBLE = "The user has confirmed. Actually, let me think again about the lanes..
 
 
 def test_a_reply_that_rambles_to_the_limit_is_never_shown_and_asked_again_without_thinking(tenants, monkeypatch):
+    monkeypatch.setenv("LLM_THINKING", "off")
     model = _install(monkeypatch, [("text", RAMBLE, "length"), ("text", RAMBLE, "length"),
                                    ("text", "Which warehouses must stay open?")])
     events = _chat(tenants["b"], text="choose my warehouses")
     answers = [e["text"] for e in events if e["type"] == "answer"]
     assert answers == ["Which warehouses must stay open?"]
-    assert [r["thinking"] for r in model.requests][1] == "off"  # the same step again, thinking off
+    # The same step again, with thinking on (19 Oct, E5: the runaways were thinking written into the reply).
+    assert [r["thinking"] for r in model.requests][1] == "on"
     assert any("ran to the length limit" in m for m in _platform(model))
     history = json.dumps(events[-1]["messages"])
     assert "Actually, let me think again" not in history  # the ramble does not eat the context either
