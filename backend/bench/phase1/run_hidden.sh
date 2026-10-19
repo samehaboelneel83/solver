@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 tag="${1:-base}"
 size="${2:-S}"
 only="${3:-}"   # optional: a comma-separated list of case ids (h07,h08) to run only those, e.g. after a crash
-export PW_DIR="C:/Users/user/AppData/Local/Temp/claude/D--solver/3932906e-32f9-4d3f-b0fb-ac43eb061e80/scratchpad/pw"
+export PW_DIR="${PW_DIR:-D:/solver-tools/pw}"
 export LIMIT_MIN=30
 mkdir -p runs/hidden
 if [ -f "runs/hidden/skip-${tag}" ]; then
