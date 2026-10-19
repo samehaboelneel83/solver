@@ -290,3 +290,30 @@ looks without being stopped -- in the check_spec reply, which the model calls of
 front of a plan that solves.
 
 The live service runs the reliable version again (eeed56; health 200, checked 18 Oct after the chain).
+
+## 9. E5, thinking on after a runaway: works as built, no gain in right answers (19 Oct)
+
+Branch `exp/loop-thinking`, commit 9e1537d, image `solver-backend:exp5` (c5b956): the candidate plus one change.
+The replies right after a runaway are sent with thinking on (`LLM_LOOP_THINKING=on`); everything else stays as the
+candidate. Hypothesis: every runaway was prose with no code and no braces, written with thinking off -- the model
+thinking aloud in the reply. Tests: `test_e4_stops.py` +2, the assistant's tests 257, all pass.
+
+| | Candidate (exp3) | E5 (exp5) |
+|---|---|---|
+| Hidden: right | 10, 7, 8 (mean 8.3) | 7, 8 (mean 7.5) |
+| Hidden: built | 12, 11, 11 | 10, 13 |
+| Hidden: wrong without a warning | 1, 3, 3 | 2, 4 |
+| Hidden: timeouts at 30 minutes | 3, 3, 4 | 3, 5 |
+| Practice: right | 6, 5 | 5 |
+
+The mechanism did what it was meant to: after a runaway, the next reply finished **48 times of 63 with thinking on
+(76%)**, against 61% at temperature 0.7 alone (exp3) and 50% before (exp2); those replies took 46 s on average.
+h09, never right in nine runs, was right once, and h05 built a plan for the first time. But the right answers did
+not rise: 7.5 against 8.3, inside the spread of both. h13 still never came right.
+
+**Verdict: not adopted.** No measured gain in right answers; the candidate stays as it is. The setting is kept on
+the branch for a later combination (it costs nothing when no runaway happens).
+
+The first attempt of this measurement (tags exp5, exp5b, exp5-1) ended within seconds: a Temp cleanup had deleted
+the browser driver's `playwright-core`; reinstalled in `D:/solver-tools/pw` (commit d9b3e8a) and measured again
+under the tags exp5r, exp5rb, exp5r-1. The live service runs the reliable version again (eeed56).
