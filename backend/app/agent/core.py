@@ -113,6 +113,9 @@ class Settings:
     #: The temperature of the replies right after one that ran away (0: as LLM_TEMPERATURE). 0.7 since 16 October
     #: 2026 (E4): in exp2, of 52 replies stopped as loops the same request again looped 25 times.
     loop_temperature: float = field(default_factory=lambda: float(_env("LLM_LOOP_TEMPERATURE", "0.7")))
+    #: One row of each rule written out on the data, beside check_spec's result and in the send-backs a plan already
+    #: gets for its trial or shape -- never a gate of its own (20 Oct, R2).
+    rule_rows: bool = field(default_factory=lambda: _env("LLM_RULE_ROWS", "1") not in ("0", "false", "no"))
     #: Past this share of the context, the older conversation is summarized (app.agent.compact).
     compact_at: float = field(default_factory=lambda: float(_env("LLM_COMPACT_AT", "0.6")))
     #: The most a model call carries before the older conversation is summarized, whatever the context:
@@ -1935,6 +1938,19 @@ def conflict_said(trial: Any) -> str:
                      + (f" ({r['note']})" if r.get("note") else "") for r in rules)
 
 
+def rows_listed(rows: Any) -> str:
+    """One row of each rule written out on the data (app.solve.lint.example_rows), as lines the model reads beside
+    a check's result (20 Oct, R2: shown where the model already looks, never as a gate in front of a plan that
+    solves -- R1 did that and cost the hidden set 4 to 5 right answers). Empty when there are none."""
+    lines = [f"- {r.get('rule')} ({r.get('where') or 'one row'}"
+             f"{'; 1 of ' + str(r.get('rows')) if (r.get('rows') or 1) > 1 else ''}): {r.get('row')}"
+             for r in rows or [] if isinstance(r, dict) and r.get("row")]
+    if not lines:
+        return ""
+    return ("\n\nONE ROW OF EACH RULE, written out on the user's data by the platform (check the direction, the "
+            "first period's starting amount, and that every number the user gave is in its row):\n" + "\n".join(lines))
+
+
 def trial_sent_back(trial: Any) -> str:
     """What the Assistant is told when a plan's trial has no answer, or no limit, before the person sees the plan:
     a described problem nearly always has an answer, so the model is what is wrong. Empty when the trial is fine."""
@@ -3297,7 +3313,9 @@ class Agent:
         if res.get("ok"):
             return ("SPEC_OK: it would build " + json.dumps((res.get("body") or {}).get("would_create"), default=str)
                     + "\n\n" + agent_readback.readback(expanded, self.loaded)
-                    + trial_said((res.get("body") or {}).get("trial")) + "\n\n" + READBACK_CHECK)
+                    + trial_said((res.get("body") or {}).get("trial"))
+                    + (rows_listed((res.get("body") or {}).get("rows")) if self.s.rule_rows else "")
+                    + "\n\n" + READBACK_CHECK)
         refused = "Not valid yet; fix these: " + clip(res.get("body"), 4000)
         key = re.sub(r"\d+", "#", refused)[:400]
         self._spec_seen[key] = self._spec_seen.get(key, 0) + 1
@@ -3585,15 +3603,16 @@ class Agent:
         res = self.call("POST", "/api/v1/problems/from-spec", None, {**_sendable(spec), "dry_run": True, "trial": True})
         if res.get("ok"):
             # A plan with no answer goes back before the person sees it, twice at most; then it is shown.
+            rows = rows_listed((res.get("body") or {}).get("rows")) if self.s.rule_rows else ""
             back = trial_sent_back((res.get("body") or {}).get("trial"))
             if back and self.trials_sent_back < TRIAL_SEND_BACKS:
                 self.trials_sent_back += 1
-                return back
+                return back + rows
             # A plan that solves and whose shape still gives a mistake away goes back once, then is shown with it.
             back = shape_sent_back((res.get("body") or {}).get("shape"))
             if back and not self.shape_sent_back:
                 self.shape_sent_back = True
-                return back
+                return back + rows
             return "PLAN_OK " + json.dumps(res.get("body"), default=str)
         return ("The spec does not build yet; fix these and call propose_plan again (the user has not "
                 "seen it): " + clip(res.get("body"), 4000))

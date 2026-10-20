@@ -182,3 +182,24 @@ def test_one_number_given_only_as_a_default_and_never_read_is_named():
     seed["parameter_values"] = [{"parameter": "battery_initial", "entities": [], "value": 600}]
     ir["constraints"][0]["right"] = {"par": "battery_capacity"}
     assert [f["what"] for f in lint.unread(ir, seed)] == ["battery_initial"]
+
+
+def test_each_rule_is_written_out_on_one_row_of_the_data():
+    """The rows the model checks before its plan is shown (17 Oct): the first record of each rule, every term with
+    its number, the platform's own variables left out."""
+    data = {**DATA, "sets": {"control": [{"id": "CTL004"}, {"id": "CTL006"}]}}
+    pick = {"var": "pick", "index": ["c"]}
+    ir = {"version": 2, "sets": ["control"], "parameters": {},
+          "variables": {"pick": {"index": ["control"], "domain": "binary"},
+                        "cost": {"index": [], "domain": "continuous", "lower": 0}},
+          "constraints": [
+              {"id": "c_each", "forall": [{"index": "c", "set": "control"}], "left": pick, "relation": "<=",
+               "right": {"const": 1}, "severity": "soft", "penalty": 10},
+              {"id": "c_cost", "left": {"var": "cost", "index": []}, "relation": ">=", "severity": "hard",
+               "right": {"sum": {"mul": [{"const": 2.5}, pick]}, "over": [{"index": "c", "set": "control"}]}}],
+          "objective": {"sense": "minimize", "terms": [{"id": "o", "weight": 1, "expression": {"var": "cost", "index": []}}]}}
+    rows = lint.example_rows(compile_model(ir, data))
+    assert [r["rule"] for r in rows] == ["c_each", "c_cost"]
+    assert rows[0] == {"rule": "c_each", "where": "c=CTL004", "row": "pick[CTL004] <= 1", "rows": 2}
+    assert rows[1]["row"] == "cost >= 2.5 pick[CTL004] + 2.5 pick[CTL006]" and rows[1]["rows"] == 1
+    assert lint.example_rows(None) == []
