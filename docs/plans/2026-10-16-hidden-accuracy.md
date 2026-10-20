@@ -317,3 +317,30 @@ the branch for a later combination (it costs nothing when no runaway happens).
 The first attempt of this measurement (tags exp5, exp5b, exp5-1) ended within seconds: a Temp cleanup had deleted
 the browser driver's `playwright-core`; reinstalled in `D:/solver-tools/pw` (commit d9b3e8a) and measured again
 under the tags exp5r, exp5rb, exp5r-1. The live service runs the reliable version again (eeed56).
+
+## 10. R2, rule rows where the model already looks: no gain (20 Oct)
+
+Branch `exp/rule-rows-quiet`, commit 3a0a741, image `solver-backend:exp6` (2cabec): the candidate plus one row of each
+rule written out on the data, beside check_spec's result and in the trial and shape send-backs; never a gate. Tests:
+`test_rule_rows_quiet.py` 4, `test_lint.py` +1, the assistant's tests 260, all pass.
+
+| | Candidate (exp3) | R2 (exp6) |
+|---|---|---|
+| Hidden: right | 10, 7, 8 (mean 8.3) | 6, 8 (mean 7.0) |
+| Hidden: built | 12, 11, 11 | 11, 12 |
+| Hidden: wrong without a warning | 1, 3, 3 | 3, 4 |
+| Practice: right | 6, 5 | 6 |
+
+The model called check_spec 46 times over the two hidden runs, so the rows were in front of it. h10 and h12, the
+target, stayed wrong (h12 went from 23 violations to 2 in one run, still wrong). **Verdict: not adopted.**
+
+**What the three formulation experiments say together** (R1, E5, R2): telling this model more about its plan --
+rows, findings, a review -- does not make it write a rule it consistently gets wrong; a gate makes it worse. The
+consistent wrong plans (h10, h12, and on practice p05, p08, p10) are the model's limit at this size. The
+candidate's gain came from stopping wasted time (loops, refusal loops), not from better formulation.
+
+The hidden runs were read only through the blind scorer and content-free logs, with one exception on 20 Oct: while
+checking that R2's first case had started, the first 200 characters of h01's driver output were printed (the
+problem's name and first sentence). Nothing from it was used.
+
+The live service runs the reliable version again (eeed56).
